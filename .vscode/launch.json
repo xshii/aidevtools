@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run CLI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "prettycli.cli",
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Run Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/", "-v"],
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Run Coverage",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "--cov=prettycli",
+        "--cov-report=term-missing",
+        "--cov-report=html",
+        "--cov-fail-under=95",
+        "tests/"
+      ],
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
