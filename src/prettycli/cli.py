@@ -13,6 +13,7 @@ from prettycli.command import BaseCommand
 from prettycli.context import Context
 from prettycli.subui import statusbar, SystemStatus, RuntimeStatus, EchoStatus
 from prettycli import ui
+from prettycli import vscode
 
 
 class CLI:
@@ -28,11 +29,15 @@ class CLI:
         self._runtime_status = RuntimeStatus()
         self._echo_status = EchoStatus()
 
+        # Register vscode status provider
+        statusbar.register(vscode.get_status)
+
     def _load_config(self, config_path: Optional[Path]) -> dict:
         """加载配置"""
         default = {
             "bash_prefix": "!",
             "toggle_key": "c-o",  # ctrl+o
+            "artifact_var": "@@$$",  # 当前 artifact 文件路径变量
         }
 
         if config_path and config_path.exists():
@@ -63,6 +68,14 @@ class CLI:
             self._commands[name] = cmd_cls()
 
         return self
+
+    def _expand_variables(self, line: str) -> str:
+        """展开特殊变量"""
+        artifact_var = self._config.get("artifact_var", "@@$$")
+        if artifact_var and artifact_var in line:
+            current_file = vscode.get_client().current_file or ""
+            line = line.replace(artifact_var, current_file)
+        return line
 
     def _parse_args(self, args_str: str) -> Dict[str, str]:
         """解析参数"""
@@ -201,6 +214,9 @@ class CLI:
                     continue
 
                 self._collapsed = False
+
+                # 展开特殊变量
+                line = self._expand_variables(line)
 
                 # 有前缀时，需要前缀才执行 bash
                 if bash_prefix:

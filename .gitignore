@@ -20,3 +20,11 @@ coverage.xml
 # Cache
 .pytest_cache/
 .ruff_cache/
+
+# Session artifacts
+tmp/prettycli/
+
+# Node modules (vscode extension)
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/coverage/

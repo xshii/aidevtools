@@ -1,0 +1,506 @@
+"""
+VS Code extension API client for prettycli
+"""
+import json
+import uuid
+import base64
+from pathlib import Path
+from typing import Optional, Any, Dict, List, Union
+
+try:
+    from websocket import create_connection, WebSocket
+    HAS_WEBSOCKET = True
+except ImportError:
+    HAS_WEBSOCKET = False
+
+
+class VSCodeClient:
+    """Client for communicating with prettycli VS Code extension"""
+
+    def __init__(self, port: int = 19960):
+        self.port = port
+        self._ws: Optional[Any] = None
+        self._connected: bool = False
+        self._current_file: Optional[str] = None
+        self._session_path: Optional[str] = None
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if connected to VS Code"""
+        return self._connected and self._ws is not None
+
+    @property
+    def current_file(self) -> Optional[str]:
+        """Get current artifact file path"""
+        return self._current_file
+
+    @property
+    def session_path(self) -> Optional[str]:
+        """Get session folder path"""
+        return self._session_path
+
+    def connect(self) -> bool:
+        """Connect to VS Code extension"""
+        if not HAS_WEBSOCKET:
+            raise ImportError("websocket-client is required: pip install websocket-client")
+
+        try:
+            self._ws = create_connection(f"ws://localhost:{self.port}", timeout=5)
+            self._connected = True
+            return True
+        except Exception:
+            self._connected = False
+            return False
+
+    def disconnect(self):
+        """Disconnect from VS Code extension"""
+        if self._ws:
+            self._ws.close()
+            self._ws = None
+        self._connected = False
+
+    def _send(self, action: str, artifact: Optional[Dict] = None, panel_id: Optional[str] = None) -> Dict:
+        """Send message and wait for response"""
+        if not self._ws:
+            if not self.connect():
+                self._connected = False
+                raise ConnectionError("Cannot connect to VS Code extension")
+
+        msg_id = str(uuid.uuid4())
+        message = {
+            "id": msg_id,
+            "action": action,
+        }
+        if artifact:
+            message["artifact"] = artifact
+        if panel_id:
+            message["panelId"] = panel_id
+
+        try:
+            self._ws.send(json.dumps(message))
+            response = json.loads(self._ws.recv())
+
+            # Update current file path from response
+            if response.get("success") and response.get("data"):
+                data = response["data"]
+                if "filePath" in data:
+                    self._current_file = data["filePath"]
+                    # Extract session path from file path
+                    if self._current_file:
+                        import os
+                        self._session_path = os.path.dirname(self._current_file)
+
+            return response
+        except Exception as e:
+            self._connected = False
+            self._ws = None
+            raise ConnectionError(f"Lost connection to VS Code: {e}")
+
+    # ============ Artifact Methods ============
+
+    def show_chart(
+        self,
+        chart_type: str,
+        labels: List[str],
+        datasets: List[Dict[str, Any]],
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a chart artifact
+
+        Args:
+            chart_type: 'bar', 'line', or 'pie'
+            labels: X-axis labels
+            datasets: List of {label: str, data: List[float], color?: str}
+            title: Chart title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "chart",
+            "title": title,
+            "data": {
+                "chartType": chart_type,
+                "labels": labels,
+                "datasets": datasets,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_table(
+        self,
+        columns: List[str],
+        rows: List[List[Any]],
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a table artifact
+
+        Args:
+            columns: Column headers
+            rows: Table rows
+            title: Table title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "table",
+            "title": title,
+            "data": {
+                "columns": columns,
+                "rows": rows,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_file(
+        self,
+        path: str,
+        content: Optional[str] = None,
+        language: Optional[str] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a file artifact
+
+        Args:
+            path: File path
+            content: File content (reads from path if not provided)
+            language: Syntax highlighting language
+            start_line: Start line number
+            end_line: End line number
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        if content is None:
+            content = Path(path).read_text()
+
+        artifact = {
+            "type": "file",
+            "title": title or path,
+            "data": {
+                "path": path,
+                "content": content,
+                "language": language,
+                "startLine": start_line,
+                "endLine": end_line,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_diff(
+        self,
+        original: str,
+        modified: str,
+        original_path: Optional[str] = None,
+        modified_path: Optional[str] = None,
+        language: Optional[str] = None,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a diff artifact
+
+        Args:
+            original: Original content
+            modified: Modified content
+            original_path: Original file path label
+            modified_path: Modified file path label
+            language: Syntax highlighting language
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "diff",
+            "title": title or "Diff",
+            "data": {
+                "original": original,
+                "modified": modified,
+                "originalPath": original_path,
+                "modifiedPath": modified_path,
+                "language": language,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_image(
+        self,
+        path: Optional[str] = None,
+        data: Optional[bytes] = None,
+        mime_type: str = "image/png",
+        alt: Optional[str] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show an image artifact
+
+        Args:
+            path: Image file path
+            data: Image binary data
+            mime_type: Image MIME type
+            alt: Alt text
+            width: Display width
+            height: Display height
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        if data is None and path:
+            data = Path(path).read_bytes()
+
+        if data:
+            b64 = base64.b64encode(data).decode()
+            src = f"data:{mime_type};base64,{b64}"
+        else:
+            src = path or ""
+
+        artifact = {
+            "type": "image",
+            "title": title,
+            "data": {
+                "src": src,
+                "alt": alt,
+                "width": width,
+                "height": height,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_markdown(
+        self,
+        content: str,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a markdown artifact
+
+        Args:
+            content: Markdown content
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "markdown",
+            "title": title,
+            "data": {
+                "content": content,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_json(
+        self,
+        content: Any,
+        collapsed: bool = False,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a JSON artifact
+
+        Args:
+            content: JSON-serializable content
+            collapsed: Start collapsed
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "json",
+            "title": title,
+            "data": {
+                "content": content,
+                "collapsed": collapsed,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_web(
+        self,
+        html: Optional[str] = None,
+        url: Optional[str] = None,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a web artifact
+
+        Args:
+            html: HTML content
+            url: URL to load
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        artifact = {
+            "type": "web",
+            "title": title,
+            "data": {
+                "html": html,
+                "url": url,
+            },
+        }
+        response = self._send("render", artifact, panel_id)
+        return response.get("data", {}).get("panelId", "")
+
+    def show_csv(
+        self,
+        path: Optional[str] = None,
+        content: Optional[str] = None,
+        title: Optional[str] = None,
+        panel_id: Optional[str] = None,
+    ) -> str:
+        """
+        Show a CSV as a table
+
+        Args:
+            path: CSV file path
+            content: CSV content string
+            title: Panel title
+            panel_id: Reuse existing panel
+
+        Returns:
+            Panel ID
+        """
+        import csv
+        from io import StringIO
+
+        if content is None and path:
+            content = Path(path).read_text()
+
+        reader = csv.reader(StringIO(content or ""))
+        rows = list(reader)
+
+        if not rows:
+            return self.show_table([], [], title, panel_id)
+
+        columns = rows[0]
+        data_rows = rows[1:]
+
+        return self.show_table(columns, data_rows, title or path, panel_id)
+
+    # ============ Panel Management ============
+
+    def close_panel(self, panel_id: str) -> bool:
+        """Close a panel"""
+        response = self._send("close", panel_id=panel_id)
+        return response.get("success", False)
+
+    def list_panels(self) -> List[str]:
+        """List all open panels"""
+        response = self._send("list")
+        return response.get("data", {}).get("panels", [])
+
+    # ============ Context Manager ============
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, *args):
+        self.disconnect()
+
+
+# Global client instance
+_client: Optional[VSCodeClient] = None
+
+
+def get_client(port: int = 19960) -> VSCodeClient:
+    """Get or create global VS Code client"""
+    global _client
+    if _client is None:
+        _client = VSCodeClient(port)
+    return _client
+
+
+def get_status() -> tuple:
+    """
+    Get VS Code connection status for statusbar.
+
+    Returns:
+        Tuple of (message, style) for statusbar display
+    """
+    client = get_client()
+
+    if not client.is_connected:
+        return ("VSCode 未连接", "warning")
+
+    if client.current_file:
+        # Show just the filename, not full path
+        import os
+        filename = os.path.basename(client.current_file)
+        return (f"📄 {filename}", "info")
+
+    return ("VSCode 已连接", "success")
+
+
+# Convenience functions
+def show_chart(*args, **kwargs) -> str:
+    return get_client().show_chart(*args, **kwargs)
+
+
+def show_table(*args, **kwargs) -> str:
+    return get_client().show_table(*args, **kwargs)
+
+
+def show_file(*args, **kwargs) -> str:
+    return get_client().show_file(*args, **kwargs)
+
+
+def show_diff(*args, **kwargs) -> str:
+    return get_client().show_diff(*args, **kwargs)
+
+
+def show_image(*args, **kwargs) -> str:
+    return get_client().show_image(*args, **kwargs)
+
+
+def show_markdown(*args, **kwargs) -> str:
+    return get_client().show_markdown(*args, **kwargs)
+
+
+def show_json(*args, **kwargs) -> str:
+    return get_client().show_json(*args, **kwargs)
+
+
+def show_web(*args, **kwargs) -> str:
+    return get_client().show_web(*args, **kwargs)
+
+
+def show_csv(*args, **kwargs) -> str:
+    return get_client().show_csv(*args, **kwargs)
