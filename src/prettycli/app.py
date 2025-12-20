@@ -1,3 +1,23 @@
+"""
+CLI Application Builder
+
+This module provides the App class for building command-line applications
+with automatic command registration and Typer integration.
+
+Example:
+    >>> from prettycli import App, BaseCommand, Context
+    >>>
+    >>> class HelloCommand(BaseCommand):
+    ...     name = "hello"
+    ...     help = "Say hello"
+    ...     def run(self, ctx: Context) -> int:
+    ...         print("Hello!")
+    ...         return 0
+    >>>
+    >>> app = App("myapp")
+    >>> app.register(Path("commands/"))
+    >>> app.run()
+"""
 import typer
 import importlib.util
 import inspect
@@ -9,15 +29,48 @@ from prettycli.context import Context
 
 
 class App:
-    """CLI 应用构建器"""
+    """
+    CLI application builder using Typer.
+
+    This class provides a simple way to build command-line applications
+    by registering commands and building a Typer app.
+
+    Attributes:
+        name: Application name
+        help: Application help text
+        ctx: Shared execution context
+
+    Example:
+        >>> app = App("myapp", help="My CLI application")
+        >>> app.register(Path("commands/"))
+        >>> app.run()
+    """
 
     def __init__(self, name: str, help: str = ""):
+        """
+        Initialize the CLI application.
+
+        Args:
+            name: Application name displayed in help
+            help: Application description
+        """
         self.name = name
         self.help = help
         self.ctx = Context()
 
     def register(self, path: Path) -> "App":
-        """递归遍历目录注册所有命令模块"""
+        """
+        Register all command modules from a directory.
+
+        Recursively scans the directory for Python files and loads them,
+        allowing BaseCommand subclasses to register themselves.
+
+        Args:
+            path: Directory path containing command modules
+
+        Returns:
+            Self for method chaining
+        """
         if not path.exists():
             return self
 

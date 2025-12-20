@@ -1,3 +1,22 @@
+"""
+UI Components Module
+
+This module provides beautiful terminal UI components including:
+- Styled output (info, success, error, warning)
+- Interactive prompts (select, confirm, text, password, checkbox)
+- Progress indicators (spinner, progress bar)
+- Tables
+
+All components use Rich for styling and InquirerPy for interactive prompts.
+
+Example:
+    >>> from prettycli import ui
+    >>>
+    >>> ui.info("Starting process...")
+    >>> name = ui.text("Enter your name:")
+    >>> if ui.confirm("Continue?"):
+    ...     ui.success("Done!")
+"""
 from typing import List
 
 from rich.console import Console
@@ -13,26 +32,44 @@ console = Console()
 
 
 def info(msg: str):
+    """Print an info message with blue icon."""
     console.print(f"[blue]ℹ[/] {msg}")
 
 
 def success(msg: str):
+    """Print a success message with green checkmark."""
     console.print(f"[green]✓[/] {msg}")
 
 
 def error(msg: str):
+    """Print an error message with red X."""
     console.print(f"[red]✗[/] {msg}")
 
 
 def warn(msg: str):
+    """Print a warning message with yellow icon."""
     console.print(f"[yellow]⚠[/] {msg}")
 
 
 def print(msg: str = "", **kwargs):
+    """
+    Print a message to the console.
+
+    Args:
+        msg: Message to print (supports Rich markup)
+        **kwargs: Additional arguments passed to Rich console.print
+    """
     console.print(msg, **kwargs)
 
 
 def panel(content: str, title: str = ""):
+    """
+    Print content in a bordered panel.
+
+    Args:
+        content: Panel content
+        title: Panel title
+    """
     console.print(Panel(content, title=title))
 
 
@@ -40,7 +77,17 @@ def panel(content: str, title: str = ""):
 
 
 def select(message: str, choices: list, default=None):
-    """选择列表"""
+    """
+    Display a selection prompt.
+
+    Args:
+        message: Prompt message
+        choices: List of choices
+        default: Default selection
+
+    Returns:
+        Selected choice
+    """
     return inquirer.select(
         message=message,
         choices=choices,
@@ -50,22 +97,57 @@ def select(message: str, choices: list, default=None):
 
 
 def confirm(message: str, default: bool = True) -> bool:
-    """确认提示"""
+    """
+    Display a yes/no confirmation prompt.
+
+    Args:
+        message: Prompt message
+        default: Default value (True for yes)
+
+    Returns:
+        True if confirmed, False otherwise
+    """
     return inquirer.confirm(message=message, default=default).execute()
 
 
 def text(message: str, default: str = "") -> str:
-    """文本输入"""
+    """
+    Display a text input prompt.
+
+    Args:
+        message: Prompt message
+        default: Default value
+
+    Returns:
+        User input string
+    """
     return inquirer.text(message=message, default=default).execute()
 
 
 def password(message: str) -> str:
-    """密码输入"""
+    """
+    Display a password input prompt (hidden input).
+
+    Args:
+        message: Prompt message
+
+    Returns:
+        Password string
+    """
     return inquirer.secret(message=message).execute()
 
 
 def checkbox(message: str, choices: list) -> list:
-    """多选"""
+    """
+    Display a multi-select checkbox prompt.
+
+    Args:
+        message: Prompt message
+        choices: List of choices
+
+    Returns:
+        List of selected choices
+    """
     return inquirer.checkbox(
         message=message,
         choices=choices,
@@ -74,7 +156,16 @@ def checkbox(message: str, choices: list) -> list:
 
 
 def fuzzy(message: str, choices: list):
-    """模糊搜索选择"""
+    """
+    Display a fuzzy search selection prompt.
+
+    Args:
+        message: Prompt message
+        choices: List of choices
+
+    Returns:
+        Selected choice
+    """
     return inquirer.fuzzy(
         message=message,
         choices=choices,
@@ -86,12 +177,35 @@ def fuzzy(message: str, choices: list):
 
 
 def spinner(message: str = "Working..."):
-    """返回一个 spinner context manager"""
+    """
+    Create a spinner context manager.
+
+    Args:
+        message: Status message to display
+
+    Returns:
+        Context manager for spinner display
+
+    Example:
+        >>> with ui.spinner("Loading..."):
+        ...     time.sleep(2)
+    """
     return console.status(message)
 
 
 def progress():
-    """返回一个 progress bar context manager"""
+    """
+    Create a progress bar context manager.
+
+    Returns:
+        Progress bar context manager
+
+    Example:
+        >>> with ui.progress() as p:
+        ...     task = p.add_task("Processing", total=100)
+        ...     for i in range(100):
+        ...         p.update(task, advance=1)
+    """
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -103,7 +217,21 @@ def progress():
 
 
 def table(title: str = "", columns: List[str] = None) -> Table:
-    """创建表格"""
+    """
+    Create a table for displaying data.
+
+    Args:
+        title: Table title
+        columns: Column headers
+
+    Returns:
+        Rich Table object
+
+    Example:
+        >>> t = ui.table("Users", ["Name", "Age"])
+        >>> t.add_row("Alice", "30")
+        >>> ui.print_table(t)
+    """
     t = Table(title=title)
     if columns:
         for col in columns:
@@ -112,4 +240,10 @@ def table(title: str = "", columns: List[str] = None) -> Table:
 
 
 def print_table(t: Table):
+    """
+    Print a table to the console.
+
+    Args:
+        t: Rich Table object to print
+    """
     console.print(t)

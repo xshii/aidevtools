@@ -15,10 +15,43 @@ except ImportError:
 
 
 class VSCodeClient:
-    """Client for communicating with prettycli VS Code extension"""
+    """
+    Client for communicating with prettycli VS Code extension.
 
-    def __init__(self, port: int = 19960):
+    Features:
+        - Auto-reconnect on connection loss
+        - Connection health checking
+        - Session and artifact file tracking
+
+    Example:
+        >>> client = VSCodeClient()
+        >>> client.show_chart("bar", ["A", "B"], [{"label": "Data", "data": [1, 2]}])
+
+        # Or use as context manager:
+        >>> with VSCodeClient() as client:
+        ...     client.show_table(["Col1"], [["Row1"]])
+    """
+
+    def __init__(
+        self,
+        port: int = 19960,
+        auto_reconnect: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 0.5,
+    ):
+        """
+        Initialize VS Code client.
+
+        Args:
+            port: WebSocket server port (default: 19960)
+            auto_reconnect: Enable auto-reconnect on connection loss
+            max_retries: Maximum reconnection attempts
+            retry_delay: Delay between retries in seconds
+        """
         self.port = port
+        self.auto_reconnect = auto_reconnect
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self._ws: Optional[Any] = None
         self._connected: bool = False
         self._current_file: Optional[str] = None
@@ -60,41 +93,100 @@ class VSCodeClient:
         self._connected = False
 
     def _send(self, action: str, artifact: Optional[Dict] = None, panel_id: Optional[str] = None) -> Dict:
-        """Send message and wait for response"""
-        if not self._ws:
-            if not self.connect():
+        """
+        Send message and wait for response with auto-reconnect.
+
+        Args:
+            action: Action type ('render', 'close', 'list', 'ping')
+            artifact: Artifact data to render
+            panel_id: Target panel ID
+
+        Returns:
+            Response dictionary from VS Code extension
+
+        Raises:
+            ConnectionError: If connection fails after retries
+        """
+        import time
+
+        last_error: Optional[Exception] = None
+        retries = self.max_retries if self.auto_reconnect else 1
+
+        for attempt in range(retries):
+            # Ensure connection
+            if not self._ws or not self._connected:
+                if not self.connect():
+                    if attempt < retries - 1:
+                        time.sleep(self.retry_delay)
+                        continue
+                    raise ConnectionError("Cannot connect to VS Code extension")
+
+            msg_id = str(uuid.uuid4())
+            message = {
+                "id": msg_id,
+                "action": action,
+            }
+            if artifact:
+                message["artifact"] = artifact
+            if panel_id:
+                message["panelId"] = panel_id
+
+            try:
+                self._ws.send(json.dumps(message))
+                response = json.loads(self._ws.recv())
+
+                # Update current file path from response
+                if response.get("success") and response.get("data"):
+                    data = response["data"]
+                    if "filePath" in data:
+                        self._current_file = data["filePath"]
+                        # Extract session path from file path
+                        if self._current_file:
+                            import os
+                            self._session_path = os.path.dirname(self._current_file)
+
+                return response
+
+            except Exception as e:
+                last_error = e
                 self._connected = False
-                raise ConnectionError("Cannot connect to VS Code extension")
+                if self._ws:
+                    try:
+                        self._ws.close()
+                    except Exception:
+                        pass
+                self._ws = None
 
-        msg_id = str(uuid.uuid4())
-        message = {
-            "id": msg_id,
-            "action": action,
-        }
-        if artifact:
-            message["artifact"] = artifact
-        if panel_id:
-            message["panelId"] = panel_id
+                # Retry if auto-reconnect enabled
+                if self.auto_reconnect and attempt < retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
 
+        raise ConnectionError(f"Lost connection to VS Code after {retries} attempts: {last_error}")
+
+    def ping(self) -> bool:
+        """
+        Check if connection is alive.
+
+        Returns:
+            True if connected and responsive, False otherwise
+        """
         try:
-            self._ws.send(json.dumps(message))
-            response = json.loads(self._ws.recv())
+            response = self._send("ping")
+            return response.get("success", False)
+        except Exception:
+            return False
 
-            # Update current file path from response
-            if response.get("success") and response.get("data"):
-                data = response["data"]
-                if "filePath" in data:
-                    self._current_file = data["filePath"]
-                    # Extract session path from file path
-                    if self._current_file:
-                        import os
-                        self._session_path = os.path.dirname(self._current_file)
+    def ensure_connected(self) -> bool:
+        """
+        Ensure connection is established, reconnecting if necessary.
 
-            return response
-        except Exception as e:
-            self._connected = False
-            self._ws = None
-            raise ConnectionError(f"Lost connection to VS Code: {e}")
+        Returns:
+            True if connected, False otherwise
+        """
+        if self.is_connected and self.ping():
+            return True
+        return self.connect()
 
     # ============ Artifact Methods ============
 

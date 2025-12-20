@@ -331,3 +331,87 @@ class TestVSCodeClientErrors:
             assert panel_id == ""
 
             client.disconnect()
+
+
+class TestVSCodeClientAutoReconnect:
+    """Test auto-reconnect functionality"""
+
+    def test_ping_success(self):
+        with MockVSCodeServer(port=19980) as server:
+            client = VSCodeClient(port=19980)
+            client.connect()
+
+            assert client.ping() is True
+
+            client.disconnect()
+
+    def test_ping_failure(self):
+        client = VSCodeClient(port=19999)  # No server
+        assert client.ping() is False
+
+    def test_ensure_connected_already_connected(self):
+        with MockVSCodeServer(port=19981) as server:
+            client = VSCodeClient(port=19981)
+            client.connect()
+
+            # Should return True without reconnecting
+            assert client.ensure_connected() is True
+            assert client.is_connected is True
+
+            client.disconnect()
+
+    def test_ensure_connected_reconnect(self):
+        with MockVSCodeServer(port=19982) as server:
+            client = VSCodeClient(port=19982)
+
+            # Not connected initially
+            assert client.is_connected is False
+
+            # Should connect
+            result = client.ensure_connected()
+            assert result is True
+            assert client.is_connected is True
+
+            client.disconnect()
+
+    def test_auto_reconnect_on_send(self):
+        with MockVSCodeServer(port=19983) as server:
+            client = VSCodeClient(port=19983, auto_reconnect=True, max_retries=3)
+            client.connect()
+
+            # Simulate connection loss by closing websocket
+            client._ws.close()
+            client._ws = None
+            client._connected = False
+
+            # Should auto-reconnect and succeed
+            panel_id = client.show_table(["A"], [[1]])
+            assert panel_id != ""
+            assert client.is_connected is True
+
+            client.disconnect()
+
+    def test_auto_reconnect_disabled(self):
+        with MockVSCodeServer(port=19984) as server:
+            client = VSCodeClient(port=19984, auto_reconnect=False)
+            client.connect()
+
+            # Stop server
+            server.stop()
+            time.sleep(0.2)
+
+            # Should fail without retrying
+            with pytest.raises(ConnectionError):
+                client.show_table(["A"], [[1]])
+
+    def test_auto_reconnect_max_retries(self):
+        # No server on this port
+        client = VSCodeClient(port=19999, auto_reconnect=True, max_retries=2, retry_delay=0.1)
+
+        # Should fail after max retries
+        with pytest.raises(ConnectionError) as excinfo:
+            client.show_table(["A"], [[1]])
+
+        # Either "Cannot connect" or "attempts" in error message
+        error_msg = str(excinfo.value)
+        assert "Cannot connect" in error_msg or "attempts" in error_msg

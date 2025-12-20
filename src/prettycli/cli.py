@@ -1,3 +1,16 @@
+"""
+Interactive CLI Module
+
+This module provides the CLI class for building interactive command-line
+shells with command registration, status bar, and VS Code integration.
+
+Example:
+    >>> from prettycli import CLI, BaseCommand
+    >>>
+    >>> cli = CLI("myapp")
+    >>> cli.register(Path("commands/"))
+    >>> cli.run()  # Starts interactive shell
+"""
 import shlex
 import subprocess
 import io
@@ -8,6 +21,7 @@ from typing import Dict, Optional
 import yaml
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.completion import Completer, Completion
 
 from prettycli.command import BaseCommand
 from prettycli.context import Context
@@ -16,10 +30,120 @@ from prettycli import ui
 from prettycli import vscode
 
 
+class CommandCompleter(Completer):
+    """
+    Tab completion for CLI commands.
+
+    Provides completions for:
+    - Command names
+    - Command arguments (--name style)
+    - Built-in commands (help, exit, quit)
+    """
+
+    def __init__(self, commands: Dict[str, BaseCommand]):
+        """
+        Initialize the completer.
+
+        Args:
+            commands: Dictionary of registered commands
+        """
+        self.commands = commands
+        self.builtins = ["help", "exit", "quit"]
+
+    def get_completions(self, document, complete_event):  # noqa: F841
+        """
+        Generate completions for the current input.
+
+        Args:
+            document: Current document state
+            complete_event: Completion event (unused but required by interface)
+
+        Yields:
+            Completion objects
+        """
+        _ = complete_event  # Required by Completer interface
+        text = document.text_before_cursor
+        words = text.split()
+
+        # Complete command name
+        if not words or (len(words) == 1 and not text.endswith(" ")):
+            word = words[0] if words else ""
+            # Built-in commands
+            for cmd in self.builtins:
+                if cmd.startswith(word):
+                    yield Completion(
+                        cmd,
+                        start_position=-len(word),
+                        display_meta="built-in"
+                    )
+            # Registered commands
+            for name, cmd in self.commands.items():
+                if name.startswith(word):
+                    yield Completion(
+                        name,
+                        start_position=-len(word),
+                        display_meta=cmd.help[:30] if cmd.help else ""
+                    )
+        # Complete command arguments
+        elif len(words) >= 1:
+            cmd_name = words[0]
+            current_word = words[-1] if not text.endswith(" ") else ""
+
+            # Get command arguments from run method signature
+            if cmd_name in self.commands:
+                cmd = self.commands[cmd_name]
+                import inspect
+                try:
+                    sig = inspect.signature(cmd.run)
+                    for param_name, param in sig.parameters.items():
+                        if param_name in ("self", "ctx"):
+                            continue
+                        arg_name = f"--{param_name.replace('_', '-')}"
+                        if arg_name.startswith(current_word):
+                            # Get type hint for display
+                            type_hint = ""
+                            if param.annotation != inspect.Parameter.empty:
+                                type_hint = getattr(param.annotation, "__name__", str(param.annotation))
+                            yield Completion(
+                                arg_name,
+                                start_position=-len(current_word),
+                                display_meta=type_hint
+                            )
+                except (ValueError, TypeError):
+                    pass
+
+
 class CLI:
-    """交互式 CLI"""
+    """
+    Interactive CLI shell.
+
+    Provides an interactive command-line interface with:
+    - Command registration and execution
+    - Bash command passthrough (with prefix)
+    - Status bar with system info
+    - VS Code integration
+    - Output collapsing (Ctrl+O)
+
+    Attributes:
+        name: CLI application name
+        prompt: Input prompt string
+        ctx: Shared execution context
+
+    Example:
+        >>> cli = CLI("myapp", prompt="$ ")
+        >>> cli.register(Path("commands/"))
+        >>> cli.run()
+    """
 
     def __init__(self, name: str, prompt: str = "> ", config_path: Optional[Path] = None):
+        """
+        Initialize the interactive CLI.
+
+        Args:
+            name: Application name
+            prompt: Input prompt string
+            config_path: Path to YAML configuration file
+        """
         self.name = name
         self.prompt = prompt
         self.ctx = Context()
@@ -182,21 +306,36 @@ class CLI:
                 ui.print(f"[dim](Ctrl+O to collapse)[/]")
 
     def run(self):  # pragma: no cover
-        """启动交互式 CLI"""
+        """
+        Start the interactive CLI shell.
+
+        Provides an interactive prompt with:
+        - Tab completion for commands and arguments
+        - Status bar display
+        - Keyboard shortcuts (Ctrl+O to toggle output)
+        """
         ui.print(f"[bold]{self.name}[/] interactive CLI")
-        ui.print("Type 'help' for commands, 'exit' to quit\n")
+        ui.print("Type 'help' for commands, 'exit' to quit")
+        ui.print("[dim]Tab for completion[/]\n")
 
         bash_prefix = self._config.get("bash_prefix", "!")
         toggle_key = self._config.get("toggle_key", "c-o")
 
-        # 设置快捷键
+        # Set up keyboard shortcuts
         bindings = KeyBindings()
 
         @bindings.add(toggle_key)
-        def _(event):
+        def _on_toggle(_event):
             self._toggle_output()
 
-        session = PromptSession(key_bindings=bindings)
+        # Set up tab completion
+        completer = CommandCompleter(self._commands)
+
+        session = PromptSession(
+            key_bindings=bindings,
+            completer=completer,
+            complete_while_typing=False,  # Only complete on Tab
+        )
 
         while True:
             try:

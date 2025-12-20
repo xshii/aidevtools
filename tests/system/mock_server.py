@@ -84,6 +84,11 @@ class MockVSCodeServer:
                             "panels": ["panel-1", "panel-2"],
                         },
                     }
+                elif action == "ping":
+                    response = {
+                        "id": msg_id,
+                        "success": True,
+                    }
                 else:
                     response = {
                         "id": msg_id,
