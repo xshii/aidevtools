@@ -1,0 +1,16 @@
+# PrettyCLI 默认配置
+
+# Bash 命令前缀，设为空字符串则自动识别
+bash_prefix: "!"
+
+# 切换输出压缩/展开的快捷键
+toggle_key: "c-o"
+
+# Artifact 文件路径变量，在命令中使用会替换为当前 artifact 路径
+artifact_var: "@@$$"
+
+# 状态栏刷新间隔（秒）
+# statusbar_interval: 1.0
+
+# VS Code WebSocket 端口
+# vscode_port: 9876

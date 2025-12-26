@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-import yaml
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import Completer, Completion
@@ -26,6 +25,7 @@ from prompt_toolkit.formatted_text import HTML
 
 from prettycli.command import BaseCommand
 from prettycli.context import Context
+from prettycli.config import load_config
 from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar
 from prettycli import ui
 from prettycli import vscode
@@ -149,7 +149,7 @@ class CLI:
         self.prompt = prompt
         self.ctx = Context()
         self._commands: Dict[str, BaseCommand] = {}
-        self._config = self._load_config(config_path)
+        self._config = load_config(config_path)
         self._runtime_status = RuntimeStatus()
         self._echo_status = EchoStatus()
 
@@ -157,21 +157,6 @@ class CLI:
         self._top_toolbar = TopToolbar(name)
         self._top_toolbar.register(vscode.get_status)
         self._bottom_toolbar = BottomToolbar()
-
-    def _load_config(self, config_path: Optional[Path]) -> dict:
-        """加载配置"""
-        default = {
-            "bash_prefix": "!",
-            "toggle_key": "c-o",  # ctrl+o
-            "artifact_var": "@@$$",  # 当前 artifact 文件路径变量
-        }
-
-        if config_path and config_path.exists():
-            with open(config_path) as f:
-                user_config = yaml.safe_load(f) or {}
-                default.update(user_config)
-
-        return default
 
     def register(self, path: Path):
         """注册命令目录"""
