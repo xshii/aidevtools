@@ -99,7 +99,8 @@ class TestCLIRunBash:
     def test_run_bash_keyboard_interrupt(self):
         cli = CLI("test")
 
-        with patch('subprocess.run', side_effect=KeyboardInterrupt):
+        with patch.object(cli, '_get_shell') as mock_shell:
+            mock_shell.return_value.run.side_effect = KeyboardInterrupt
             with patch('prettycli.ui.warn'):
                 result = cli._run_bash("sleep 10")
                 assert result == 130
@@ -107,7 +108,8 @@ class TestCLIRunBash:
     def test_run_bash_exception(self):
         cli = CLI("test")
 
-        with patch('subprocess.run', side_effect=Exception("test error")):
+        with patch.object(cli, '_get_shell') as mock_shell:
+            mock_shell.return_value.run.side_effect = Exception("test error")
             with patch('prettycli.ui.error'):
                 result = cli._run_bash("bad")
                 assert result == 1

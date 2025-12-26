@@ -27,6 +27,7 @@ from prettycli.command import BaseCommand
 from prettycli.context import Context
 from prettycli.config import load_config
 from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar
+from prettycli.testing.shell import ShellSession
 from prettycli import ui
 from prettycli import vscode
 
@@ -152,6 +153,7 @@ class CLI:
         self._config = load_config(config_path)
         self._runtime_status = RuntimeStatus()
         self._echo_status = EchoStatus()
+        self._shell: Optional[ShellSession] = None  # 持久化 shell 会话
 
         # 固定工具栏
         self._top_toolbar = TopToolbar(name)
@@ -209,16 +211,27 @@ class CLI:
 
         return args
 
+    def _get_shell(self) -> ShellSession:
+        """获取或创建持久化 shell 会话"""
+        if self._shell is None or not self._shell.is_alive:
+            self._shell = ShellSession()
+            self._shell.start()
+        return self._shell
+
     def _run_bash(self, line: str) -> int:
-        """执行 bash 命令"""
+        """执行 bash 命令（持久化会话，支持 cd、环境变量等）"""
         self._runtime_status.start(line.split()[0] if line else "bash")
         try:
-            result = subprocess.run(line, shell=True, capture_output=True, text=True)
+            shell = self._get_shell()
+            result = shell.run(line)
             self._runtime_status.stop()
-            output = result.stdout + result.stderr
+            output = result.stdout
+            if result.stderr:
+                output += result.stderr
             self._last_output = output
-            print(output, end="")
-            return result.returncode
+            if output:
+                print(output)
+            return result.exit_code
         except KeyboardInterrupt:
             self._runtime_status.stop()
             ui.warn("Interrupted")
@@ -366,6 +379,10 @@ class CLI:
                 ui.print("\nUse 'exit' to quit")
             except EOFError:
                 break
+
+        # 清理 shell 会话
+        if self._shell:
+            self._shell.close()
 
         ui.print("Bye!")
 
