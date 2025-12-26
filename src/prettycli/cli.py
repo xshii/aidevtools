@@ -26,7 +26,7 @@ from prompt_toolkit.formatted_text import HTML
 from prettycli.command import BaseCommand
 from prettycli.context import Context
 from prettycli.config import load_config
-from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar
+from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar, QuoteWidget
 from prettycli.testing.shell import ShellSession
 from prettycli import ui
 from prettycli import vscode
@@ -158,7 +158,12 @@ class CLI:
         # 固定工具栏
         self._top_toolbar = TopToolbar(name)
         self._top_toolbar.register(vscode.get_status)
+
+        # 底部工具栏：左边每日一句，右边状态
+        self._quote_widget = QuoteWidget()
         self._bottom_toolbar = BottomToolbar()
+        self._bottom_toolbar.add_left(self._quote_widget)
+        self._bottom_toolbar.add_right(vscode.get_status)
 
     def register(self, path: Path):
         """注册命令目录"""
