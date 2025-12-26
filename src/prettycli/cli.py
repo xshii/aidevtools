@@ -157,7 +157,6 @@ class CLI:
 
         # 固定工具栏
         self._top_toolbar = TopToolbar(name)
-        self._top_toolbar.register(vscode.get_status)
 
         # 底部工具栏：左边每日一句，右边状态
         self._quote_widget = QuoteWidget()
