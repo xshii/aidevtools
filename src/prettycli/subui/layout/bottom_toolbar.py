@@ -1,5 +1,7 @@
 """底部工具栏布局"""
-from typing import Callable, List, Optional, Tuple, Union
+import re
+import shutil
+from typing import Callable, List, Tuple, Union
 
 from prompt_toolkit.formatted_text import HTML
 
@@ -64,18 +66,27 @@ class BottomToolbar:
 
         return " <style fg='ansibrightblack'>|</style> ".join(parts)
 
+    def _strip_html(self, text: str) -> str:
+        """移除 HTML 标签，计算纯文本长度"""
+        return re.sub(r'<[^>]+>', '', text)
+
     def render(self) -> HTML:
         """渲染为 prompt_toolkit HTML"""
         left = self._render_providers(self._left)
         right = self._render_providers(self._right)
 
         if left and right:
-            # 左右对齐：左边内容 ... 右边内容
-            return HTML(f"<i>{left}</i><right>{right}</right>")
+            # 计算需要填充的空格数
+            left_len = len(self._strip_html(left))
+            right_len = len(self._strip_html(right))
+            width = shutil.get_terminal_size().columns
+            space_count = max(1, width - left_len - right_len)
+            spaces = ' ' * space_count
+            return HTML(f"<i>{left}</i>{spaces}{right}")
         elif left:
             return HTML(f"<i>{left}</i>")
         elif right:
-            return HTML(f"<right>{right}</right>")
+            return HTML(f"{right}")
         else:
             return HTML("")
 
