@@ -38,6 +38,7 @@ class VSCodeClient:
         auto_reconnect: bool = True,
         max_retries: int = 3,
         retry_delay: float = 0.5,
+        max_retry_delay: float = 8.0,
     ):
         """
         Initialize VS Code client.
@@ -46,12 +47,14 @@ class VSCodeClient:
             port: WebSocket server port (default: 19960)
             auto_reconnect: Enable auto-reconnect on connection loss
             max_retries: Maximum reconnection attempts
-            retry_delay: Delay between retries in seconds
+            retry_delay: Initial delay between retries in seconds (exponential backoff)
+            max_retry_delay: Maximum delay between retries in seconds
         """
         self.port = port
         self.auto_reconnect = auto_reconnect
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.max_retry_delay = max_retry_delay
         self._ws: Optional[Any] = None
         self._connected: bool = False
         self._current_file: Optional[str] = None
@@ -92,9 +95,25 @@ class VSCodeClient:
             self._ws = None
         self._connected = False
 
+    def _get_retry_delay(self, attempt: int) -> float:
+        """
+        Calculate retry delay using exponential backoff.
+
+        Args:
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Delay in seconds
+        """
+        delay = self.retry_delay * (2 ** attempt)
+        return min(delay, self.max_retry_delay)
+
     def _send(self, action: str, artifact: Optional[Dict] = None, panel_id: Optional[str] = None) -> Dict:
         """
         Send message and wait for response with auto-reconnect.
+
+        Uses exponential backoff for retries (delay doubles each attempt,
+        capped at max_retry_delay).
 
         Args:
             action: Action type ('render', 'close', 'list', 'ping')
@@ -117,7 +136,7 @@ class VSCodeClient:
             if not self._ws or not self._connected:
                 if not self.connect():
                     if attempt < retries - 1:
-                        time.sleep(self.retry_delay)
+                        time.sleep(self._get_retry_delay(attempt))
                         continue
                     raise ConnectionError("Cannot connect to VS Code extension")
 
@@ -159,7 +178,7 @@ class VSCodeClient:
 
                 # Retry if auto-reconnect enabled
                 if self.auto_reconnect and attempt < retries - 1:
-                    time.sleep(self.retry_delay)
+                    time.sleep(self._get_retry_delay(attempt))
                     continue
 
         raise ConnectionError(f"Lost connection to VS Code after {retries} attempts: {last_error}")

@@ -1,11 +1,25 @@
 """底部工具栏布局"""
-import re
 import shutil
+from html.parser import HTMLParser
 from typing import Callable, List, Tuple, Union
 
 from prompt_toolkit.formatted_text import HTML
 
 __all__ = ["BottomToolbar"]
+
+
+class _HTMLTextExtractor(HTMLParser):
+    """从HTML中提取纯文本"""
+
+    def __init__(self):
+        super().__init__()
+        self._text_parts: List[str] = []
+
+    def handle_data(self, data: str):
+        self._text_parts.append(data)
+
+    def get_text(self) -> str:
+        return "".join(self._text_parts)
 
 ContentProvider = Callable[[], Union[str, Tuple[str, str], None]]
 
@@ -68,7 +82,9 @@ class BottomToolbar:
 
     def _strip_html(self, text: str) -> str:
         """移除 HTML 标签，计算纯文本长度"""
-        return re.sub(r'<[^>]+>', '', text)
+        extractor = _HTMLTextExtractor()
+        extractor.feed(text)
+        return extractor.get_text()
 
     def render(self) -> HTML:
         """渲染为 prompt_toolkit HTML"""
