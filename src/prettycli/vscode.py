@@ -2,6 +2,7 @@
 VS Code extension API client for prettycli
 """
 import json
+import threading
 import uuid
 import base64
 from pathlib import Path
@@ -572,16 +573,47 @@ class VSCodeClient:
         self.disconnect()
 
 
-# Global client instance
+# Global client instance with thread-safe initialization
 _client: Optional[VSCodeClient] = None
+_client_lock = threading.Lock()
 
 
 def get_client(port: int = 19960) -> VSCodeClient:
-    """Get or create global VS Code client"""
+    """
+    Get or create global VS Code client (thread-safe).
+
+    Note: port parameter is only used on first call.
+    Subsequent calls return the existing client regardless of port.
+
+    Args:
+        port: WebSocket server port (only used on first initialization)
+
+    Returns:
+        Global VSCodeClient instance
+    """
     global _client
     if _client is None:
-        _client = VSCodeClient(port)
+        with _client_lock:
+            # Double-check locking pattern
+            if _client is None:
+                _client = VSCodeClient(port)
     return _client
+
+
+def reset_client():
+    """
+    Reset the global client (useful for testing or reconnecting to different port).
+
+    Thread-safe operation that disconnects existing client before clearing.
+    """
+    global _client
+    with _client_lock:
+        if _client is not None:
+            try:
+                _client.disconnect()
+            except Exception:
+                pass
+            _client = None
 
 
 def get_status() -> tuple:
