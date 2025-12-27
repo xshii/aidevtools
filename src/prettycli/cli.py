@@ -11,6 +11,7 @@ Example:
     >>> cli.register(Path("commands/"))
     >>> cli.run()  # Starts interactive shell
 """
+import inspect
 import shlex
 import subprocess
 import io
@@ -94,7 +95,6 @@ class CommandCompleter(Completer):
             # Get command arguments from run method signature
             if cmd_name in self.commands:
                 cmd = self.commands[cmd_name]
-                import inspect
                 try:
                     sig = inspect.signature(cmd.run)
                     for param_name, param in sig.parameters.items():
@@ -154,6 +154,11 @@ class CLI:
         self._runtime_status = RuntimeStatus()
         self._echo_status = EchoStatus()
         self._shell: Optional[ShellSession] = None  # 持久化 shell 会话
+
+        # 输出相关状态
+        self._last_output: str = ""
+        self._collapsed: bool = False
+        self._max_collapsed_lines: int = self._config.get("max_collapsed_lines", 10)
 
         # 固定工具栏
         self._top_toolbar = TopToolbar(name)

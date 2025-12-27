@@ -7,7 +7,8 @@ from prettycli.subui.widget.quote import QuoteWidget
 class TestQuoteWidget:
     def test_load_quotes(self):
         widget = QuoteWidget()
-        assert len(widget._quotes) > 0
+        # 使用公开的 quotes 属性触发延迟加载
+        assert len(widget.quotes) > 0
 
     def test_current_returns_string(self):
         widget = QuoteWidget()
@@ -41,7 +42,8 @@ class TestQuoteWidget:
     def test_fallback_quote(self, tmp_path):
         # Test when quotes file doesn't exist
         widget = QuoteWidget(quotes_file=tmp_path / "missing.txt")
-        assert widget._quotes == ["Keep coding!"]
+        # 使用公开的 quotes 属性触发延迟加载
+        assert widget.quotes == ["Keep coding!"]
 
     def test_custom_quotes_file(self, tmp_path):
         # Create custom quotes file
@@ -49,5 +51,19 @@ class TestQuoteWidget:
         quotes_file.write_text("Quote 1\nQuote 2\n")
 
         widget = QuoteWidget(quotes_file=quotes_file)
-        assert len(widget._quotes) == 2
-        assert "Quote 1" in widget._quotes
+        # 使用公开的 quotes 属性触发延迟加载
+        assert len(widget.quotes) == 2
+        assert "Quote 1" in widget.quotes
+
+    def test_lazy_loading(self, tmp_path):
+        # Test that quotes are not loaded until accessed
+        quotes_file = tmp_path / "quotes.txt"
+        quotes_file.write_text("Lazy Quote\n")
+
+        widget = QuoteWidget(quotes_file=quotes_file)
+        # Before accessing, _quotes should be None
+        assert widget._quotes is None
+        # After accessing quotes property, it should be loaded
+        _ = widget.quotes
+        assert widget._quotes is not None
+        assert "Lazy Quote" in widget._quotes

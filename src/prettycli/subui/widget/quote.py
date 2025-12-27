@@ -1,6 +1,6 @@
 """每日一句 Widget"""
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 __all__ = ["QuoteWidget"]
 
@@ -11,6 +11,8 @@ DEFAULT_QUOTES_FILE = Path(__file__).parent.parent.parent / "quotes.txt"
 class QuoteWidget:
     """每日一句
 
+    使用延迟加载，在首次访问时才读取quotes文件。
+
     Example:
         >>> quote = QuoteWidget()
         >>> print(quote.current())
@@ -19,9 +21,16 @@ class QuoteWidget:
     def __init__(self, quotes_file: Optional[Path] = None):
         self._quotes_file = quotes_file or DEFAULT_QUOTES_FILE
         self._index = 0
-        self._quotes = self._load_quotes()
+        self._quotes: Optional[List[str]] = None  # 延迟加载
 
-    def _load_quotes(self) -> list:
+    @property
+    def quotes(self) -> List[str]:
+        """延迟加载quotes列表"""
+        if self._quotes is None:
+            self._quotes = self._load_quotes()
+        return self._quotes
+
+    def _load_quotes(self) -> List[str]:
         """加载 quotes 文件"""
         if self._quotes_file.exists():
             return [
@@ -33,13 +42,13 @@ class QuoteWidget:
 
     def next(self) -> str:
         """获取下一条 quote"""
-        quote = self._quotes[self._index % len(self._quotes)]
+        quote = self.quotes[self._index % len(self.quotes)]
         self._index += 1
         return quote
 
     def current(self) -> str:
         """获取当前 quote（不切换）"""
-        return self._quotes[self._index % len(self._quotes)]
+        return self.quotes[self._index % len(self.quotes)]
 
     def render(self) -> str:
         """渲染为 rich 格式"""

@@ -18,22 +18,23 @@ class HelloCommand(BaseCommand):
     """Say hello."""
 
     name = "hello"
-    description = "Say hello"
+    help = "Say hello"
 
-    def execute(self, ctx: Context, name: str = "World"):
-        ctx.print(f"Hello, {name}!")
+    def run(self, ctx: Context, name: str = "World") -> int:
+        print(f"Hello, {name}!")
+        return 0
 
 
 class CalcCommand(BaseCommand):
     """Simple calculator."""
 
     name = "calc"
-    description = "Calculate expression (e.g., calc 1 + 2)"
+    help = "Calculate expression (e.g., calc 1 + 2)"
 
-    def execute(self, ctx: Context, *args: str):
+    def run(self, ctx: Context, *args: str) -> int:
         if not args:
-            ctx.print("Usage: calc <number> <op> <number>")
-            return
+            print("Usage: calc <number> <op> <number>")
+            return 1
 
         expr = " ".join(args)
         try:
@@ -41,21 +42,24 @@ class CalcCommand(BaseCommand):
             allowed = set("0123456789+-*/.() ")
             if all(c in allowed for c in expr):
                 result = eval(expr)
-                ctx.print(f"{expr} = {result}")
+                print(f"{expr} = {result}")
+                return 0
             else:
-                ctx.print("Invalid expression")
+                print("Invalid expression")
+                return 1
         except Exception as e:
-            ctx.print(f"Error: {e}")
+            print(f"Error: {e}")
+            return 1
 
 
 class ExitCommand(BaseCommand):
     """Exit the shell."""
 
     name = "exit"
-    description = "Exit the interactive shell"
+    help = "Exit the interactive shell"
 
-    def execute(self, ctx: Context):
-        ctx.print("Goodbye!")
+    def run(self, ctx: Context) -> int:
+        print("Goodbye!")
         raise SystemExit(0)
 
 

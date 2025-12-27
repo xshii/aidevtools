@@ -14,38 +14,46 @@ class HelloCommand(BaseCommand):
     """A simple hello world command."""
 
     name = "hello"
-    description = "Say hello to someone"
+    help = "Say hello to someone"
 
-    def execute(self, ctx: Context, name: str = "World"):
+    def run(self, ctx: Context, name: str = "World") -> int:
         """
         Execute the hello command.
 
         Args:
             ctx: The execution context
             name: Name to greet (default: World)
+
+        Returns:
+            Exit code (0 for success)
         """
-        ctx.print(f"Hello, {name}!")
+        print(f"Hello, {name}!")
+        return 0
 
 
 class GreetCommand(BaseCommand):
     """Greet multiple people at once."""
 
     name = "greet"
-    description = "Greet multiple people"
+    help = "Greet multiple people"
 
-    def execute(self, ctx: Context, *names: str):
+    def run(self, ctx: Context, *names: str) -> int:
         """
         Greet multiple people.
 
         Args:
             ctx: The execution context
             names: Names to greet
+
+        Returns:
+            Exit code (0 for success)
         """
         if not names:
-            ctx.print("Hello, everyone!")
+            print("Hello, everyone!")
         else:
             for name in names:
-                ctx.print(f"Hello, {name}!")
+                print(f"Hello, {name}!")
+        return 0
 
 
 if __name__ == "__main__":

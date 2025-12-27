@@ -55,6 +55,7 @@ class ShellSession:
         self._stderr_queue: queue.Queue = queue.Queue()
         self._reader_threads: List[threading.Thread] = []
         self._history: List[ShellResult] = []
+        self._data_event: threading.Event = threading.Event()  # 用于通知数据到达
 
     def __enter__(self):
         self.start()
@@ -90,6 +91,7 @@ class ShellSession:
                 for line in iter(stream.readline, ''):
                     if line:
                         q.put(line)
+                        self._data_event.set()  # 通知有新数据
             except (ValueError, OSError):
                 pass  # 流已关闭
 
@@ -113,9 +115,10 @@ class ShellSession:
         timeout = timeout or self._timeout
         start_time = time.time()
 
-        # 清空队列
+        # 清空队列和事件
         self._drain_queue(self._stdout_queue)
         self._drain_queue(self._stderr_queue)
+        self._data_event.clear()
 
         # 发送命令，附加退出码和结束标记
         full_command = (
@@ -133,42 +136,52 @@ class ShellSession:
 
         while True:
             elapsed = time.time() - start_time
-            if elapsed > timeout:
+            remaining = timeout - elapsed
+            if remaining <= 0:
                 raise TimeoutError(f"Command timed out after {timeout}s: {command}")
 
-            # 读取 stdout
-            try:
-                line = self._stdout_queue.get(timeout=0.1)
-                if self._END_MARKER in line:
-                    break
-                elif self._EXIT_CODE_MARKER in line:
-                    # 提取退出码
-                    match = re.search(rf"{self._EXIT_CODE_MARKER}(\d+)", line)
-                    if match:
-                        exit_code = int(match.group(1))
-                else:
-                    stdout_lines.append(line)
-            except queue.Empty:
-                pass
+            # 使用Event等待数据，比固定轮询更高效
+            self._data_event.wait(timeout=min(remaining, 0.5))
+            self._data_event.clear()
 
-            # 读取 stderr
+            # 读取所有可用的 stdout
+            while True:
+                try:
+                    line = self._stdout_queue.get_nowait()
+                    if self._END_MARKER in line:
+                        # 读取剩余 stderr
+                        try:
+                            while True:
+                                stderr_lines.append(self._stderr_queue.get_nowait())
+                        except queue.Empty:
+                            pass
+                        # 返回结果
+                        duration = time.time() - start_time
+                        result = ShellResult(
+                            command=command,
+                            stdout="".join(stdout_lines).rstrip("\n"),
+                            stderr="".join(stderr_lines).rstrip("\n"),
+                            exit_code=exit_code,
+                            duration=duration,
+                        )
+                        self._history.append(result)
+                        return result
+                    elif self._EXIT_CODE_MARKER in line:
+                        # 提取退出码
+                        match = re.search(rf"{self._EXIT_CODE_MARKER}(\d+)", line)
+                        if match:
+                            exit_code = int(match.group(1))
+                    else:
+                        stdout_lines.append(line)
+                except queue.Empty:
+                    break
+
+            # 读取所有可用的 stderr
             try:
                 while True:
-                    line = self._stderr_queue.get_nowait()
-                    stderr_lines.append(line)
+                    stderr_lines.append(self._stderr_queue.get_nowait())
             except queue.Empty:
                 pass
-
-        duration = time.time() - start_time
-        result = ShellResult(
-            command=command,
-            stdout="".join(stdout_lines).rstrip("\n"),
-            stderr="".join(stderr_lines).rstrip("\n"),
-            exit_code=exit_code,
-            duration=duration,
-        )
-        self._history.append(result)
-        return result
 
     def _drain_queue(self, q: queue.Queue):
         """清空队列"""
