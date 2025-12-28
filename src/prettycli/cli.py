@@ -25,13 +25,14 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 
-from prettycli.command import BaseCommand
+from prettycli.command import BaseCommand, all_commands as all_func_commands, CommandInfo
 from prettycli.context import Context
 from prettycli.config import load_config
 from prettycli.subui import RuntimeStatus, TopToolbar, BottomToolbar, QuoteWidget, WelcomeLayout
 from prettycli.shell import ShellSession
 from prettycli import ui
 from prettycli import vscode
+from prettycli import log
 
 
 class CommandCompleter(Completer):
@@ -39,19 +40,25 @@ class CommandCompleter(Completer):
     Tab completion for CLI commands.
 
     Provides completions for:
-    - Command names
+    - Command names (class-based and function-based)
     - Command arguments (--name style)
     - Built-in commands (help, exit, quit)
     """
 
-    def __init__(self, commands: Dict[str, BaseCommand]):
+    def __init__(
+        self,
+        class_commands: Dict[str, BaseCommand],
+        func_commands: Dict[str, CommandInfo],
+    ):
         """
         Initialize the completer.
 
         Args:
-            commands: Dictionary of registered commands
+            class_commands: Dictionary of class-based commands
+            func_commands: Dictionary of function-based commands
         """
-        self.commands = commands
+        self.class_commands = class_commands
+        self.func_commands = func_commands
         self.builtins = ["help", "exit", "quit"]
 
     def get_completions(self, document, complete_event):  # noqa: F841
@@ -80,30 +87,42 @@ class CommandCompleter(Completer):
                         start_position=-len(word),
                         display_meta="built-in"
                     )
-            # Registered commands
-            for name, cmd in self.commands.items():
+            # Class-based commands
+            for name, cmd in self.class_commands.items():
                 if name.startswith(word):
                     yield Completion(
                         name,
                         start_position=-len(word),
                         display_meta=cmd.help[:30] if cmd.help else ""
                     )
+            # Function-based commands
+            for name, cmd_info in self.func_commands.items():
+                if name.startswith(word):
+                    yield Completion(
+                        name,
+                        start_position=-len(word),
+                        display_meta=cmd_info.help[:30] if cmd_info.help else ""
+                    )
         # Complete command arguments
         elif len(words) >= 1:
             cmd_name = words[0]
             current_word = words[-1] if not text.endswith(" ") else ""
 
-            # Get command arguments from run method signature
-            if cmd_name in self.commands:
-                cmd = self.commands[cmd_name]
+            # Get function to inspect
+            func = None
+            if cmd_name in self.class_commands:
+                func = self.class_commands[cmd_name].run
+            elif cmd_name in self.func_commands:
+                func = self.func_commands[cmd_name].func
+
+            if func:
                 try:
-                    sig = inspect.signature(cmd.run)
+                    sig = inspect.signature(func)
                     for param_name, param in sig.parameters.items():
-                        if param_name in ("self", "ctx"):
+                        if param_name in ("self", "ctx", "kwargs"):
                             continue
                         arg_name = f"--{param_name.replace('_', '-')}"
                         if arg_name.startswith(current_word):
-                            # Get type hint for display
                             type_hint = ""
                             if param.annotation != inspect.Parameter.empty:
                                 type_hint = getattr(param.annotation, "__name__", str(param.annotation))
@@ -155,7 +174,8 @@ class CLI:
         self.name = name
         self.project_root = (project_root or Path.cwd()).resolve()
         self.ctx = Context()
-        self._commands: Dict[str, BaseCommand] = {}
+        self._class_commands: Dict[str, BaseCommand] = {}
+        self._func_commands: Dict[str, CommandInfo] = {}
         self._config = load_config(config_path)
         self._runtime_status = RuntimeStatus()
         self._shell: Optional[ShellSession] = None  # 持久化 shell 会话
@@ -194,8 +214,12 @@ class CLI:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
+        # Load class-based commands
         for name, cmd_cls in BaseCommand.all().items():
-            self._commands[name] = cmd_cls()
+            self._class_commands[name] = cmd_cls()
+
+        # Load function-based commands
+        self._func_commands.update(all_func_commands())
 
         return self
 
@@ -297,14 +321,22 @@ class CLI:
 
         cmd_name = parts[0]
         args_str = parts[1] if len(parts) > 1 else ""
-
-        if cmd_name not in self._commands:
-            return None
-
-        cmd = self._commands[cmd_name]
         args = self._parse_args(args_str)
 
-        # 捕获输出
+        # Check class-based commands
+        if cmd_name in self._class_commands:
+            return self._run_class_command(cmd_name, args)
+
+        # Check function-based commands
+        if cmd_name in self._func_commands:
+            return self._run_func_command(cmd_name, args)
+
+        return None
+
+    def _run_class_command(self, cmd_name: str, args: Dict) -> int:
+        """执行类式命令"""
+        cmd = self._class_commands[cmd_name]
+
         buffer = io.StringIO()
         old_stdout = sys.stdout
         sys.stdout = buffer
@@ -316,7 +348,7 @@ class CLI:
             self._runtime_status.stop()
             self._last_output = buffer.getvalue()
             print(self._last_output, end="")
-            return result
+            return result if result is not None else 0
         except KeyboardInterrupt:
             sys.stdout = old_stdout
             self._runtime_status.stop()
@@ -329,6 +361,28 @@ class CLI:
             return 1
         except Exception as e:
             sys.stdout = old_stdout
+            self._runtime_status.stop()
+            ui.error(f"Error: {e}")
+            return 1
+
+    def _run_func_command(self, cmd_name: str, args: Dict) -> int:
+        """执行函数式命令"""
+        cmd_info = self._func_commands[cmd_name]
+
+        self._runtime_status.start(cmd_name)
+        try:
+            result = cmd_info.func(**args)
+            self._runtime_status.stop()
+            return result if result is not None else 0
+        except KeyboardInterrupt:
+            self._runtime_status.stop()
+            ui.warn("Interrupted")
+            return 130
+        except TypeError as e:
+            self._runtime_status.stop()
+            ui.error(f"Invalid arguments: {e}")
+            return 1
+        except Exception as e:
             self._runtime_status.stop()
             ui.error(f"Error: {e}")
             return 1
@@ -362,6 +416,12 @@ class CLI:
         - Status bar display
         - Keyboard shortcuts (Ctrl+O to toggle output)
         """
+        # Set up logging to redirect to CLI
+        log.setup()
+
+        # Load built-in commands
+        self._load_builtins()
+
         # 自动安装 VS Code 扩展（只在新安装时提示）
         if not vscode.is_extension_installed():
             ui.info("正在安装 VS Code 扩展...")
@@ -383,7 +443,7 @@ class CLI:
             self._toggle_output()
 
         # Set up tab completion
-        completer = CommandCompleter(self._commands)
+        completer = CommandCompleter(self._class_commands, self._func_commands)
 
         session = PromptSession(
             key_bindings=bindings,
@@ -461,9 +521,19 @@ class CLI:
 
         ui.print("Bye!")
 
+    def _load_builtins(self):
+        """加载内置命令"""
+        # Import builtins module to trigger @command decorators
+        from prettycli import builtins  # noqa: F401
+        self._func_commands.update(all_func_commands())
+
     def _show_help(self):
         """显示帮助"""
         t = ui.table("Commands", ["Name", "Description"])
-        for name, cmd in self._commands.items():
+        # Class-based commands
+        for name, cmd in self._class_commands.items():
             t.add_row(name, cmd.help)
+        # Function-based commands
+        for name, cmd_info in self._func_commands.items():
+            t.add_row(name, cmd_info.help)
         ui.print_table(t)

@@ -27,14 +27,25 @@ class AnotherCommand(BaseCommand):
         return 0
 
 
+from prettycli.command import CommandInfo
+
+
+def dummy_func(name: str = "test", verbose: bool = False):
+    """Dummy function command."""
+    return 0
+
+
 @pytest.fixture
 def completer():
     """Create a completer with test commands."""
-    commands = {
+    class_commands = {
         "dummy": DummyCommand(),
         "another": AnotherCommand(),
     }
-    return CommandCompleter(commands)
+    func_commands = {
+        "func-cmd": CommandInfo(name="func-cmd", func=dummy_func, help="A function command"),
+    }
+    return CommandCompleter(class_commands, func_commands)
 
 
 @pytest.fixture(autouse=True)
@@ -49,8 +60,8 @@ class TestCommandCompleter:
 
     def test_init(self, completer):
         """Test completer initialization."""
-        assert "dummy" in completer.commands
-        assert "another" in completer.commands
+        assert "dummy" in completer.class_commands
+        assert "another" in completer.class_commands
         assert "help" in completer.builtins
         assert "exit" in completer.builtins
         assert "quit" in completer.builtins
@@ -156,3 +167,35 @@ class TestCommandCompleter:
         # display_meta is FormattedText, convert to string for check
         meta_text = str(count_completion.display_meta)
         assert "int" in meta_text
+
+    def test_complete_func_command(self, completer):
+        """Test completion of function-based commands."""
+        document = MagicMock()
+        document.text_before_cursor = "func"
+
+        completions = list(completer.get_completions(document, None))
+
+        names = [c.text for c in completions]
+        assert "func-cmd" in names
+
+    def test_complete_func_command_args(self, completer):
+        """Test completion of function command arguments."""
+        document = MagicMock()
+        document.text_before_cursor = "func-cmd --"
+
+        completions = list(completer.get_completions(document, None))
+
+        names = [c.text for c in completions]
+        assert "--name" in names
+        assert "--verbose" in names
+
+    def test_func_command_display_meta(self, completer):
+        """Test function command shows help in display_meta."""
+        document = MagicMock()
+        document.text_before_cursor = "func"
+
+        completions = list(completer.get_completions(document, None))
+
+        func_completion = next(c for c in completions if c.text == "func-cmd")
+        meta_text = str(func_completion.display_meta)
+        assert "function" in meta_text.lower()

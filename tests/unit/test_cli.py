@@ -6,14 +6,14 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from prettycli.cli import CLI
-from prettycli.command import BaseCommand
+from prettycli.command import BaseCommand, command, clear_commands, CommandInfo
 
 
 class TestCLIInit:
     def test_default_values(self):
         cli = CLI("test")
         assert cli.name == "test"
-        assert cli._commands == {}
+        assert cli._class_commands == {}
 
     def test_default_prompt(self, tmp_path):
         cli = CLI("test", project_root=tmp_path)
@@ -184,7 +184,7 @@ class TestCLIExecuteCommand:
                 return 0
 
         cli = CLI("test")
-        cli._commands["testcmd"] = TestCmd()
+        cli._class_commands["testcmd"] = TestCmd()
 
         result = cli._execute_command("testcmd")
         assert result == 0
@@ -202,7 +202,7 @@ class TestCLIExecuteCommand:
                 return 0
 
         cli = CLI("test")
-        cli._commands["argscmd"] = ArgsCmd()
+        cli._class_commands["argscmd"] = ArgsCmd()
 
         result = cli._execute_command("argscmd --name test")
         assert result == 0
@@ -219,7 +219,7 @@ class TestCLIExecuteCommand:
                 raise KeyboardInterrupt
 
         cli = CLI("test")
-        cli._commands["interrupt"] = InterruptCmd()
+        cli._class_commands["interrupt"] = InterruptCmd()
 
         with patch('prettycli.ui.warn'):
             result = cli._execute_command("interrupt")
@@ -236,7 +236,7 @@ class TestCLIExecuteCommand:
                 return 0
 
         cli = CLI("test")
-        cli._commands["typeerror"] = TypeErrorCmd()
+        cli._class_commands["typeerror"] = TypeErrorCmd()
 
         with patch('prettycli.ui.error'):
             result = cli._execute_command("typeerror")
@@ -253,11 +253,97 @@ class TestCLIExecuteCommand:
                 raise RuntimeError("test error")
 
         cli = CLI("test")
-        cli._commands["exception"] = ExceptionCmd()
+        cli._class_commands["exception"] = ExceptionCmd()
 
         with patch('prettycli.ui.error'):
             result = cli._execute_command("exception")
             assert result == 1
+
+
+class TestCLIFuncCommand:
+    """Test function-based command execution."""
+
+    def test_execute_func_command(self):
+        """Test executing a function-based command."""
+        clear_commands()
+
+        @command("func-test", help="Test function command")
+        def func_test():
+            return 0
+
+        cli = CLI("test")
+        cli._func_commands["func-test"] = CommandInfo(
+            name="func-test", func=func_test, help="Test"
+        )
+
+        result = cli._execute_command("func-test")
+        assert result == 0
+
+    def test_execute_func_command_with_args(self):
+        """Test executing function command with arguments."""
+        clear_commands()
+
+        @command("func-args")
+        def func_args(name="default"):
+            return 0 if name == "test" else 1
+
+        cli = CLI("test")
+        cli._func_commands["func-args"] = CommandInfo(
+            name="func-args", func=func_args, help=""
+        )
+
+        result = cli._execute_command("func-args --name test")
+        assert result == 0
+
+    def test_execute_func_command_exception(self):
+        """Test function command that raises exception."""
+        clear_commands()
+
+        @command("func-error")
+        def func_error():
+            raise RuntimeError("test error")
+
+        cli = CLI("test")
+        cli._func_commands["func-error"] = CommandInfo(
+            name="func-error", func=func_error, help=""
+        )
+
+        with patch('prettycli.ui.error'):
+            result = cli._execute_command("func-error")
+            assert result == 1
+
+    def test_execute_func_command_keyboard_interrupt(self):
+        """Test function command interrupted by user."""
+        clear_commands()
+
+        @command("func-interrupt")
+        def func_interrupt():
+            raise KeyboardInterrupt
+
+        cli = CLI("test")
+        cli._func_commands["func-interrupt"] = CommandInfo(
+            name="func-interrupt", func=func_interrupt, help=""
+        )
+
+        with patch('prettycli.ui.warn'):
+            result = cli._execute_command("func-interrupt")
+            assert result == 130
+
+    def test_execute_func_command_none_return(self):
+        """Test function command returning None (should be 0)."""
+        clear_commands()
+
+        @command("func-none")
+        def func_none():
+            pass  # Returns None
+
+        cli = CLI("test")
+        cli._func_commands["func-none"] = CommandInfo(
+            name="func-none", func=func_none, help=""
+        )
+
+        result = cli._execute_command("func-none")
+        assert result == 0
 
 
 class TestCLIRegister:
@@ -280,7 +366,7 @@ class MyCmd(BaseCommand):
         cli = CLI("test")
         cli.register(tmp_path)
 
-        assert "mycmd" in cli._commands
+        assert "mycmd" in cli._class_commands
 
     def test_register_nonexistent_directory(self):
         cli = CLI("test")
@@ -306,8 +392,8 @@ class PublicCmd(BaseCommand):
         cli = CLI("test")
         cli.register(tmp_path)
 
-        assert "public" in cli._commands
-        assert "_private" not in cli._commands
+        assert "public" in cli._class_commands
+        assert "_private" not in cli._class_commands
 
 
 class TestCLIShowHelp:
@@ -322,7 +408,23 @@ class TestCLIShowHelp:
                 return 0
 
         cli = CLI("test")
-        cli._commands["helpcmd"] = HelpCmd()
+        cli._class_commands["helpcmd"] = HelpCmd()
+
+        with patch('prettycli.ui.print_table') as mock:
+            cli._show_help()
+
+    def test_show_help_with_func_commands(self):
+        """Test help shows function-based commands."""
+        clear_commands()
+
+        @command("func-help", help="Function help")
+        def func_help():
+            return 0
+
+        cli = CLI("test")
+        cli._func_commands["func-help"] = CommandInfo(
+            name="func-help", func=func_help, help="Function help"
+        )
 
         with patch('prettycli.ui.print_table') as mock:
             cli._show_help()

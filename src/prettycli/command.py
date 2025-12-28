@@ -1,10 +1,18 @@
 """
-Base Command Module
+Command Module
 
-This module provides the BaseCommand abstract class that all CLI commands
-must inherit from. Commands are automatically registered when defined.
+This module provides two ways to define CLI commands:
 
-Example:
+1. Function-based (recommended):
+    >>> from prettycli import command
+    >>> import logging
+    >>>
+    >>> @command("greet", help="Greet a user")
+    ... def greet(name: str = "World"):
+    ...     logging.info(f"Hello, {name}!")
+    ...     return 0
+
+2. Class-based (legacy):
     >>> from prettycli import BaseCommand, Context
     >>>
     >>> class GreetCommand(BaseCommand):
@@ -16,10 +24,60 @@ Example:
     ...         return 0
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Type, Optional, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Dict, Type, Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from prettycli.context import Context
+
+
+# =============================================================================
+# Function-based command registry
+# =============================================================================
+
+@dataclass
+class CommandInfo:
+    """Metadata for a registered command."""
+    name: str
+    func: Callable
+    help: str = ""
+
+
+_func_registry: Dict[str, CommandInfo] = {}
+
+
+def command(name: str, help: str = ""):
+    """Decorator to register a function as a CLI command.
+
+    Args:
+        name: Command name (e.g., "install-vscode")
+        help: Help text for the command
+
+    Example:
+        >>> @command("greet", help="Greet a user")
+        ... def greet(name: str = "World"):
+        ...     logging.info(f"Hello, {name}!")
+        ...     return 0
+    """
+    def decorator(func: Callable) -> Callable:
+        _func_registry[name] = CommandInfo(name=name, func=func, help=help)
+        return func
+    return decorator
+
+
+def get_command(name: str) -> Optional[CommandInfo]:
+    """Get a registered function command by name."""
+    return _func_registry.get(name)
+
+
+def all_commands() -> Dict[str, CommandInfo]:
+    """Get all registered function commands."""
+    return _func_registry.copy()
+
+
+def clear_commands():
+    """Clear the function command registry (for testing)."""
+    _func_registry.clear()
 
 
 class BaseCommand(ABC):
