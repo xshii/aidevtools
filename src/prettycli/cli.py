@@ -430,6 +430,9 @@ class CLI:
             else:
                 ui.warn("VS Code 扩展安装失败，部分功能不可用")
 
+        # 尝试连接 VS Code
+        vscode.get_client().connect()
+
         self._welcome_layout.show()
 
         bash_prefix = self._config.get("bash_prefix", "!")
