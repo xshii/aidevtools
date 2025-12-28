@@ -1,12 +1,13 @@
 """交互式测试示例"""
-from prettycli.testing import (
+from pathlib import Path
+
+from tests.framework import (
     test,
     mock_prompt,
     assert_contains,
     TestRunner,
     InteractiveSession,
 )
-from pathlib import Path
 
 
 # 被测试的函数

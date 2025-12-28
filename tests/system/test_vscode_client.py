@@ -9,7 +9,7 @@ pytest.importorskip("websockets")
 pytest.importorskip("websocket")
 
 from tests.system.mock_server import MockVSCodeServer
-from prettycli.vscode import VSCodeClient, get_client, get_status
+from prettycli.vscode import VSCodeClient, get_client, get_status, reset_client
 
 
 class TestVSCodeClientConnection:
@@ -266,8 +266,7 @@ class TestVSCodeStatus:
 
     def test_get_status_disconnected(self):
         # Reset global client
-        import prettycli.vscode as vscode_module
-        vscode_module._client = None
+        reset_client()
 
         status = get_status()
         assert status[0] == "VSCode 未连接"
@@ -275,11 +274,11 @@ class TestVSCodeStatus:
 
     def test_get_status_connected(self):
         with MockVSCodeServer(port=19976) as server:
-            import prettycli.vscode as vscode_module
-            vscode_module._client = None
+            reset_client()
 
             client = get_client(port=19976)
             client.connect()
+            time.sleep(0.2)  # Wait for connection to be established
 
             status = get_status()
             assert "已连接" in status[0] or "未连接" not in status[0]
@@ -288,11 +287,11 @@ class TestVSCodeStatus:
 
     def test_get_status_with_file(self):
         with MockVSCodeServer(port=19977) as server:
-            import prettycli.vscode as vscode_module
-            vscode_module._client = None
+            reset_client()
 
             client = get_client(port=19977)
             client.connect()
+            time.sleep(0.2)  # Wait for connection to be established
 
             # Show something to get a file path
             client.show_table(["A"], [[1]])

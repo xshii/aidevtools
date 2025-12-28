@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "A beautiful CLI framework for Python"
 requires-python = ">=3.8"
 dependencies = [
-    "typer>=0.9.0",
     "rich>=13.0.0",
     "InquirerPy>=0.3.4",
     "pyyaml>=6.0",
@@ -40,8 +39,8 @@ addopts = "-v --ignore=tests/test_interactive.py --ignore=tests/test_shell_sessi
 source = ["src/prettycli"]
 branch = true
 omit = [
-    "src/prettycli/vscode.py",  # Optional module, requires websocket
-    "src/prettycli/testing/*",  # Test utility framework
+    "src/prettycli/vscode/*",  # Optional module, requires websocket
+    "src/prettycli/shell.py",  # Shell session, requires terminal
     "src/prettycli/__main__.py",  # Entry point
     "src/prettycli/subui/layout/*",  # UI layout, requires terminal
 ]

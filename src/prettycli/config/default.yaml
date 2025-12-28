@@ -1,7 +1,7 @@
 # PrettyCLI 默认配置
 
-# Bash 命令前缀，设为空字符串则自动识别
-bash_prefix: "!"
+# Bash 命令前缀，空字符串表示自动识别（未注册的命令自动执行bash）
+bash_prefix: ""
 
 # 切换输出压缩/展开的快捷键
 toggle_key: "c-o"

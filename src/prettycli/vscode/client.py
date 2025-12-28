@@ -682,3 +682,15 @@ def show_excel(path: str) -> bool:
 def open_file(path: str) -> bool:
     """Open a file with the system default application."""
     return get_client().open_file(path)
+
+
+def is_extension_installed() -> bool:
+    """Check if VS Code extension is installed."""
+    # TODO: implement actual check
+    return True
+
+
+def install_extension() -> bool:
+    """Install VS Code extension."""
+    # TODO: implement actual installation
+    return True

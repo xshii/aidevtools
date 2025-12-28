@@ -1,12 +1,8 @@
 """Shell 会话测试示例 - 验证状态持久化"""
-from prettycli.testing import (
-    test,
-    ShellSession,
-    assert_equals,
-    assert_contains,
-    TestRunner,
-)
 from pathlib import Path
+
+from prettycli.shell import ShellSession
+from tests.framework import test, assert_equals, assert_contains, TestRunner
 
 
 @test("should persist working directory after cd")

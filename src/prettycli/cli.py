@@ -13,7 +13,7 @@ Example:
 """
 import inspect
 import shlex
-import subprocess
+import shutil
 import io
 import sys
 from pathlib import Path
@@ -28,8 +28,8 @@ from prompt_toolkit.styles import Style
 from prettycli.command import BaseCommand
 from prettycli.context import Context
 from prettycli.config import load_config
-from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar, QuoteWidget, WelcomeLayout
-from prettycli.testing.shell import ShellSession
+from prettycli.subui import RuntimeStatus, TopToolbar, BottomToolbar, QuoteWidget, WelcomeLayout
+from prettycli.shell import ShellSession
 from prettycli import ui
 from prettycli import vscode
 
@@ -161,7 +161,6 @@ class CLI:
         self._commands: Dict[str, BaseCommand] = {}
         self._config = load_config(config_path)
         self._runtime_status = RuntimeStatus()
-        self._echo_status = EchoStatus()
         self._shell: Optional[ShellSession] = None  # 持久化 shell 会话
 
         # 输出相关状态
@@ -368,14 +367,29 @@ class CLI:
             }),
         )
 
+        def get_prompt():
+            """动态生成包含顶部状态栏的提示符"""
+            width = shutil.get_terminal_size().columns
+            separator = "─" * width
+            toolbar = self._top_toolbar.render().value  # HTML字符串
+            return HTML(f"{toolbar}\n<style fg='ansibrightblack'>{separator}</style>\n{self.prompt}")
+
+        def clear_prompt_lines():
+            """清除prompt的3行（工具栏、分割线、输入行）"""
+            sys.stdout.write("\033[3A\033[J")  # 上移3行并清除到底部
+            sys.stdout.flush()
+
         while True:
             try:
-                # 显示顶部状态栏
-                ui.print(self._top_toolbar.render_rich())
-                line = session.prompt(self.prompt).strip()
+                line = session.prompt(get_prompt).strip()
 
                 if not line:
+                    clear_prompt_lines()
                     continue
+
+                # 清除prompt行并显示命令
+                clear_prompt_lines()
+                ui.print(f"[dim]{self.prompt}[/]{line}")
 
                 if line == "exit" or line == "quit":
                     break

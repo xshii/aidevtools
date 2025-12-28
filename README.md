@@ -34,36 +34,18 @@ pip install -e ".[dev]"
 
 ```python
 # app.py
-from prettycli import App, BaseCommand, Context
+from pathlib import Path
+from prettycli import CLI
 
-class HelloCommand(BaseCommand):
-    name = "hello"
-    description = "Say hello"
-
-    def execute(self, ctx: Context, name: str = "World"):
-        ctx.print(f"Hello, {name}!")
-
-app = App("myapp")
-app.register(HelloCommand())
-
-if __name__ == "__main__":
-    app.run()
+cli = CLI("myapp")
+cli.register(Path("commands/"))  # Register command directory
+cli.run()  # Starts interactive shell
 ```
 
 Run it:
 ```bash
-python app.py hello
-python app.py hello --name Alice
-```
-
-### 4. Interactive Mode
-
-```python
-from prettycli import CLI
-
-cli = CLI("myapp")
-cli.register(HelloCommand())
-cli.run()  # Starts interactive shell
+python -m prettycli
+python -m prettycli --project-root /path/to/project
 ```
 
 ## VS Code Extension
@@ -148,12 +130,12 @@ Use in commands:
 prettycli/
 ├── src/prettycli/       # Python package
 │   ├── __init__.py
-│   ├── app.py           # Application class
 │   ├── cli.py           # Interactive CLI
+│   ├── shell.py         # Persistent shell session
 │   ├── command.py       # Base command class
 │   ├── context.py       # Execution context
 │   ├── ui.py            # UI components
-│   ├── subui/           # Status bar, etc.
+│   ├── subui/           # Widgets and layouts
 │   └── vscode.py        # VS Code client API
 ├── vscode-extension/    # VS Code extension
 │   ├── src/
@@ -167,14 +149,10 @@ prettycli/
 └── tests/               # Test suite
 ```
 
-## Interactive Testing Framework
-
-PrettyCLI includes a testing framework for interactive CLI applications.
-
-### ShellSession - Persistent Shell
+## ShellSession - Persistent Shell
 
 ```python
-from prettycli.testing import ShellSession
+from prettycli import ShellSession
 
 with ShellSession() as sh:
     sh.run("cd /tmp")
@@ -186,40 +164,6 @@ with ShellSession() as sh:
     # Check exit codes
     result = sh.run("ls /nonexistent")
     print(result.exit_code)  # non-zero
-```
-
-### Mock Prompts
-
-```python
-from prettycli.testing import mock_prompt, test, TestRunner
-
-@test("should greet user")
-def test_greet():
-    with mock_prompt(["Alice"]):  # Simulate user input
-        result = my_prompt_function()
-        assert "Alice" in result
-
-# Run tests
-runner = TestRunner()
-runner.discover(Path("tests/"))
-runner.run()  # Returns 0 if all pass
-```
-
-### Assertions
-
-```python
-from prettycli.testing import assert_contains, assert_matches, assert_equals
-
-assert_contains(output, "success")
-assert_matches(output, r"ID: \d+")
-assert_equals(result.exit_code, 0)
-```
-
-### Interactive Mode
-
-```bash
-# Run with interactive debugging (pause on failure)
-python tests/test_shell_session.py -i
 ```
 
 ## Development

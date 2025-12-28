@@ -81,7 +81,7 @@ jobs:
 
       - name: Run interactive tests
         run: |
-          python tests/test_shell_session.py
+          PYTHONPATH=$PWD python tests/test_shell_session.py
 
   system-test:
     runs-on: ubuntu-latest

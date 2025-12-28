@@ -81,30 +81,48 @@ class BottomToolbar:
         return " <style fg='ansibrightblack'>|</style> ".join(parts)
 
     def _strip_html(self, text: str) -> str:
-        """移除 HTML 标签，计算纯文本长度"""
+        """移除 HTML 标签，返回纯文本"""
         extractor = _HTMLTextExtractor()
         extractor.feed(text)
         return extractor.get_text()
+
+    def _display_width(self, text: str) -> int:
+        """计算文本显示宽度（中文字符占2列）"""
+        width = 0
+        for char in text:
+            # CJK 字符范围
+            if '\u4e00' <= char <= '\u9fff' or \
+               '\u3000' <= char <= '\u303f' or \
+               '\uff00' <= char <= '\uffef':
+                width += 2
+            else:
+                width += 1
+        return width
 
     def render(self) -> HTML:
         """渲染为 prompt_toolkit HTML"""
         left = self._render_providers(self._left)
         right = self._render_providers(self._right)
 
+        # 分割线
+        width = shutil.get_terminal_size().columns
+        separator = f'<style fg="ansibrightblack">{"─" * width}</style>'
+
         if left and right:
-            # 计算需要填充的空格数
-            left_len = len(self._strip_html(left))
-            right_len = len(self._strip_html(right))
-            width = shutil.get_terminal_size().columns
-            space_count = max(1, width - left_len - right_len)
+            # 计算需要填充的空格数（中文字符占2列）
+            left_len = self._display_width(self._strip_html(left))
+            right_len = self._display_width(self._strip_html(right))
+            space_count = max(1, width - left_len - right_len - 2)
             spaces = ' ' * space_count
-            return HTML(f"<i>{left}</i>{spaces}{right}")
+            content = f"<i>{left}</i>{spaces}{right}"
         elif left:
-            return HTML(f"<i>{left}</i>")
+            content = f"<i>{left}</i>"
         elif right:
-            return HTML(f"{right}")
+            content = f"{right}"
         else:
-            return HTML("")
+            content = ""
+
+        return HTML(f"{separator}\n{content}")
 
     def __call__(self):
         """prompt_toolkit toolbar 回调"""

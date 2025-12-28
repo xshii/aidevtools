@@ -22,14 +22,14 @@ class TestCLIInit:
 
     def test_default_config(self):
         cli = CLI("test")
-        assert cli._config["bash_prefix"] == "!"
+        assert cli._config["bash_prefix"] == ""
         assert cli._config["toggle_key"] == "c-o"
 
 
 class TestCLIConfigLoad:
     def test_load_config_no_file(self, tmp_path):
         cli = CLI("test", config_path=tmp_path / "nonexistent.yaml")
-        assert cli._config["bash_prefix"] == "!"
+        assert cli._config["bash_prefix"] == ""
 
     def test_load_config_with_file(self, tmp_path):
         config_file = tmp_path / "config.yaml"
@@ -41,7 +41,7 @@ class TestCLIConfigLoad:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("")
         cli = CLI("test", config_path=config_file)
-        assert cli._config["bash_prefix"] == "!"
+        assert cli._config["bash_prefix"] == ""
 
 
 class TestCLIParseArgs:
