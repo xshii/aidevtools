@@ -23,11 +23,12 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.styles import Style
 
 from prettycli.command import BaseCommand
 from prettycli.context import Context
 from prettycli.config import load_config
-from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar, QuoteWidget
+from prettycli.subui import RuntimeStatus, EchoStatus, TopToolbar, BottomToolbar, QuoteWidget, WelcomeLayout
 from prettycli.testing.shell import ShellSession
 from prettycli import ui
 from prettycli import vscode
@@ -137,7 +138,13 @@ class CLI:
         >>> cli.run()
     """
 
-    def __init__(self, name: str, prompt: str = "> ", config_path: Optional[Path] = None):
+    def __init__(
+        self,
+        name: str,
+        prompt: str = "> ",
+        config_path: Optional[Path] = None,
+        project_root: Optional[Path] = None,
+    ):
         """
         Initialize the interactive CLI.
 
@@ -145,9 +152,11 @@ class CLI:
             name: Application name
             prompt: Input prompt string
             config_path: Path to YAML configuration file
+            project_root: Project root directory (defaults to cwd)
         """
         self.name = name
         self.prompt = prompt
+        self.project_root = (project_root or Path.cwd()).resolve()
         self.ctx = Context()
         self._commands: Dict[str, BaseCommand] = {}
         self._config = load_config(config_path)
@@ -168,6 +177,9 @@ class CLI:
         self._bottom_toolbar = BottomToolbar()
         self._bottom_toolbar.add_left(self._quote_widget)
         self._bottom_toolbar.add_right(vscode.get_status)
+
+        # 欢迎页
+        self._welcome_layout = WelcomeLayout(name, project_root=self.project_root)
 
     def register(self, path: Path):
         """注册命令目录"""
@@ -323,9 +335,15 @@ class CLI:
         - Status bar display
         - Keyboard shortcuts (Ctrl+O to toggle output)
         """
-        ui.print(f"[bold]{self.name}[/] interactive CLI")
-        ui.print("Type 'help' for commands, 'exit' to quit")
-        ui.print("[dim]Tab for completion[/]\n")
+        # 自动安装 VS Code 扩展（只在新安装时提示）
+        if not vscode.is_extension_installed():
+            ui.info("正在安装 VS Code 扩展...")
+            if vscode.install_extension():
+                ui.success("VS Code 扩展已安装，请重新加载 VS Code (Cmd+Shift+P → Reload Window)")
+            else:
+                ui.warn("VS Code 扩展安装失败，部分功能不可用")
+
+        self._welcome_layout.show()
 
         bash_prefix = self._config.get("bash_prefix", "!")
         toggle_key = self._config.get("toggle_key", "c-o")
@@ -345,6 +363,9 @@ class CLI:
             completer=completer,
             complete_while_typing=False,  # Only complete on Tab
             bottom_toolbar=self._bottom_toolbar,  # 底部每日一句
+            style=Style.from_dict({
+                'bottom-toolbar': 'noreverse',  # 去掉背景色
+            }),
         )
 
         while True:
@@ -384,6 +405,7 @@ class CLI:
 
                 self._runtime_status.show()
                 ui.print()
+                self._quote_widget.next()  # 切换下一条每日一句
 
             except KeyboardInterrupt:
                 ui.print("\nUse 'exit' to quit")
