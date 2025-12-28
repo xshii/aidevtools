@@ -18,7 +18,7 @@ class TestCLIInit:
     def test_default_prompt(self, tmp_path):
         cli = CLI("test", project_root=tmp_path)
         prompt = cli._get_prompt_text()
-        assert prompt == "~ $ "
+        assert prompt == "test $ "
 
     def test_prompt_with_subdirectory(self, tmp_path):
         subdir = tmp_path / "src" / "app"
@@ -29,15 +29,40 @@ class TestCLIInit:
         cli._shell.is_alive = True
         cli._shell.pwd.return_value = str(subdir)
         prompt = cli._get_prompt_text()
-        assert prompt == "~/src/app $ "
+        assert prompt == "test/src/app $ "
 
-    def test_prompt_outside_project(self, tmp_path):
+    def test_prompt_parent_directory(self, tmp_path):
+        """Test prompt when cd to parent directory of project root."""
         cli = CLI("test", project_root=tmp_path)
         cli._shell = MagicMock()
         cli._shell.is_alive = True
-        cli._shell.pwd.return_value = "/tmp"
+        # Go to parent directory
+        cli._shell.pwd.return_value = str(tmp_path.parent)
         prompt = cli._get_prompt_text()
-        assert prompt == "/tmp $ "
+        assert prompt == ".. $ "
+
+    def test_prompt_grandparent_directory(self, tmp_path):
+        """Test prompt when cd to grandparent directory of project root."""
+        cli = CLI("test", project_root=tmp_path)
+        cli._shell = MagicMock()
+        cli._shell.is_alive = True
+        # Go to grandparent directory
+        cli._shell.pwd.return_value = str(tmp_path.parent.parent)
+        prompt = cli._get_prompt_text()
+        assert prompt == "../.. $ "
+
+    def test_prompt_unrelated_path(self, tmp_path):
+        """Test prompt when cd to a path unrelated to project root."""
+        # Create a separate directory that's not an ancestor of tmp_path
+        import tempfile
+        with tempfile.TemporaryDirectory() as other_dir:
+            cli = CLI("test", project_root=tmp_path)
+            cli._shell = MagicMock()
+            cli._shell.is_alive = True
+            cli._shell.pwd.return_value = other_dir
+            prompt = cli._get_prompt_text()
+            # Should show absolute path for unrelated directories
+            assert prompt == f"{other_dir} $ "
 
     def test_default_config(self):
         cli = CLI("test")

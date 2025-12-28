@@ -219,16 +219,24 @@ class CLI:
             try:
                 rel_path = cwd.relative_to(self.project_root)
                 if str(rel_path) == ".":
-                    path_str = "~"
+                    path_str = self.name
                 else:
-                    path_str = f"~/{rel_path}"
+                    path_str = f"{self.name}/{rel_path}"
             except ValueError:
-                # cwd 不在 project_root 下，显示绝对路径
-                path_str = str(cwd)
+                # cwd 不在 project_root 下，计算相对路径用 .. 表示
+                try:
+                    # 计算从 project_root 到 cwd 的相对路径
+                    rel_from_root = self.project_root.relative_to(cwd)
+                    # 每一层用 .. 表示
+                    dots = "/".join(".." for _ in rel_from_root.parts)
+                    path_str = dots if dots else self.name
+                except ValueError:
+                    # 无法计算相对路径，使用绝对路径
+                    path_str = str(cwd)
 
             return f"{path_str} $ "
         except Exception:
-            return "~ $ "
+            return f"{self.name} $ "
 
     def _parse_args(self, args_str: str) -> Dict[str, str]:
         """解析参数"""
