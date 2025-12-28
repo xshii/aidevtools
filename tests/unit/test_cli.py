@@ -13,12 +13,31 @@ class TestCLIInit:
     def test_default_values(self):
         cli = CLI("test")
         assert cli.name == "test"
-        assert cli.prompt == "> "
         assert cli._commands == {}
 
-    def test_custom_prompt(self):
-        cli = CLI("test", prompt=">>> ")
-        assert cli.prompt == ">>> "
+    def test_default_prompt(self, tmp_path):
+        cli = CLI("test", project_root=tmp_path)
+        prompt = cli._get_prompt_text()
+        assert prompt == "~ $ "
+
+    def test_prompt_with_subdirectory(self, tmp_path):
+        subdir = tmp_path / "src" / "app"
+        subdir.mkdir(parents=True)
+        cli = CLI("test", project_root=tmp_path)
+        # Simulate shell in subdirectory
+        cli._shell = MagicMock()
+        cli._shell.is_alive = True
+        cli._shell.pwd.return_value = str(subdir)
+        prompt = cli._get_prompt_text()
+        assert prompt == "~/src/app $ "
+
+    def test_prompt_outside_project(self, tmp_path):
+        cli = CLI("test", project_root=tmp_path)
+        cli._shell = MagicMock()
+        cli._shell.is_alive = True
+        cli._shell.pwd.return_value = "/tmp"
+        prompt = cli._get_prompt_text()
+        assert prompt == "/tmp $ "
 
     def test_default_config(self):
         cli = CLI("test")

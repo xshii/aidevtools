@@ -141,7 +141,6 @@ class CLI:
     def __init__(
         self,
         name: str,
-        prompt: str = "> ",
         config_path: Optional[Path] = None,
         project_root: Optional[Path] = None,
     ):
@@ -150,12 +149,10 @@ class CLI:
 
         Args:
             name: Application name
-            prompt: Input prompt string
             config_path: Path to YAML configuration file
             project_root: Project root directory (defaults to cwd)
         """
         self.name = name
-        self.prompt = prompt
         self.project_root = (project_root or Path.cwd()).resolve()
         self.ctx = Context()
         self._commands: Dict[str, BaseCommand] = {}
@@ -209,6 +206,29 @@ class CLI:
             current_file = vscode.get_client().current_file or ""
             line = line.replace(artifact_var, current_file)
         return line
+
+    def _get_prompt_text(self) -> str:
+        """生成 bash 风格的路径提示符"""
+        try:
+            if self._shell and self._shell.is_alive:
+                cwd = Path(self._shell.pwd())
+            else:
+                cwd = self.project_root
+
+            # 计算相对于 project_root 的路径
+            try:
+                rel_path = cwd.relative_to(self.project_root)
+                if str(rel_path) == ".":
+                    path_str = "~"
+                else:
+                    path_str = f"~/{rel_path}"
+            except ValueError:
+                # cwd 不在 project_root 下，显示绝对路径
+                path_str = str(cwd)
+
+            return f"{path_str} $ "
+        except Exception:
+            return "~ $ "
 
     def _parse_args(self, args_str: str) -> Dict[str, str]:
         """解析参数"""
@@ -372,7 +392,8 @@ class CLI:
             width = shutil.get_terminal_size().columns
             separator = "─" * width
             toolbar = self._top_toolbar.render().value  # HTML字符串
-            return HTML(f"{toolbar}\n<style fg='ansibrightblack'>{separator}</style>\n{self.prompt}")
+            prompt_text = self._get_prompt_text()
+            return HTML(f"{toolbar}\n<style fg='ansibrightblack'>{separator}</style>\n{prompt_text}")
 
         def clear_prompt_lines():
             """清除prompt的3行（工具栏、分割线、输入行）"""
@@ -389,7 +410,7 @@ class CLI:
 
                 # 清除prompt行并显示命令
                 clear_prompt_lines()
-                ui.print(f"[dim]{self.prompt}[/]{line}")
+                ui.print(f"[dim]{self._get_prompt_text()}[/]{line}")
 
                 if line == "exit" or line == "quit":
                     break
