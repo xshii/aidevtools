@@ -1,0 +1,55 @@
+{
+  "name": "prettycli",
+  "displayName": "prettycli",
+  "description": "Artifact rendering API for prettycli",
+  "version": "0.1.0",
+  "publisher": "prettycli",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "prettycli.showArtifact",
+        "title": "Show Artifact"
+      }
+    ],
+    "configuration": {
+      "title": "prettycli",
+      "properties": {
+        "prettycli.serverPort": {
+          "type": "number",
+          "default": 19960,
+          "description": "Port for prettycli API server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "jest --coverage",
+    "test:ci": "jest --coverage --coverageReporters=json-summary --coverageReporters=text"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  }
+}
