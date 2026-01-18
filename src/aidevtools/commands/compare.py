@@ -2,9 +2,9 @@
 import numpy as np
 from prettycli import command
 
-from aidevtools.tools.compare.diff import compare_full, compare_block, calc_qsnr
-from aidevtools.tools.compare.report import gen_report, gen_heatmap_svg
+from aidevtools.tools.compare.diff import compare_full
 from aidevtools.tools.compare.runner import run_compare, archive
+from aidevtools.trace.tracer import dump, gen_csv, clear
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
 
@@ -30,17 +30,6 @@ def cmd_compare(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5")
         mode_filter=mode or None,
         atol=float(atol),
     )
-    return 0
-
-
-@command("compare-archive", help="打包比数结果")
-def cmd_archive(csv: str = ""):
-    """打包比数结果为 zip"""
-    if not csv:
-        logger.error("请指定 csv 文件: compare-archive --csv=xxx.csv")
-        return 1
-
-    archive(csv)
     return 0
 
 
@@ -71,3 +60,49 @@ def cmd_quick(golden: str = "", result: str = "", dtype: str = "float32"):
     print(f"cosine: {diff.cosine:.6f}")
 
     return 0 if diff.passed else 1
+
+
+@command("compare-dump", help="导出 Golden 数据")
+def cmd_dump(output: str = "./workspace", format: str = "raw"):
+    """
+    导出 @trace 记录的 Golden 数据
+
+    Args:
+        output: 输出目录
+        format: 数据格式 (raw/numpy)
+    """
+    dump(output, format=format)
+    return 0
+
+
+@command("compare-csv", help="生成 compare.csv")
+def cmd_csv(output: str = "./workspace", model: str = "model"):
+    """
+    生成 compare.csv 配置表
+
+    Args:
+        output: 输出目录
+        model: 模型名称
+    """
+    csv_path = gen_csv(output, model)
+    print(f"生成: {csv_path}")
+    return 0
+
+
+@command("compare-clear", help="清空 Golden 记录")
+def cmd_clear():
+    """清空 @trace 记录的 Golden 数据"""
+    clear()
+    logger.info("Golden 记录已清空")
+    return 0
+
+
+@command("compare-archive", help="打包比数结果")
+def cmd_archive(csv: str = ""):
+    """打包比数结果为 zip"""
+    if not csv:
+        logger.error("请指定 csv 文件: compare-archive --csv=xxx.csv")
+        return 1
+
+    archive(csv)
+    return 0
