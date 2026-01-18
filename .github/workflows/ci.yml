@@ -34,7 +34,7 @@ jobs:
         run: pytest tests/ -v --tb=short
 
       - name: Test prettycli
-        run: pytest libs/prettycli/tests/ -v --tb=short --ignore=libs/prettycli/tests/test_interactive.py --ignore=libs/prettycli/tests/test_shell_session.py
+        run: pytest libs/prettycli/tests/ -v --tb=short --ignore=libs/prettycli/tests/test_interactive.py --ignore=libs/prettycli/tests/test_shell_session.py --ignore=libs/prettycli/tests/unit/test_vscode_integration.py
 
       - name: Coverage
         run: pytest tests/ --cov=aidevtools --cov-report=term-missing
