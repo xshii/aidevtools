@@ -226,59 +226,6 @@ def update_compare_results(
         if "note" in col_map and "note" in res:
             ws.cell(row=row, column=col_map["note"], value=res["note"])
 
-    # 添加汇总统计
-    _add_summary_sheet(wb, results)
-
     wb.save(xlsx_path)
     logger.info(f"更新比对结果: {xlsx_path}")
     return xlsx_path
-
-
-def _add_summary_sheet(wb: "Workbook", results: List[Dict[str, Any]]):
-    """
-    添加汇总统计 sheet
-
-    简洁版：PASS/FAIL 计数 + 通过率
-    """
-    # 统计
-    pass_count = sum(1 for r in results if r.get("status") == "PASS")
-    fail_count = sum(1 for r in results if r.get("status") == "FAIL")
-    total = len(results)
-    pass_rate = (pass_count / total * 100) if total > 0 else 0
-
-    # 创建或更新 summary sheet
-    if "summary" in wb.sheetnames:
-        ws = wb["summary"]
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.value = None
-    else:
-        ws = wb.create_sheet("summary", 0)
-
-    # 样式
-    pass_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    fail_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-
-    # 汇总信息
-    ws.cell(row=1, column=1, value="比对结果汇总").font = Font(bold=True, size=14)
-
-    ws.cell(row=3, column=1, value="PASS")
-    ws.cell(row=3, column=2, value=pass_count)
-    ws.cell(row=3, column=1).fill = pass_fill
-    ws.cell(row=3, column=2).fill = pass_fill
-
-    ws.cell(row=4, column=1, value="FAIL")
-    ws.cell(row=4, column=2, value=fail_count)
-    ws.cell(row=4, column=1).fill = fail_fill
-    ws.cell(row=4, column=2).fill = fail_fill
-
-    ws.cell(row=5, column=1, value="总计")
-    ws.cell(row=5, column=2, value=total)
-
-    ws.cell(row=7, column=1, value="通过率").font = Font(bold=True)
-    rate_cell = ws.cell(row=7, column=2, value=f"{pass_rate:.1f}%")
-    rate_cell.font = Font(bold=True)
-    rate_cell.fill = pass_fill if pass_rate >= 90 else fail_fill
-
-    ws.column_dimensions['A'].width = 12
-    ws.column_dimensions['B'].width = 10
