@@ -2,6 +2,7 @@
 
 从 xlsx 配置运行比对流程。
 """
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import numpy as np
@@ -15,6 +16,95 @@ except ImportError:
 from aidevtools.core.log import logger
 from aidevtools.xlsx.import_ import parse_xlsx, OpConfig
 from aidevtools.xlsx.export import update_compare_results
+
+
+def _run_sim_cmd(
+    sim_cmd: str,
+    op_id: int,
+    op_name: str,
+    output_dir: Path,
+    name: str,
+    has_input: bool = True,
+    has_weight: bool = False,
+) -> Optional[np.ndarray]:
+    """
+    执行仿真命令
+
+    Args:
+        sim_cmd: 仿真命令模板，支持占位符
+        op_id: 算子 ID
+        op_name: 算子名称
+        output_dir: 输出目录
+        name: 记录名称 (如 "linear_0")
+        has_input: 是否有输入文件
+        has_weight: 是否有权重文件
+
+    Returns:
+        仿真结果数组，失败返回 None
+
+    占位符:
+        {golden_bin} - golden 文件路径
+        {result_bin} - result 文件路径
+        {input_bin} - 输入文件路径
+        {weight_bin} - 权重文件路径
+        {id} - 算子 ID
+        {op_name} - 算子名称
+    """
+    if not sim_cmd or not sim_cmd.strip():
+        return None
+
+    # 构建路径
+    golden_bin = str(output_dir / f"{name}_golden.bin")
+    result_bin = str(output_dir / f"{name}_result.bin")
+    input_bin = str(output_dir / f"{name}_input.bin") if has_input else ""
+    weight_bin = str(output_dir / f"{name}_weight.bin") if has_weight else ""
+
+    # 替换占位符
+    cmd = sim_cmd.format(
+        golden_bin=golden_bin,
+        result_bin=result_bin,
+        input_bin=input_bin,
+        weight_bin=weight_bin,
+        id=op_id,
+        op_name=op_name,
+    )
+
+    logger.info(f"执行仿真命令: {cmd}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 分钟超时
+        )
+
+        if result.returncode != 0:
+            logger.error(f"仿真命令失败 (code={result.returncode}): {result.stderr}")
+            return None
+
+        if result.stdout:
+            logger.debug(f"仿真输出: {result.stdout[:200]}")
+
+        # 检查 result_bin 是否生成
+        result_path = Path(result_bin)
+        if result_path.exists():
+            # 读取结果
+            from aidevtools.formats.base import load as load_data
+            data = load_data(result_bin)
+            logger.info(f"仿真结果: {result_bin}, shape={data.shape}")
+            return data
+        else:
+            logger.warn(f"仿真命令执行完成，但未生成 result 文件: {result_bin}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"仿真命令超时 (>300s): {cmd}")
+        return None
+    except Exception as e:
+        logger.error(f"仿真命令异常: {e}")
+        return None
 
 
 def _check_openpyxl():
@@ -101,6 +191,36 @@ def run_xlsx(
 
     # 导出数据
     dump(output_dir, format=format)
+
+    # 构建 sim_cmd 映射表 (通过 op_name 索引)
+    sim_cmd_map = {}
+    for config in op_configs:
+        if config.sim_cmd:
+            sim_cmd_map[config.op_name] = config
+
+    # 执行仿真命令（如果配置了 sim_cmd）
+    for record in records:
+        op_type = record.get("op")
+        name = record.get("name", "")
+
+        if op_type in sim_cmd_map and record.get("result") is None:
+            config = sim_cmd_map[op_type]
+            has_input = record.get("input") is not None
+            has_weight = record.get("weight") is not None
+
+            sim_result = _run_sim_cmd(
+                sim_cmd=config.sim_cmd,
+                op_id=config.id,
+                op_name=config.op_name,
+                output_dir=out_path,
+                name=name,
+                has_input=has_input,
+                has_weight=has_weight,
+            )
+
+            if sim_result is not None:
+                record["result"] = sim_result
+                logger.info(f"仿真完成: {name}, shape={sim_result.shape}")
 
     # 先导出记录到 xlsx（创建 compare 行）
     from aidevtools.xlsx.export import export_xlsx

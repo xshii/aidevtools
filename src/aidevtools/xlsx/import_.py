@@ -31,6 +31,7 @@ class OpConfig:
     qtype: str
     skip: bool
     note: str
+    sim_cmd: str = ""  # 仿真命令，支持占位符: {golden_bin}, {result_bin}, {input_bin}, {weight_bin}, {id}, {op_name}
 
     def parse_depends(self) -> Dict[str, List[int]]:
         """
@@ -155,6 +156,7 @@ def parse_xlsx(xlsx_path: str) -> Tuple[List[str], List[OpConfig]]:
                 qtype=str(row_dict.get("qtype", "") or ""),
                 skip=skip,
                 note=str(row_dict.get("note", "") or ""),
+                sim_cmd=str(row_dict.get("sim_cmd", "") or ""),
             )
             op_configs.append(config)
 

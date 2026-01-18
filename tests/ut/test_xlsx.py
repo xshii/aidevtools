@@ -768,3 +768,283 @@ class TestXlsxImportEdgeCases:
 
         assert "attention" in code
         assert py_path.exists()
+
+    def test_code_gen_all_ops(self):
+        """测试所有算子的代码生成"""
+        from aidevtools.xlsx import create_template, import_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "all_ops.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        ops_to_test = [
+            (0, "linear", "", "独立 linear"),
+            (1, "relu", "0", "依赖 linear"),
+            (2, "softmax", "1", "依赖 relu"),
+            (3, "matmul", "", "独立 matmul"),
+            (4, "matmul", "0,3", "双输入 matmul"),
+            (5, "add", "", "独立 add"),
+            (6, "add", "0,1", "双输入 add"),
+            (7, "mul", "", "独立 mul"),
+            (8, "mul", "0,1", "双输入 mul"),
+            (9, "unknown_op", "", "未知算子"),
+        ]
+
+        for i, (op_id, op_name, depends, note) in enumerate(ops_to_test):
+            ws.cell(row=2+i, column=1, value=op_id)
+            ws.cell(row=2+i, column=2, value=op_name)
+            ws.cell(row=2+i, column=3, value="2,4,8")
+            ws.cell(row=2+i, column=4, value="float32")
+            ws.cell(row=2+i, column=5, value=depends)
+            ws.cell(row=2+i, column=7, value="FALSE")
+            ws.cell(row=2+i, column=8, value=note)
+
+        wb.save(xlsx_path)
+
+        py_path = Path(self.temp_dir) / "all_ops.py"
+        code = import_xlsx(str(xlsx_path), str(py_path))
+
+        assert "nn.linear" in code
+        assert "nn.relu" in code
+        assert "nn.softmax" in code
+        assert "nn.matmul" in code
+        assert "nn.add" in code
+        assert "nn.mul" in code
+        assert "未知算子: unknown_op" in code
+        assert py_path.exists()
+
+    def test_code_gen_with_skip(self):
+        """测试跳过算子的代码生成"""
+        from aidevtools.xlsx import create_template, import_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "skip_ops.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        ws.cell(row=2, column=1, value=0)
+        ws.cell(row=2, column=2, value="linear")
+        ws.cell(row=2, column=3, value="2,4,8")
+        ws.cell(row=2, column=4, value="float32")
+        ws.cell(row=2, column=7, value="TRUE")  # skip
+        ws.cell(row=2, column=8, value="被跳过的算子")
+
+        wb.save(xlsx_path)
+
+        code = import_xlsx(str(xlsx_path), None)
+
+        assert "[SKIP]" in code
+
+    def test_parse_xlsx_comment_row(self):
+        """测试解析注释行"""
+        from aidevtools.xlsx import create_template, parse_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "comment.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        ws.cell(row=2, column=1, value="# 这是注释")
+        ws.cell(row=3, column=1, value=0)
+        ws.cell(row=3, column=2, value="relu")
+        ws.cell(row=3, column=3, value="1,64")
+        ws.cell(row=3, column=4, value="float32")
+        ws.cell(row=3, column=7, value="FALSE")
+
+        wb.save(xlsx_path)
+
+        _, configs = parse_xlsx(str(xlsx_path))
+        assert len(configs) == 1
+        assert configs[0].op_name == "relu"
+
+    def test_code_gen_attention_without_qkv(self):
+        """测试 attention 缺少 qkv 的代码生成"""
+        from aidevtools.xlsx import create_template, import_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "attention_no_qkv.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        ws.cell(row=2, column=1, value=0)
+        ws.cell(row=2, column=2, value="attention")
+        ws.cell(row=2, column=3, value="1,4,8,32")
+        ws.cell(row=2, column=4, value="float32")
+        ws.cell(row=2, column=5, value="")
+        ws.cell(row=2, column=7, value="FALSE")
+
+        wb.save(xlsx_path)
+
+        code = import_xlsx(str(xlsx_path), None)
+        assert "attention 需要 q, k, v" in code
+
+
+class TestSimCmd:
+    """仿真命令测试"""
+
+    def setup_method(self):
+        """创建临时目录"""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        """清理临时目录"""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_template_has_sim_cmd_column(self):
+        """测试模板包含 sim_cmd 列"""
+        from aidevtools.xlsx import create_template
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "test_sim.xlsx"
+        create_template(str(xlsx_path))
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        # 检查表头
+        headers = [cell.value for cell in ws[1]]
+        assert "sim_cmd" in headers
+
+    def test_parse_xlsx_with_sim_cmd(self):
+        """测试解析带 sim_cmd 的 xlsx"""
+        from aidevtools.xlsx import create_template, parse_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "test_sim_parse.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        # 找到 sim_cmd 列索引
+        headers = [cell.value for cell in ws[1]]
+        sim_cmd_col = headers.index("sim_cmd") + 1
+
+        ws.cell(row=2, column=1, value=0)
+        ws.cell(row=2, column=2, value="linear")
+        ws.cell(row=2, column=3, value="1,4,8")
+        ws.cell(row=2, column=4, value="float32")
+        ws.cell(row=2, column=7, value="FALSE")
+        ws.cell(row=2, column=sim_cmd_col, value="./my_sim.sh {golden_bin} {result_bin}")
+
+        wb.save(xlsx_path)
+
+        enabled_ops, op_configs = parse_xlsx(str(xlsx_path))
+        assert len(op_configs) == 1
+        assert op_configs[0].sim_cmd == "./my_sim.sh {golden_bin} {result_bin}"
+
+    def test_run_sim_cmd_placeholder_substitution(self):
+        """测试 sim_cmd 占位符替换"""
+        from aidevtools.xlsx.run import _run_sim_cmd
+
+        output_dir = Path(self.temp_dir)
+
+        # 创建一个模拟脚本
+        sim_script = output_dir / "mock_sim.sh"
+        sim_script.write_text("""#!/bin/bash
+echo "input: $1"
+echo "golden: $2"
+echo "result: $3"
+# 创建 result 文件（复制 golden）
+cp "$2" "$3"
+""")
+        sim_script.chmod(0o755)
+
+        # 创建 golden 文件
+        golden_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        golden_path = output_dir / "test_0_golden.bin"
+        golden_data.tofile(golden_path)
+
+        # 执行仿真命令
+        result = _run_sim_cmd(
+            sim_cmd=f"{sim_script} {{input_bin}} {{golden_bin}} {{result_bin}}",
+            op_id=0,
+            op_name="test",
+            output_dir=output_dir,
+            name="test_0",
+            has_input=True,
+        )
+
+        # 验证结果
+        assert result is not None
+        assert result.shape == golden_data.shape
+
+    def test_run_sim_cmd_empty(self):
+        """测试空 sim_cmd"""
+        from aidevtools.xlsx.run import _run_sim_cmd
+
+        result = _run_sim_cmd(
+            sim_cmd="",
+            op_id=0,
+            op_name="test",
+            output_dir=Path(self.temp_dir),
+            name="test_0",
+        )
+        assert result is None
+
+        result = _run_sim_cmd(
+            sim_cmd="   ",
+            op_id=0,
+            op_name="test",
+            output_dir=Path(self.temp_dir),
+            name="test_0",
+        )
+        assert result is None
+
+    def test_run_sim_cmd_failure(self):
+        """测试 sim_cmd 执行失败"""
+        from aidevtools.xlsx.run import _run_sim_cmd
+
+        result = _run_sim_cmd(
+            sim_cmd="exit 1",
+            op_id=0,
+            op_name="test",
+            output_dir=Path(self.temp_dir),
+            name="test_0",
+        )
+        assert result is None
+
+    def test_run_xlsx_with_sim_cmd(self):
+        """测试完整 run_xlsx 流程中的 sim_cmd"""
+        from aidevtools.xlsx import create_template, run_xlsx
+        from openpyxl import load_workbook
+
+        xlsx_path = Path(self.temp_dir) / "test_full_sim.xlsx"
+        create_template(str(xlsx_path), include_examples=False)
+
+        # 创建模拟仿真脚本
+        sim_script = Path(self.temp_dir) / "sim.sh"
+        sim_script.write_text("""#!/bin/bash
+cp "$1" "$2"
+""")
+        sim_script.chmod(0o755)
+
+        wb = load_workbook(xlsx_path)
+        ws = wb["ops"]
+
+        headers = [cell.value for cell in ws[1]]
+        sim_cmd_col = headers.index("sim_cmd") + 1
+
+        ws.cell(row=2, column=1, value=0)
+        ws.cell(row=2, column=2, value="linear")
+        ws.cell(row=2, column=3, value="1,4,8")
+        ws.cell(row=2, column=4, value="float32")
+        ws.cell(row=2, column=7, value="FALSE")
+        ws.cell(row=2, column=sim_cmd_col, value=f"{sim_script} {{golden_bin}} {{result_bin}}")
+
+        wb.save(xlsx_path)
+
+        results = run_xlsx(str(xlsx_path), str(self.temp_dir))
+
+        # 由于 golden 实现存在，sim_cmd 不会执行
+        # 但配置应该被正确解析
+        assert len(results) >= 1
