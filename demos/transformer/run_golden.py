@@ -17,14 +17,19 @@ Transformer Golden 数据生成示例
        > compare 3 --csv=./workspace/transformer_compare.csv
 """
 import numpy as np
+import sys
+from pathlib import Path
+
+# 添加 workspace 到 path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from aidevtools.trace import trace, dump, gen_csv, clear
 
-# 导入算子和模型
-from aidevtools.examples.transformer.operators import (
+# 导入本地算子和模型
+from transformer.operators import (
     linear, relu, gelu, softmax_safe, layernorm, attention, embedding
 )
-from aidevtools.examples.transformer.model import (
+from transformer.model import (
     TransformerConfig, init_weights,
     self_attention_block, ffn_block, transformer_layer, transformer_forward
 )

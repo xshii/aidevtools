@@ -8,12 +8,14 @@ from aidevtools.formats.quantize import list_quantize
 from aidevtools.trace.tracer import dump, gen_csv, clear
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
+from aidevtools.ops.base import get_records
 
 
 @command("compare", help="比数工具")
 def cmd_compare(
     action: str = "",
     csv: str = "",
+    xlsx: str = "",
     output: str = "./workspace",
     model: str = "model",
     format: str = "raw",
@@ -26,6 +28,7 @@ def cmd_compare(
     shape: str = "",
     fuzzy: str = "false",
     target_dtype: str = "",
+    ops: str = "",
 ):
     """
     比数工具
@@ -45,9 +48,17 @@ def cmd_compare(
         t/convert  类型转换导出
         q/qtypes   列出支持的量化类型
 
+    xlsx 子命令:
+        xlsx template   生成 xlsx 空模板
+        xlsx export     从 trace 导出到 xlsx
+        xlsx import     从 xlsx 生成 Python 代码
+        xlsx run        从 xlsx 运行比数
+
     参数:
         --fuzzy=true       启用模糊比对模式
         --target_dtype     转换目标类型 (float16/bfloat16/...)
+        --xlsx=xxx.xlsx    指定 xlsx 文件
+        --ops=linear,relu  限定算子列表（xlsx template 用）
 
     示例:
         compare                              一键式流程
@@ -58,6 +69,13 @@ def cmd_compare(
         compare f --golden=a.bin --result=b.bin --dtype=float32   模糊比对
         compare t --golden=a.bin --output=a_fp16.bin --target_dtype=float16   类型转换
         compare q                            列出量化类型
+
+    xlsx 示例:
+        compare xlsx template --output=config.xlsx              生成空模板
+        compare xlsx template --output=config.xlsx --ops=linear,relu  限定算子
+        compare xlsx export --xlsx=config.xlsx                  从 trace 导出
+        compare xlsx import --xlsx=config.xlsx --output=gen.py  生成 Python
+        compare xlsx run --xlsx=config.xlsx                     运行比数
 
     模糊比对流程 (代码方式):
         from aidevtools.tools.compare.fuzzy import create_fuzzy_case
@@ -187,7 +205,7 @@ def cmd_compare(
         # 使用量化框架转换
         try:
             converted, meta = quantize(data, target_dtype)
-        except NotImplementedError as e:
+        except (NotImplementedError, ValueError) as e:
             logger.error(str(e))
             return 1
 
@@ -207,7 +225,82 @@ def cmd_compare(
             print(f"  - {qtype}")
         return 0
 
+    elif action == "xlsx":
+        # xlsx 子命令，需要第二个参数
+        return _handle_xlsx(csv, xlsx, output, model, format, ops)
+
     else:
         logger.error(f"未知子命令: {action}")
-        print("可用子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, s/single, f/fuzzy, t/convert, q/qtypes")
+        print("可用子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, s/single, f/fuzzy, t/convert, q/qtypes, xlsx")
+        return 1
+
+
+def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, format: str, ops_str: str) -> int:
+    """处理 xlsx 子命令"""
+    from aidevtools.xlsx import create_template, export_xlsx, import_xlsx, run_xlsx
+    from aidevtools.xlsx.op_registry import list_ops
+
+    if subaction in ("template", "t"):
+        # 生成空模板
+        out_path = xlsx_path if xlsx_path else f"{output}/{model}_config.xlsx"
+        ops_list = [o.strip() for o in ops_str.split(",") if o.strip()] if ops_str else None
+        create_template(out_path, ops=ops_list)
+        print(f"生成 xlsx 模板: {out_path}")
+        if ops_list:
+            print(f"限定算子: {', '.join(ops_list)}")
+        else:
+            print(f"可用算子: {', '.join(list_ops())}")
+        return 0
+
+    elif subaction in ("export", "e"):
+        # 从 trace 导出
+        if not xlsx_path:
+            xlsx_path = f"{output}/{model}_config.xlsx"
+        records = get_records()
+        if not records:
+            logger.warn("没有 trace 记录，请先运行算子")
+            # 仍然创建空模板
+            create_template(xlsx_path)
+            print(f"生成空模板 (无记录): {xlsx_path}")
+            return 0
+        export_xlsx(xlsx_path, records)
+        print(f"导出到 xlsx: {xlsx_path} ({len(records)} 条记录)")
+        return 0
+
+    elif subaction in ("import", "i"):
+        # 生成 Python 代码
+        if not xlsx_path:
+            logger.error("请指定 xlsx 文件: compare xlsx import --xlsx=config.xlsx")
+            return 1
+        out_py = output if output.endswith(".py") else f"{output}/generated_{model}.py"
+        code = import_xlsx(xlsx_path, out_py)
+        print(f"生成 Python 代码: {out_py}")
+        return 0
+
+    elif subaction in ("run", "r"):
+        # 运行比数
+        if not xlsx_path:
+            logger.error("请指定 xlsx 文件: compare xlsx run --xlsx=config.xlsx")
+            return 1
+        results = run_xlsx(xlsx_path, output, format)
+
+        # 统计
+        pass_count = sum(1 for r in results if r.get("status") == "PASS")
+        fail_count = sum(1 for r in results if r.get("status") == "FAIL")
+        skip_count = sum(1 for r in results if r.get("status") in ("SKIP", "PENDING", "ERROR"))
+
+        print(f"比数完成: PASS={pass_count}, FAIL={fail_count}, SKIP/PENDING={skip_count}")
+        print(f"结果已更新到: {xlsx_path}")
+        return 0 if fail_count == 0 else 1
+
+    elif subaction in ("ops", "o"):
+        # 列出可用算子
+        print("可用算子:")
+        for op in list_ops():
+            print(f"  - {op}")
+        return 0
+
+    else:
+        logger.error(f"未知 xlsx 子命令: {subaction}")
+        print("可用 xlsx 子命令: template(t), export(e), import(i), run(r), ops(o)")
         return 1

@@ -97,8 +97,10 @@ def calc_qsnr(golden: np.ndarray, result: np.ndarray) -> float:
 
 def calc_cosine(a: np.ndarray, b: np.ndarray) -> float:
     """计算余弦相似度"""
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    a_flat = a.flatten()
+    b_flat = b.flatten()
+    norm_a = np.linalg.norm(a_flat)
+    norm_b = np.linalg.norm(b_flat)
     if norm_a < 1e-12 or norm_b < 1e-12:
         return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
+    return float(np.dot(a_flat, b_flat) / (norm_a * norm_b))

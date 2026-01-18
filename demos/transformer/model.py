@@ -2,7 +2,7 @@
 import numpy as np
 
 from aidevtools.trace import trace
-from aidevtools.examples.transformer.operators import (
+from transformer.operators import (
     linear, relu, gelu, softmax_safe, layernorm, attention, embedding
 )
 
