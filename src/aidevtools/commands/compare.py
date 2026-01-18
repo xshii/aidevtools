@@ -9,8 +9,37 @@ from aidevtools.formats.base import load
 from aidevtools.core.log import logger
 
 
-@command("compare", help="运行比数")
-def cmd_compare(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5"):
+# === 分步流程 ===
+
+@command("compare1", help="步骤1: 导出 Golden 数据")
+def cmd_1(output: str = "./workspace", format: str = "raw"):
+    """
+    导出 @trace 记录的 Golden 数据
+
+    Args:
+        output: 输出目录
+        format: 数据格式 (raw/numpy)
+    """
+    dump(output, format=format)
+    return 0
+
+
+@command("compare2", help="步骤2: 生成 compare.csv")
+def cmd_2(output: str = "./workspace", model: str = "model"):
+    """
+    生成 compare.csv 配置表
+
+    Args:
+        output: 输出目录
+        model: 模型名称
+    """
+    csv_path = gen_csv(output, model)
+    print(f"生成: {csv_path}")
+    return 0
+
+
+@command("compare3", help="步骤3: 运行比数")
+def cmd_3(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5"):
     """
     运行比数
 
@@ -21,7 +50,7 @@ def cmd_compare(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5")
         atol: 绝对误差阈值
     """
     if not csv:
-        logger.error("请指定 csv 文件: compare --csv=xxx.csv")
+        logger.error("请指定 csv 文件: compare3 --csv=xxx.csv")
         return 1
 
     run_compare(
@@ -33,8 +62,29 @@ def cmd_compare(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5")
     return 0
 
 
-@command("compare-quick", help="快速比对两个文件")
-def cmd_quick(golden: str = "", result: str = "", dtype: str = "float32"):
+@command("compare4", help="步骤4: 打包比数结果")
+def cmd_4(csv: str = ""):
+    """打包比数结果为 zip"""
+    if not csv:
+        logger.error("请指定 csv 文件: compare4 --csv=xxx.csv")
+        return 1
+
+    archive(csv)
+    return 0
+
+
+# === 辅助命令 ===
+
+@command("comparec", help="清空 Golden 记录")
+def cmd_c():
+    """清空 @trace 记录的 Golden 数据"""
+    clear()
+    logger.info("Golden 记录已清空")
+    return 0
+
+
+@command("compareq", help="快速比对两个文件（一键式）")
+def cmd_q(golden: str = "", result: str = "", dtype: str = "float32"):
     """
     快速比对两个二进制文件
 
@@ -44,7 +94,7 @@ def cmd_quick(golden: str = "", result: str = "", dtype: str = "float32"):
         dtype: 数据类型
     """
     if not golden or not result:
-        logger.error("请指定文件: compare-quick --golden=a.bin --result=b.bin")
+        logger.error("请指定文件: compareq --golden=a.bin --result=b.bin")
         return 1
 
     dt = getattr(np, dtype)
@@ -60,49 +110,3 @@ def cmd_quick(golden: str = "", result: str = "", dtype: str = "float32"):
     print(f"cosine: {diff.cosine:.6f}")
 
     return 0 if diff.passed else 1
-
-
-@command("compare-dump", help="导出 Golden 数据")
-def cmd_dump(output: str = "./workspace", format: str = "raw"):
-    """
-    导出 @trace 记录的 Golden 数据
-
-    Args:
-        output: 输出目录
-        format: 数据格式 (raw/numpy)
-    """
-    dump(output, format=format)
-    return 0
-
-
-@command("compare-csv", help="生成 compare.csv")
-def cmd_csv(output: str = "./workspace", model: str = "model"):
-    """
-    生成 compare.csv 配置表
-
-    Args:
-        output: 输出目录
-        model: 模型名称
-    """
-    csv_path = gen_csv(output, model)
-    print(f"生成: {csv_path}")
-    return 0
-
-
-@command("compare-clear", help="清空 Golden 记录")
-def cmd_clear():
-    """清空 @trace 记录的 Golden 数据"""
-    clear()
-    logger.info("Golden 记录已清空")
-    return 0
-
-
-@command("compare-archive", help="打包比数结果")
-def cmd_archive(csv: str = ""):
-    """打包比数结果为 zip"""
-    if not csv:
-        logger.error("请指定 csv 文件: compare-archive --csv=xxx.csv")
-        return 1
-
-    archive(csv)
-    return 0
