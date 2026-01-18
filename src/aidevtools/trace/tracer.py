@@ -86,7 +86,8 @@ def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
 
     # 写 CSV
     fields = ["op_name", "mode", "input_bin", "weight_bin", "golden_bin",
-              "result_bin", "skip", "status", "max_abs", "qsnr", "detail_link", "note"]
+              "result_bin", "dtype", "shape", "qtype", "skip",
+              "status", "max_abs", "qsnr", "cosine", "detail_link", "note"]
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -94,6 +95,7 @@ def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
 
         for r in _records:
             name = r["name"]
+            output = np.asarray(r["output"]) if r["output"] is not None else None
             row = {
                 "op_name": name,
                 "mode": "single",
@@ -101,10 +103,14 @@ def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
                 "weight_bin": str(path / f"{name}_weight.bin") if r["weight"] is not None else "",
                 "golden_bin": str(path / f"{name}_golden.bin"),
                 "result_bin": str(path / f"{name}_sim_out.bin"),  # 假定命名
+                "dtype": str(output.dtype) if output is not None else "",
+                "shape": ",".join(str(d) for d in output.shape) if output is not None else "",
+                "qtype": "",  # 空为精确比对，填值为模糊比对
                 "skip": "false",
                 "status": "",
                 "max_abs": "",
                 "qsnr": "",
+                "cosine": "",
                 "detail_link": "",
                 "note": "",
             }

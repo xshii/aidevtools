@@ -1,12 +1,13 @@
 """比数运行器"""
 import csv
 import zipfile
+import numpy as np
 from pathlib import Path
 from typing import Optional
 
 from aidevtools.core.log import logger
 from aidevtools.formats.base import load
-from aidevtools.tools.compare.diff import compare_full, compare_block, compare_bit
+from aidevtools.tools.compare.diff import compare_full, compare_block, compare_bit, calc_qsnr, calc_cosine
 from aidevtools.tools.compare.report import gen_report, gen_heatmap_svg
 
 def run_compare(csv_path: str, output_dir: str = None,
@@ -83,30 +84,55 @@ def run_compare(csv_path: str, output_dir: str = None,
         golden = load(golden_path, format=format, **load_kwargs)
         result = load(result_path, format=format, **load_kwargs)
 
-        # 比对
-        logger.info(f"[{op_name}] 开始比对...")
+        # 比对模式
+        qtype = row.get("qtype", "").strip()
+        is_fuzzy = bool(qtype)  # 有 qtype 则为模糊比对
 
-        # 完整级
-        diff_result = compare_full(golden, result, atol=atol, rtol=rtol)
+        if is_fuzzy:
+            # 模糊比对：只做 QSNR/cosine，不做 bit 级
+            logger.info(f"[{op_name}] 模糊比对 (qtype={qtype})...")
 
-        # 分块级
-        blocks = compare_block(golden, result, block_size=block_size, threshold=atol)
+            g_f64 = golden.astype(np.float64).flatten()
+            r_f64 = result.astype(np.float64).flatten()
 
-        # 生成报告
-        detail_path = gen_report(op_name, diff_result, blocks, str(output_dir))
+            qsnr = calc_qsnr(golden, result)
+            cosine = calc_cosine(golden, result)
+            max_abs = np.max(np.abs(g_f64 - r_f64))
 
-        # 生成热力图
-        svg_path = output_dir / op_name / "heatmap.svg"
-        gen_heatmap_svg(blocks, str(svg_path))
+            # 更新 row（模糊比对不判断 PASS/FAIL，只记录指标）
+            row["status"] = "FUZZY"
+            row["max_abs"] = f"{max_abs:.6e}"
+            row["qsnr"] = f"{qsnr:.2f}"
+            row["cosine"] = f"{cosine:.6f}"
+            row["detail_link"] = ""
 
-        # 更新 row
-        row["status"] = "PASS" if diff_result.passed else "FAIL"
-        row["max_abs"] = f"{diff_result.max_abs:.6e}"
-        row["qsnr"] = f"{diff_result.qsnr:.2f}"
-        row["detail_link"] = str(Path(detail_path).relative_to(csv_path.parent))
+            logger.info(f"[{op_name}] FUZZY qsnr={qsnr:.2f}dB cosine={cosine:.6f}")
+        else:
+            # 精确比对
+            logger.info(f"[{op_name}] 精确比对...")
 
-        status = "PASS" if diff_result.passed else "FAIL"
-        logger.info(f"[{op_name}] {status} (qsnr={diff_result.qsnr:.2f}dB)")
+            # 完整级
+            diff_result = compare_full(golden, result, atol=atol, rtol=rtol)
+
+            # 分块级
+            blocks = compare_block(golden, result, block_size=block_size, threshold=atol)
+
+            # 生成报告
+            detail_path = gen_report(op_name, diff_result, blocks, str(output_dir))
+
+            # 生成热力图
+            svg_path = output_dir / op_name / "heatmap.svg"
+            gen_heatmap_svg(blocks, str(svg_path))
+
+            # 更新 row
+            row["status"] = "PASS" if diff_result.passed else "FAIL"
+            row["max_abs"] = f"{diff_result.max_abs:.6e}"
+            row["qsnr"] = f"{diff_result.qsnr:.2f}"
+            row["cosine"] = f"{diff_result.cosine:.6f}"
+            row["detail_link"] = str(Path(detail_path).relative_to(csv_path.parent))
+
+            status = "PASS" if diff_result.passed else "FAIL"
+            logger.info(f"[{op_name}] {status} (qsnr={diff_result.qsnr:.2f}dB)")
 
         results.append(row)
 
