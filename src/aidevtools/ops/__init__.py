@@ -1,7 +1,7 @@
 """算子 API
 
 使用方法:
-    from aidevtools.ops import register_golden, clear, dump, gen_csv
+    from aidevtools.ops import register_golden, clear, dump
     from aidevtools.ops.nn import linear, relu, softmax
 
     # 1. 注册用户的 golden 实现（如 C++ binding）
@@ -15,9 +15,11 @@
     y = relu(y)
     y = softmax(y)
 
-    # 3. 导出数据和 CSV
+    # 3. 导出数据
     dump("./workspace")
-    gen_csv("./workspace", model_name="my_model")
+
+    # 4. 使用 xlsx 配置比对（推荐）
+    #    aidev compare xlsx run --xlsx=config.xlsx
 """
 from aidevtools.ops.base import (
     Op,
@@ -26,6 +28,5 @@ from aidevtools.ops.base import (
     get_records,
     clear,
     dump,
-    gen_csv,
 )
 from aidevtools.ops import nn  # 触发算子实例化

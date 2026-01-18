@@ -130,7 +130,7 @@ def run_xlsx(
     """
     _check_openpyxl()
     from aidevtools.ops import nn
-    from aidevtools.ops.base import clear, dump, gen_csv, get_records
+    from aidevtools.ops.base import clear, dump, get_records
     from aidevtools.tools.compare.diff import compare_full
     from aidevtools.formats.base import save as save_data
 

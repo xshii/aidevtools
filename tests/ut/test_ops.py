@@ -275,20 +275,3 @@ class TestOpsDump:
         assert (tmp_path / "linear_0_weight.bin").exists()
         assert (tmp_path / "relu_0_golden.bin").exists()
 
-    def test_gen_csv(self, tmp_path):
-        """生成 CSV"""
-        from aidevtools.ops.base import clear, dump, gen_csv
-        from aidevtools.ops.nn import linear
-
-        clear()
-        x = np.random.randn(2, 4).astype(np.float32)
-        w = np.random.randn(4, 8).astype(np.float32)
-
-        linear(x, w)
-        dump(str(tmp_path))
-        csv_path = gen_csv(str(tmp_path), "test_model")
-
-        assert Path(csv_path).exists()
-        content = Path(csv_path).read_text()
-        assert "linear_0" in content
-        assert "golden_bin" in content
