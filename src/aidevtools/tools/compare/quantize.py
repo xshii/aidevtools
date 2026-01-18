@@ -58,13 +58,31 @@ def to_float16(data: np.ndarray, **kwargs) -> tuple:
     return data.astype(np.float16), {}
 
 
-@register_quantize("bfloat16")
-def to_bfloat16(data: np.ndarray, **kwargs) -> tuple:
-    """fp32 → bfloat16 (用 uint16 存储)"""
-    # bfloat16: 截断 fp32 低 16 位
+@register_quantize("gfloat16")
+def to_gfloat16(data: np.ndarray, **kwargs) -> tuple:
+    """
+    fp32 → gfloat16 (自定义 16 位浮点格式 demo)
+
+    格式: 1 符号 + 8 指数 + 7 尾数 (与 bfloat16 相同)
+    存储: uint16
+    """
     fp32_bits = data.view(np.uint32)
-    bf16_bits = (fp32_bits >> 16).astype(np.uint16)
-    return bf16_bits, {"format": "bfloat16_as_uint16"}
+    gf16_bits = (fp32_bits >> 16).astype(np.uint16)
+    return gf16_bits, {"format": "gfloat16_as_uint16"}
+
+
+@register_quantize("gfloat8")
+def to_gfloat8(data: np.ndarray, **kwargs) -> tuple:
+    """
+    fp32 → gfloat8 (自定义 8 位浮点格式 demo)
+
+    格式: 1 符号 + 4 指数 + 3 尾数
+    存储: uint8
+    """
+    # 简单实现：截断 fp32 高 8 位
+    fp32_bits = data.view(np.uint32)
+    gf8_bits = (fp32_bits >> 24).astype(np.uint8)
+    return gf8_bits, {"format": "gfloat8_as_uint8"}
 
 
 @register_quantize("int8_symmetric")
