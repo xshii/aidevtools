@@ -26,6 +26,10 @@ def cmd_compare(
     """
     比数工具
 
+    用法:
+        compare                 一键式执行完整流程 (csv→dump→run→archive)
+        compare <action>        执行指定步骤
+
     子命令:
         1/csv      生成 compare.csv 配置表
         2/dump     导出 Golden 数据
@@ -35,18 +39,23 @@ def cmd_compare(
         q/quick    快速比对两个文件
 
     示例:
-        compare 1 --output=./workspace --model=resnet
-        compare 2 --output=./workspace --format=raw
-        compare 3 --csv=compare.csv
-        compare 4 --csv=compare.csv
-        compare c
+        compare                              一键式流程
+        compare 1 --output=./workspace       生成配置表
+        compare 3 --csv=compare.csv          运行比数
         compare q --golden=a.bin --result=b.bin
     """
+    # 默认一键式流程
     if not action:
-        print("用法: compare <action> [options]")
-        print("子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, q/quick")
-        print("输入 compare --help 查看详情")
-        return 1
+        logger.info("执行一键式比数流程...")
+        csv_path = gen_csv(output, model)
+        print(f"[1/4] 生成: {csv_path}")
+        dump(output, format=format)
+        print(f"[2/4] 导出 Golden 数据完成")
+        run_compare(csv_path=csv_path, op_filter=None, mode_filter=None, atol=float(atol))
+        print(f"[3/4] 比数完成")
+        archive(csv_path)
+        print(f"[4/4] 打包完成")
+        return 0
 
     if action in ("1", "csv", "1csv"):
         csv_path = gen_csv(output, model)
