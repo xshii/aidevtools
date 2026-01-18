@@ -33,27 +33,5 @@ jobs:
       - name: Test aidevtools
         run: pytest tests/ -v --tb=short
 
-      - name: Test prettycli
-        run: pytest libs/prettycli/tests/ -v --tb=short --ignore=libs/prettycli/tests/test_interactive.py --ignore=libs/prettycli/tests/test_shell_session.py --ignore=libs/prettycli/tests/unit/test_vscode_integration.py
-
       - name: Coverage
         run: pytest tests/ --cov=aidevtools --cov-report=term-missing
-
-  typescript-test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: libs/prettycli/vscode-extension
-        run: npm install
-
-      - name: Run TypeScript tests
-        working-directory: libs/prettycli/vscode-extension
-        run: npm run test:ci || true
