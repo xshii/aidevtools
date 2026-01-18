@@ -25,7 +25,7 @@ pybind11_add_module(gfloat_golden
 
 # 设置输出目录
 set_target_properties(gfloat_golden PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
 # 安装

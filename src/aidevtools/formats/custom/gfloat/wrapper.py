@@ -12,7 +12,7 @@ _cpp = None
 _import_error = None
 
 try:
-    from aidevtools.golden import gfloat_golden as _cpp
+    from aidevtools.formats.custom.gfloat import gfloat_golden as _cpp
     logger.debug("GFloat C++ Golden API 加载成功")
 except ImportError as e:
     _import_error = e
@@ -25,7 +25,7 @@ def _check_cpp():
         raise ImportError(
             f"GFloat C++ Golden API 未编译或加载失败。\n"
             f"原因: {_import_error}\n"
-            f"请先编译: cd src/aidevtools/golden/cpp && bash build.sh"
+            f"请先编译: cd src/aidevtools/formats/custom/gfloat/cpp && bash build.sh"
         )
 
 

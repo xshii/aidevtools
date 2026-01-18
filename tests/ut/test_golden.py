@@ -8,7 +8,7 @@ class TestGfloatGolden:
 
     def test_fp32_to_gfloat16(self):
         """fp32 -> gfloat16 转换"""
-        from aidevtools.golden.gfloat_wrapper import fp32_to_gfloat16
+        from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16
 
         data = np.array([1.0, 2.0, -3.0, 0.0], dtype=np.float32)
         result = fp32_to_gfloat16(data)
@@ -22,7 +22,7 @@ class TestGfloatGolden:
 
     def test_gfloat16_to_fp32(self):
         """gfloat16 -> fp32 转换"""
-        from aidevtools.golden.gfloat_wrapper import fp32_to_gfloat16, gfloat16_to_fp32
+        from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16, gfloat16_to_fp32
 
         original = np.array([1.0, 2.0, -3.0, 0.0], dtype=np.float32)
         gf16 = fp32_to_gfloat16(original)
@@ -34,7 +34,7 @@ class TestGfloatGolden:
 
     def test_fp32_to_gfloat8(self):
         """fp32 -> gfloat8 转换"""
-        from aidevtools.golden.gfloat_wrapper import fp32_to_gfloat8
+        from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat8
 
         data = np.array([1.0, 2.0, -3.0, 0.0], dtype=np.float32)
         result = fp32_to_gfloat8(data)
@@ -48,7 +48,7 @@ class TestGfloatGolden:
 
     def test_gfloat8_to_fp32(self):
         """gfloat8 -> fp32 转换"""
-        from aidevtools.golden.gfloat_wrapper import fp32_to_gfloat8, gfloat8_to_fp32
+        from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat8, gfloat8_to_fp32
 
         original = np.array([1.0, 2.0, -3.0, 0.0], dtype=np.float32)
         gf8 = fp32_to_gfloat8(original)
@@ -61,7 +61,7 @@ class TestGfloatGolden:
 
     def test_multidim_array(self):
         """多维数组测试"""
-        from aidevtools.golden.gfloat_wrapper import fp32_to_gfloat16, gfloat16_to_fp32
+        from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16, gfloat16_to_fp32
 
         data = np.random.randn(2, 3, 4).astype(np.float32)
         gf16 = fp32_to_gfloat16(data)
@@ -73,7 +73,7 @@ class TestGfloatGolden:
 
     def test_is_cpp_available(self):
         """检查 C++ 可用性"""
-        from aidevtools.golden.gfloat_wrapper import is_cpp_available
+        from aidevtools.formats.custom.gfloat.wrapper import is_cpp_available
 
         # 不管是否可用，函数应该返回 bool
         result = is_cpp_available()
@@ -81,7 +81,7 @@ class TestGfloatGolden:
 
     def test_check_cpp_error(self):
         """C++ 不可用时报错"""
-        from aidevtools.golden import gfloat_wrapper
+        from aidevtools.formats.custom.gfloat import wrapper as gfloat_wrapper
 
         # 模拟 C++ 不可用
         original_cpp = gfloat_wrapper._cpp
@@ -104,7 +104,7 @@ class TestGfloatGoldenRegister:
 
     def test_register_golden(self):
         """注册 golden 实现"""
-        from aidevtools.golden import register_gfloat_golden
+        from aidevtools.formats.custom.gfloat import register_gfloat_golden
         from aidevtools.formats.quantize import list_quantize
 
         register_gfloat_golden()
@@ -115,7 +115,7 @@ class TestGfloatGoldenRegister:
 
     def test_use_golden_quantize(self):
         """使用 golden 量化"""
-        from aidevtools.golden import register_gfloat_golden
+        from aidevtools.formats.custom.gfloat import register_gfloat_golden
         from aidevtools.formats.quantize import quantize
 
         register_gfloat_golden()
