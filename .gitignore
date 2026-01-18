@@ -4,22 +4,28 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.egg
 
 # Virtual environment
 .venv/
 venv/
+ENV/
 
 # Coverage
 htmlcov/
 .coverage
+.coverage.*
 coverage.xml
 
 # IDE
 .idea/
+*.swp
+*.swo
 
 # Cache
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 
 # Session artifacts
 tmp/prettycli/
@@ -28,3 +34,19 @@ tmp/prettycli/
 vscode-extension/node_modules/
 vscode-extension/out/
 vscode-extension/coverage/
+
+# 比数工具生成的内容
+workspace/
+details/
+*.zip
+*_compare.csv
+heatmap.svg
+failed_cases/
+
+# 日志
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
