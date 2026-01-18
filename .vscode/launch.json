@@ -1,0 +1,69 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run AI Dev Tools",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "aidevtools.cli",
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Run PrettyCLI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "prettycli",
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Test: All",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/", "-v"],
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Test: PrettyCLI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["libs/prettycli/tests/", "-v"],
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Test: Coverage",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "--cov=aidevtools",
+        "--cov=prettycli",
+        "--cov-report=term-missing",
+        "--cov-report=html",
+        "tests/",
+        "libs/prettycli/tests/"
+      ],
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

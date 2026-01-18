@@ -1,0 +1,22 @@
+# PrettyCLI 默认配置
+
+# Bash 命令前缀，空字符串表示自动识别（未注册的命令自动执行bash）
+bash_prefix: ""
+
+# 切换输出压缩/展开的快捷键
+toggle_key: "c-o"
+
+# 输出折叠时显示的最大行数
+max_collapsed_lines: 10
+
+# Artifact 文件路径变量，在命令中使用会替换为当前 artifact 路径
+artifact_var: "@@$$"
+
+# 状态栏刷新间隔（秒）
+# statusbar_interval: 1.0
+
+# VS Code WebSocket 配置
+# vscode_port: 19960
+# vscode_max_retries: 3
+# vscode_retry_delay: 0.5
+# vscode_max_retry_delay: 8.0
