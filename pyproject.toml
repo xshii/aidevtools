@@ -20,8 +20,17 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
 ]
+xlsx = [
+    "openpyxl>=3.0.0",
+]
+cpp = [
+    "pybind11>=2.10.0",
+]
 vscode = [
     "websocket-client>=1.6.0",
+]
+all = [
+    "aidevtools[xlsx,cpp]",
 ]
 
 [project.scripts]

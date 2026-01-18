@@ -1,5 +1,4 @@
 """Trace 装饰器"""
-import csv
 from pathlib import Path
 from functools import wraps
 from typing import List, Dict, Any
@@ -78,45 +77,6 @@ def dump(output_dir: str = "./workspace", format: str = "raw"):
             save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), format=format)
         logger.info(f"dump: {name}")
 
-def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
-    """生成 compare.csv"""
-    path = Path(output_dir)
-
-    # 文件名去重
-    csv_path = path / f"{model_name}_compare.csv"
-    i = 1
-    while csv_path.exists():
-        csv_path = path / f"{model_name}_compare_{i:03d}.csv"
-        i += 1
-
-    # 写 CSV (只含配置，不含结果)
-    fields = ["op_name", "mode", "input_bin", "weight_bin", "golden_bin",
-              "result_bin", "dtype", "shape", "qtype", "skip", "note"]
-
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-
-        for r in _records:
-            name = r["name"]
-            output = np.asarray(r["output"]) if r["output"] is not None else None
-            row = {
-                "op_name": name,
-                "mode": "single",
-                "input_bin": str(path / f"{name}_input.bin") if r["input"] is not None else "",
-                "weight_bin": str(path / f"{name}_weight.bin") if r["weight"] is not None else "",
-                "golden_bin": str(path / f"{name}_golden.bin"),
-                "result_bin": str(path / f"{name}_sim_out.bin"),  # 假定命名
-                "dtype": str(output.dtype) if output is not None else "",
-                "shape": ",".join(str(d) for d in output.shape) if output is not None else "",
-                "qtype": "",  # 空为精确比对，填值为模糊比对
-                "skip": "false",
-                "note": "",
-            }
-            writer.writerow(row)
-
-    logger.info(f"生成 compare 表: {csv_path}")
-    return str(csv_path)
 
 def clear():
     """清空记录"""

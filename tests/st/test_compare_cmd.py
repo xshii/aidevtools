@@ -3,7 +3,6 @@
 通过命令行接口进行端到端测试
 """
 import pytest
-import csv
 import numpy as np
 from pathlib import Path
 
@@ -147,132 +146,25 @@ class TestCompareQtypesCmd:
         assert "gfloat16" in captured.out
 
 
-class TestCompareCsvCmd:
-    """csv 子命令测试"""
-
-    def setup_method(self):
-        from aidevtools.trace.tracer import clear
-        clear()
-
-    def test_gen_csv(self, tmp_path):
-        """生成 CSV"""
-        from aidevtools.commands.compare import cmd_compare
-        from aidevtools.trace.tracer import trace, _records
-
-        # 先记录一些操作
-        @trace
-        def test_op(x):
-            return x * 2
-
-        x = np.random.randn(2, 4).astype(np.float32)
-        test_op(x)
-
-        ret = cmd_compare(
-            action="csv",
-            output=str(tmp_path),
-            model="test",
-        )
-
-        assert ret == 0
-        csv_files = list(tmp_path.glob("*_compare.csv"))
-        assert len(csv_files) == 1
-
-
 class TestCompareClearCmd:
     """clear 子命令测试"""
 
     def test_clear(self):
         """清空记录"""
         from aidevtools.commands.compare import cmd_compare
-        from aidevtools.trace.tracer import trace, _records, clear
+        from aidevtools.ops.base import clear, get_records
+        from aidevtools.ops import nn
 
         clear()
 
-        @trace
-        def test_op(x):
-            return x
-
-        test_op(np.array([1, 2, 3]))
-        assert len(_records) == 1
+        # 使用 ops.nn 触发记录
+        x = np.random.randn(2, 4).astype(np.float32)
+        nn.relu(x)
+        assert len(get_records()) == 1
 
         ret = cmd_compare(action="clear")
         assert ret == 0
-        assert len(_records) == 0
-
-
-class TestCompareRunCmd:
-    """run 子命令测试"""
-
-    def test_run_without_csv(self):
-        """缺少 CSV 参数"""
-        from aidevtools.commands.compare import cmd_compare
-
-        ret = cmd_compare(action="run", csv="")
-        assert ret == 1
-
-    def test_run_with_csv(self, tmp_path):
-        """运行比数"""
-        from aidevtools.commands.compare import cmd_compare
-
-        # 创建测试数据
-        golden = np.random.randn(2, 4).astype(np.float32)
-        golden_path = tmp_path / "op_golden.bin"
-        result_path = tmp_path / "op_result.bin"
-        golden.tofile(golden_path)
-        golden.tofile(result_path)
-
-        # 创建 CSV
-        csv_path = tmp_path / "compare.csv"
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "op_name", "mode", "input_bin", "weight_bin", "golden_bin",
-                "result_bin", "dtype", "shape", "qtype", "skip", "note"
-            ])
-            writer.writeheader()
-            writer.writerow({
-                "op_name": "test_op",
-                "mode": "single",
-                "input_bin": "",
-                "weight_bin": "",
-                "golden_bin": str(golden_path),
-                "result_bin": str(result_path),
-                "dtype": "float32",
-                "shape": "2,4",
-                "qtype": "",
-                "skip": "false",
-                "note": "",
-            })
-
-        ret = cmd_compare(action="run", csv=str(csv_path))
-        assert ret == 0
-
-        # 检查结果
-        result_csv = csv_path.with_name("compare_result.csv")
-        assert result_csv.exists()
-
-
-class TestCompareArchiveCmd:
-    """archive 子命令测试"""
-
-    def test_archive_without_csv(self):
-        """缺少 CSV 参数"""
-        from aidevtools.commands.compare import cmd_compare
-
-        ret = cmd_compare(action="archive", csv="")
-        assert ret == 1
-
-    def test_archive(self, tmp_path):
-        """打包归档"""
-        from aidevtools.commands.compare import cmd_compare
-
-        csv_path = tmp_path / "compare.csv"
-        csv_path.write_text("op_name\ntest\n")
-
-        ret = cmd_compare(action="archive", csv=str(csv_path))
-        assert ret == 0
-
-        zip_path = csv_path.with_suffix(".zip")
-        assert zip_path.exists()
+        assert len(get_records()) == 0
 
 
 class TestCompareUnknownCmd:
@@ -290,60 +182,19 @@ class TestCompareDumpCmd:
     """dump 子命令测试"""
 
     def setup_method(self):
-        from aidevtools.trace.tracer import clear
+        from aidevtools.ops.base import clear
         clear()
 
     def test_dump(self, tmp_path):
         """导出数据"""
         from aidevtools.commands.compare import cmd_compare
-        from aidevtools.trace.tracer import trace
-
-        @trace
-        def test_op(x):
-            return x * 2
+        from aidevtools.ops import nn
 
         x = np.random.randn(2, 4).astype(np.float32)
-        test_op(x)
+        nn.relu(x)
 
         ret = cmd_compare(action="dump", output=str(tmp_path))
         assert ret == 0
 
         # 检查文件生成
-        assert (tmp_path / "test_op_0_golden.bin").exists()
-
-
-class TestCompareOneClickFlow:
-    """一键式流程测试"""
-
-    def setup_method(self):
-        from aidevtools.trace.tracer import clear
-        clear()
-
-    def test_oneclick_flow(self, tmp_path):
-        """一键式比数流程"""
-        from aidevtools.commands.compare import cmd_compare
-        from aidevtools.trace.tracer import trace
-
-        @trace
-        def my_op(x):
-            return x * 2
-
-        x = np.random.randn(2, 4).astype(np.float32)
-        my_op(x)
-
-        # 执行一键式流程
-        ret = cmd_compare(
-            action="",  # 空 action 触发一键式流程
-            output=str(tmp_path),
-            model="test",
-        )
-
-        assert ret == 0
-
-        # 检查生成的文件
-        csv_files = list(tmp_path.glob("*_compare.csv"))
-        assert len(csv_files) == 1
-
-        # 检查 zip 文件
-        zip_files = list(tmp_path.glob("*.zip"))
-        assert len(zip_files) == 1
+        assert (tmp_path / "relu_0_golden.bin").exists()

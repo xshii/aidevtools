@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 from pathlib import Path
 
-from aidevtools.trace.tracer import trace, dump, gen_csv, clear, _records
+from aidevtools.trace.tracer import trace, dump, clear, _records
 
 class TestTrace:
     """Trace 装饰器测试"""
@@ -63,18 +63,3 @@ class TestDump:
         assert (tmp_workspace / "my_op_0_golden.bin").exists()
         assert (tmp_workspace / "my_op_0_input.bin").exists()
 
-    def test_gen_csv(self, tmp_workspace, sample_data):
-        """生成 CSV"""
-        @trace
-        def conv2d(x, w):
-            return x * w
-
-        w = np.ones_like(sample_data)
-        conv2d(sample_data, w)
-        dump(str(tmp_workspace))
-        csv_path = gen_csv(str(tmp_workspace), "test_model")
-
-        assert Path(csv_path).exists()
-        content = Path(csv_path).read_text()
-        assert "conv2d_0" in content
-        assert "golden" in content
