@@ -5,10 +5,9 @@ from prettycli import command
 from aidevtools.tools.compare.diff import compare_full
 from aidevtools.tools.compare.runner import run_compare, archive
 from aidevtools.formats.quantize import list_quantize
-from aidevtools.trace.tracer import dump, gen_csv, clear
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
-from aidevtools.ops.base import get_records
+from aidevtools.ops.base import get_records, dump, gen_csv, clear
 
 
 @command("compare", help="比数工具")
