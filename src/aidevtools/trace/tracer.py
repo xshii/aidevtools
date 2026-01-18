@@ -84,10 +84,9 @@ def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
         csv_path = path / f"{model_name}_compare_{i:03d}.csv"
         i += 1
 
-    # 写 CSV
+    # 写 CSV (只含配置，不含结果)
     fields = ["op_name", "mode", "input_bin", "weight_bin", "golden_bin",
-              "result_bin", "dtype", "shape", "qtype", "skip",
-              "status", "max_abs", "qsnr", "cosine", "detail_link", "note"]
+              "result_bin", "dtype", "shape", "qtype", "skip", "note"]
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -107,11 +106,6 @@ def gen_csv(output_dir: str = "./workspace", model_name: str = "model") -> str:
                 "shape": ",".join(str(d) for d in output.shape) if output is not None else "",
                 "qtype": "",  # 空为精确比对，填值为模糊比对
                 "skip": "false",
-                "status": "",
-                "max_abs": "",
-                "qsnr": "",
-                "cosine": "",
-                "detail_link": "",
                 "note": "",
             }
             writer.writerow(row)

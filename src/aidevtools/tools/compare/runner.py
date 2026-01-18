@@ -136,15 +136,18 @@ def run_compare(csv_path: str, output_dir: str = None,
 
         results.append(row)
 
-    # 写回 CSV
+    # 写结果到单独文件
     if results:
-        fields = list(results[0].keys())
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writeheader()
-            writer.writerows(rows)
+        result_path = csv_path.with_name(csv_path.stem + "_result.csv")
+        result_fields = ["op_name", "status", "max_abs", "qsnr", "cosine", "detail_link"]
 
-    logger.info(f"比数完成，结果已更新到 {csv_path}")
+        with open(result_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=result_fields)
+            writer.writeheader()
+            for row in results:
+                writer.writerow({k: row.get(k, "") for k in result_fields})
+
+        logger.info(f"比数完成，结果: {result_path}")
 
 def archive(csv_path: str, output_path: str = None):
     """打包归档"""
