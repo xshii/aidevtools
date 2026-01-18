@@ -187,7 +187,7 @@ def cmd_compare(
         # 使用量化框架转换
         try:
             converted, meta = quantize(data, target_dtype)
-        except NotImplementedError as e:
+        except (NotImplementedError, ValueError) as e:
             logger.error(str(e))
             return 1
 
