@@ -23,6 +23,8 @@ def cmd_compare(
     result: str = "",
     dtype: str = "float32",
     shape: str = "",
+    fuzzy: str = "false",
+    target_dtype: str = "",
 ):
     """
     比数工具
@@ -38,6 +40,12 @@ def cmd_compare(
         4/archive  打包比数结果
         c/clear    清空 Golden 记录
         s/single   单次比对两个文件
+        f/fuzzy    模糊比对（跳过 bit 级比对）
+        t/convert  类型转换导出
+
+    参数:
+        --fuzzy=true       启用模糊比对模式
+        --target_dtype     转换目标类型 (fp16/int8/...)
 
     示例:
         compare                              一键式流程
@@ -45,6 +53,8 @@ def cmd_compare(
         compare 3 --csv=compare.csv          运行比数
         compare 3 --csv=compare.csv --op=conv1   单用例比数
         compare s --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32
+        compare f --golden=a.bin --result=b.bin --dtype=float32   模糊比对
+        compare t --golden=a.bin --output=a_fp16.bin --target_dtype=float16   类型转换
     """
     # 默认一键式流程
     if not action:
@@ -109,7 +119,68 @@ def cmd_compare(
         print(f"cosine: {diff.cosine:.6f}")
         return 0 if diff.passed else 1
 
+    elif action in ("f", "fuzzy"):
+        # 模糊比对：只做 QSNR/cosine，不做 bit 级比对
+        if not golden or not result:
+            logger.error("请指定文件: compare f --golden=a.bin --result=b.bin")
+            return 1
+        dt = getattr(np, dtype)
+        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        g = load(golden, format="raw", dtype=dt, shape=sh)
+        r = load(result, format="raw", dtype=dt, shape=sh)
+
+        # 模糊比对：转为 float64 计算指标
+        g_f64 = g.astype(np.float64).flatten()
+        r_f64 = r.astype(np.float64).flatten()
+
+        # QSNR
+        diff_val = g_f64 - r_f64
+        signal_power = np.mean(g_f64 ** 2)
+        noise_power = np.mean(diff_val ** 2)
+        qsnr = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float('inf')
+
+        # Cosine
+        norm_g = np.linalg.norm(g_f64)
+        norm_r = np.linalg.norm(r_f64)
+        cosine = np.dot(g_f64, r_f64) / (norm_g * norm_r) if norm_g > 0 and norm_r > 0 else 0.0
+
+        # Max abs
+        max_abs = np.max(np.abs(diff_val))
+
+        print(f"模式: 模糊比对 (fuzzy)")
+        print(f"shape: {g.shape}")
+        print(f"max_abs: {max_abs:.6e}")
+        print(f"qsnr: {qsnr:.2f} dB")
+        print(f"cosine: {cosine:.6f}")
+        return 0
+
+    elif action in ("t", "convert"):
+        # 类型转换导出
+        if not golden:
+            logger.error("请指定输入文件: compare t --golden=a.bin --output=out.bin --target_dtype=float16")
+            return 1
+        if not target_dtype:
+            logger.error("请指定目标类型: --target_dtype=float16")
+            return 1
+        if not output or output == "./workspace":
+            output = golden.replace(".bin", f"_{target_dtype}.bin")
+
+        dt = getattr(np, dtype)
+        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        data = load(golden, format="raw", dtype=dt, shape=sh)
+
+        # 转换类型
+        target_dt = getattr(np, target_dtype)
+        converted = data.astype(target_dt)
+
+        # 导出
+        converted.tofile(output)
+        print(f"转换: {dtype} → {target_dtype}")
+        print(f"shape: {data.shape}")
+        print(f"输出: {output}")
+        return 0
+
     else:
         logger.error(f"未知子命令: {action}")
-        print("可用子命令: csv, dump, run, archive, clear, quick")
+        print("可用子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, s/single, f/fuzzy, t/convert")
         return 1
