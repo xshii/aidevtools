@@ -2,6 +2,9 @@
 
 from prettycli import CLI
 
+# 导入命令模块以触发注册
+from aidevtools import commands
+
 
 def main():
     """Main entry point for aidev CLI."""
