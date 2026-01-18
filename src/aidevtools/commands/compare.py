@@ -36,13 +36,13 @@ def cmd_compare(
         3/run      运行比数
         4/archive  打包比数结果
         c/clear    清空 Golden 记录
-        q/quick    快速比对两个文件
+        s/single   单次比对两个文件
 
     示例:
         compare                              一键式流程
         compare 1 --output=./workspace       生成配置表
         compare 3 --csv=compare.csv          运行比数
-        compare q --golden=a.bin --result=b.bin
+        compare s --golden=a.bin --result=b.bin
     """
     # 默认一键式流程
     if not action:
@@ -90,9 +90,9 @@ def cmd_compare(
         logger.info("Golden 记录已清空")
         return 0
 
-    elif action in ("q", "quick"):
+    elif action in ("s", "single"):
         if not golden or not result:
-            logger.error("请指定文件: compare quick --golden=a.bin --result=b.bin")
+            logger.error("请指定文件: compare s --golden=a.bin --result=b.bin")
             return 1
         dt = getattr(np, dtype)
         g = load(golden, format="raw", dtype=dt)
