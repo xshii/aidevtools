@@ -8,8 +8,6 @@ from typing import List, Dict, Any, Optional
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.chart import PieChart, Reference
-    from openpyxl.chart.label import DataLabelList
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -240,140 +238,47 @@ def _add_summary_sheet(wb: "Workbook", results: List[Dict[str, Any]]):
     """
     添加汇总统计 sheet
 
-    包含：
-    - PASS/FAIL/SKIP/PENDING/ERROR 计数
-    - 通过率
-    - 饼图
+    简洁版：PASS/FAIL 计数 + 通过率
     """
     # 统计
-    stats = {"PASS": 0, "FAIL": 0, "SKIP": 0, "PENDING": 0, "ERROR": 0}
-    for res in results:
-        status = res.get("status", "PENDING")
-        if status in stats:
-            stats[status] += 1
-        else:
-            stats["ERROR"] += 1
-
-    total = sum(stats.values())
-    pass_rate = (stats["PASS"] / total * 100) if total > 0 else 0
+    pass_count = sum(1 for r in results if r.get("status") == "PASS")
+    fail_count = sum(1 for r in results if r.get("status") == "FAIL")
+    total = len(results)
+    pass_rate = (pass_count / total * 100) if total > 0 else 0
 
     # 创建或更新 summary sheet
     if "summary" in wb.sheetnames:
         ws = wb["summary"]
-        # 清空内容
         for row in ws.iter_rows():
             for cell in row:
                 cell.value = None
     else:
-        ws = wb.create_sheet("summary", 0)  # 放在最前面
+        ws = wb.create_sheet("summary", 0)
 
     # 样式
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     pass_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     fail_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    skip_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-    title_font = Font(bold=True, size=14)
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
 
-    # 标题
-    ws.cell(row=1, column=1, value="比对结果汇总").font = title_font
-    ws.merge_cells("A1:C1")
+    # 汇总信息
+    ws.cell(row=1, column=1, value="比对结果汇总").font = Font(bold=True, size=14)
 
-    # 统计表格
-    ws.cell(row=3, column=1, value="状态").font = header_font
-    ws.cell(row=3, column=1).fill = header_fill
-    ws.cell(row=3, column=1).border = thin_border
-    ws.cell(row=3, column=2, value="数量").font = header_font
-    ws.cell(row=3, column=2).fill = header_fill
-    ws.cell(row=3, column=2).border = thin_border
-    ws.cell(row=3, column=3, value="占比").font = header_font
-    ws.cell(row=3, column=3).fill = header_fill
-    ws.cell(row=3, column=3).border = thin_border
+    ws.cell(row=3, column=1, value="PASS")
+    ws.cell(row=3, column=2, value=pass_count)
+    ws.cell(row=3, column=1).fill = pass_fill
+    ws.cell(row=3, column=2).fill = pass_fill
 
-    row_idx = 4
-    status_fills = {
-        "PASS": pass_fill,
-        "FAIL": fail_fill,
-        "SKIP": skip_fill,
-        "PENDING": skip_fill,
-        "ERROR": fail_fill,
-    }
+    ws.cell(row=4, column=1, value="FAIL")
+    ws.cell(row=4, column=2, value=fail_count)
+    ws.cell(row=4, column=1).fill = fail_fill
+    ws.cell(row=4, column=2).fill = fail_fill
 
-    for status, count in stats.items():
-        if count == 0:
-            continue
-        pct = count / total * 100 if total > 0 else 0
+    ws.cell(row=5, column=1, value="总计")
+    ws.cell(row=5, column=2, value=total)
 
-        cell_status = ws.cell(row=row_idx, column=1, value=status)
-        cell_status.border = thin_border
-        if status in status_fills:
-            cell_status.fill = status_fills[status]
+    ws.cell(row=7, column=1, value="通过率").font = Font(bold=True)
+    rate_cell = ws.cell(row=7, column=2, value=f"{pass_rate:.1f}%")
+    rate_cell.font = Font(bold=True)
+    rate_cell.fill = pass_fill if pass_rate >= 90 else fail_fill
 
-        ws.cell(row=row_idx, column=2, value=count).border = thin_border
-        ws.cell(row=row_idx, column=3, value=f"{pct:.1f}%").border = thin_border
-        row_idx += 1
-
-    # 总计行
-    ws.cell(row=row_idx, column=1, value="总计").font = Font(bold=True)
-    ws.cell(row=row_idx, column=1).border = thin_border
-    ws.cell(row=row_idx, column=2, value=total).font = Font(bold=True)
-    ws.cell(row=row_idx, column=2).border = thin_border
-    ws.cell(row=row_idx, column=3, value="100%").font = Font(bold=True)
-    ws.cell(row=row_idx, column=3).border = thin_border
-
-    # 通过率
-    row_idx += 2
-    ws.cell(row=row_idx, column=1, value="通过率").font = Font(bold=True, size=12)
-    rate_cell = ws.cell(row=row_idx, column=2, value=f"{pass_rate:.1f}%")
-    rate_cell.font = Font(bold=True, size=12)
-    if pass_rate >= 90:
-        rate_cell.fill = pass_fill
-    elif pass_rate >= 60:
-        rate_cell.fill = skip_fill
-    else:
-        rate_cell.fill = fail_fill
-
-    # 饼图（只有当有数据时）
-    if total > 0:
-        # 准备饼图数据（在 E 列）
-        chart_data_row = 3
-        ws.cell(row=chart_data_row, column=5, value="状态")
-        ws.cell(row=chart_data_row, column=6, value="数量")
-        chart_row = chart_data_row + 1
-        for status, count in stats.items():
-            if count > 0:
-                ws.cell(row=chart_row, column=5, value=status)
-                ws.cell(row=chart_row, column=6, value=count)
-                chart_row += 1
-
-        # 创建饼图
-        if chart_row > chart_data_row + 1:  # 至少有一行数据
-            pie = PieChart()
-            pie.title = "比对结果分布"
-            labels = Reference(ws, min_col=5, min_row=chart_data_row + 1, max_row=chart_row - 1)
-            data = Reference(ws, min_col=6, min_row=chart_data_row, max_row=chart_row - 1)
-            pie.add_data(data, titles_from_data=True)
-            pie.set_categories(labels)
-
-            # 显示百分比标签
-            pie.dataLabels = DataLabelList()
-            pie.dataLabels.showPercent = True
-            pie.dataLabels.showVal = False
-            pie.dataLabels.showCatName = True
-
-            pie.width = 12
-            pie.height = 8
-            ws.add_chart(pie, "A" + str(row_idx + 3))
-
-    # 列宽
     ws.column_dimensions['A'].width = 12
     ws.column_dimensions['B'].width = 10
-    ws.column_dimensions['C'].width = 10
-    ws.column_dimensions['E'].width = 10
-    ws.column_dimensions['F'].width = 10
