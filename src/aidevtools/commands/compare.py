@@ -4,6 +4,7 @@ from prettycli import command
 
 from aidevtools.tools.compare.diff import compare_full
 from aidevtools.tools.compare.runner import run_compare, archive
+from aidevtools.tools.compare.quantize import list_quantize
 from aidevtools.trace.tracer import dump, gen_csv, clear
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
@@ -42,10 +43,11 @@ def cmd_compare(
         s/single   单次比对两个文件
         f/fuzzy    模糊比对（跳过 bit 级比对）
         t/convert  类型转换导出
+        q/qtypes   列出支持的量化类型
 
     参数:
         --fuzzy=true       启用模糊比对模式
-        --target_dtype     转换目标类型 (fp16/int8/...)
+        --target_dtype     转换目标类型 (float16/bfloat16/...)
 
     示例:
         compare                              一键式流程
@@ -55,6 +57,17 @@ def cmd_compare(
         compare s --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32
         compare f --golden=a.bin --result=b.bin --dtype=float32   模糊比对
         compare t --golden=a.bin --output=a_fp16.bin --target_dtype=float16   类型转换
+        compare q                            列出量化类型
+
+    模糊比对流程 (代码方式):
+        from aidevtools.tools.compare.fuzzy import create_fuzzy_case
+
+        case = create_fuzzy_case("conv1")
+        case.set_input("x", input_data)
+        case.set_weight("w", weight_data)
+        case.set_compute(lambda inputs, weights: np.matmul(inputs["x"], weights["w"]))
+        case.compute_golden()
+        case.export(qtype="float16")  # 导出给仿真器
     """
     # 默认一键式流程
     if not action:
@@ -156,11 +169,13 @@ def cmd_compare(
 
     elif action in ("t", "convert"):
         # 类型转换导出
+        from aidevtools.tools.compare.quantize import quantize
+
         if not golden:
             logger.error("请指定输入文件: compare t --golden=a.bin --output=out.bin --target_dtype=float16")
             return 1
         if not target_dtype:
-            logger.error("请指定目标类型: --target_dtype=float16")
+            logger.error("请指定目标类型: --target_dtype=float16 (可用: compare q 查看)")
             return 1
         if not output or output == "./workspace":
             output = golden.replace(".bin", f"_{target_dtype}.bin")
@@ -169,18 +184,30 @@ def cmd_compare(
         sh = tuple(int(x) for x in shape.split(",")) if shape else None
         data = load(golden, format="raw", dtype=dt, shape=sh)
 
-        # 转换类型
-        target_dt = getattr(np, target_dtype)
-        converted = data.astype(target_dt)
+        # 使用量化框架转换
+        try:
+            converted, meta = quantize(data, target_dtype)
+        except NotImplementedError as e:
+            logger.error(str(e))
+            return 1
 
         # 导出
         converted.tofile(output)
         print(f"转换: {dtype} → {target_dtype}")
         print(f"shape: {data.shape}")
         print(f"输出: {output}")
+        if meta:
+            print(f"meta: {meta}")
+        return 0
+
+    elif action in ("q", "qtypes"):
+        # 列出支持的量化类型
+        print("支持的量化类型:")
+        for qtype in list_quantize():
+            print(f"  - {qtype}")
         return 0
 
     else:
         logger.error(f"未知子命令: {action}")
-        print("可用子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, s/single, f/fuzzy, t/convert")
+        print("可用子命令: 1/csv, 2/dump, 3/run, 4/archive, c/clear, s/single, f/fuzzy, t/convert, q/qtypes")
         return 1
