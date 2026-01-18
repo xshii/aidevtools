@@ -101,7 +101,7 @@ class Op:
                 golden_output = golden_impl(*args, **kwargs)
                 logger.debug(f"{full_name}: golden 执行完成")
             except Exception as e:
-                logger.warning(f"{full_name}: golden 执行失败 - {e}")
+                logger.warn(f"{full_name}: golden 执行失败 - {e}")
 
         # 记录
         record = {
