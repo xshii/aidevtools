@@ -11,7 +11,7 @@ from aidevtools.core.log import logger
 
 # === 分步流程 ===
 
-@command("compare1", help="步骤1: 导出 Golden 数据")
+@command("compare1-dump", help="步骤1: 导出 Golden 数据")
 def cmd_1(output: str = "./workspace", format: str = "raw"):
     """
     导出 @trace 记录的 Golden 数据
@@ -24,7 +24,7 @@ def cmd_1(output: str = "./workspace", format: str = "raw"):
     return 0
 
 
-@command("compare2", help="步骤2: 生成 compare.csv")
+@command("compare2-csv", help="步骤2: 生成 compare.csv")
 def cmd_2(output: str = "./workspace", model: str = "model"):
     """
     生成 compare.csv 配置表
@@ -38,7 +38,7 @@ def cmd_2(output: str = "./workspace", model: str = "model"):
     return 0
 
 
-@command("compare3", help="步骤3: 运行比数")
+@command("compare3-run", help="步骤3: 运行比数")
 def cmd_3(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5"):
     """
     运行比数
@@ -50,7 +50,7 @@ def cmd_3(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5"):
         atol: 绝对误差阈值
     """
     if not csv:
-        logger.error("请指定 csv 文件: compare3 --csv=xxx.csv")
+        logger.error("请指定 csv 文件: compare3-run --csv=xxx.csv")
         return 1
 
     run_compare(
@@ -62,11 +62,11 @@ def cmd_3(csv: str = "", op: str = "", mode: str = "", atol: str = "1e-5"):
     return 0
 
 
-@command("compare4", help="步骤4: 打包比数结果")
+@command("compare4-archive", help="步骤4: 打包比数结果")
 def cmd_4(csv: str = ""):
     """打包比数结果为 zip"""
     if not csv:
-        logger.error("请指定 csv 文件: compare4 --csv=xxx.csv")
+        logger.error("请指定 csv 文件: compare4-archive --csv=xxx.csv")
         return 1
 
     archive(csv)
@@ -75,7 +75,7 @@ def cmd_4(csv: str = ""):
 
 # === 辅助命令 ===
 
-@command("comparec", help="清空 Golden 记录")
+@command("comparec-clear", help="清空 Golden 记录")
 def cmd_c():
     """清空 @trace 记录的 Golden 数据"""
     clear()
@@ -83,7 +83,7 @@ def cmd_c():
     return 0
 
 
-@command("compareq", help="快速比对两个文件（一键式）")
+@command("compareq-quick", help="快速比对两个文件（一键式）")
 def cmd_q(golden: str = "", result: str = "", dtype: str = "float32"):
     """
     快速比对两个二进制文件
@@ -94,7 +94,7 @@ def cmd_q(golden: str = "", result: str = "", dtype: str = "float32"):
         dtype: 数据类型
     """
     if not golden or not result:
-        logger.error("请指定文件: compareq --golden=a.bin --result=b.bin")
+        logger.error("请指定文件: compareq-quick --golden=a.bin --result=b.bin")
         return 1
 
     dt = getattr(np, dtype)
