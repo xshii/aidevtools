@@ -66,12 +66,19 @@ def run_compare(csv_path: str, output_dir: str = None,
             row["status"] = "SKIP"
             continue
 
-        # 加载数据
+        # 加载数据 (优先从 csv 读取 dtype/shape)
+        row_dtype = row.get("dtype") or dtype
+        row_shape = row.get("shape") or shape
+
         load_kwargs = {}
-        if dtype:
-            load_kwargs["dtype"] = dtype
-        if shape:
-            load_kwargs["shape"] = shape
+        if row_dtype:
+            import numpy as np
+            load_kwargs["dtype"] = getattr(np, row_dtype) if isinstance(row_dtype, str) else row_dtype
+        if row_shape:
+            if isinstance(row_shape, str):
+                load_kwargs["shape"] = tuple(int(x) for x in row_shape.split(","))
+            else:
+                load_kwargs["shape"] = row_shape
 
         golden = load(golden_path, format=format, **load_kwargs)
         result = load(result_path, format=format, **load_kwargs)

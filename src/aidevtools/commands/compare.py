@@ -22,6 +22,7 @@ def cmd_compare(
     golden: str = "",
     result: str = "",
     dtype: str = "float32",
+    shape: str = "",
 ):
     """
     比数工具
@@ -42,7 +43,8 @@ def cmd_compare(
         compare                              一键式流程
         compare 1 --output=./workspace       生成配置表
         compare 3 --csv=compare.csv          运行比数
-        compare s --golden=a.bin --result=b.bin
+        compare 3 --csv=compare.csv --op=conv1   单用例比数
+        compare s --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32
     """
     # 默认一键式流程
     if not action:
@@ -92,14 +94,16 @@ def cmd_compare(
 
     elif action in ("s", "single"):
         if not golden or not result:
-            logger.error("请指定文件: compare s --golden=a.bin --result=b.bin")
+            logger.error("请指定文件: compare s --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32")
             return 1
         dt = getattr(np, dtype)
-        g = load(golden, format="raw", dtype=dt)
-        r = load(result, format="raw", dtype=dt)
+        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        g = load(golden, format="raw", dtype=dt, shape=sh)
+        r = load(result, format="raw", dtype=dt, shape=sh)
         diff = compare_full(g, r)
         status = "PASS" if diff.passed else "FAIL"
         print(f"状态: {status}")
+        print(f"shape: {g.shape}")
         print(f"max_abs: {diff.max_abs:.6e}")
         print(f"qsnr: {diff.qsnr:.2f} dB")
         print(f"cosine: {diff.cosine:.6f}")
