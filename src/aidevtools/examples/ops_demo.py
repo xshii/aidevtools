@@ -2,105 +2,23 @@
 """
 算子 API 使用示例
 
-展示两种模式:
-1. reference 模式: 使用内置 numpy 实现（模糊比对）
-2. golden 模式: 使用用户注册的 Golden 实现（精确比对）
+调用算子时，自动同时执行:
+1. reference 实现 (numpy) -> 保存为 golden（参考标准）
+2. golden 实现 (用户注册的 C++ binding) -> 保存为 result（待验证）
 """
 import numpy as np
 
-from aidevtools.ops import set_mode, get_mode, register_golden
-from aidevtools.ops.nn import linear, relu, gelu, softmax, layernorm, attention
-from aidevtools.trace import dump, gen_csv, clear
+from aidevtools.ops import register_golden, clear, dump, gen_csv
+from aidevtools.ops.nn import linear, relu, softmax
 
 
-def demo_reference_mode():
-    """模糊比对模式演示"""
+def demo_without_golden():
+    """未注册 golden 实现时"""
     print("=" * 50)
-    print("Reference 模式（模糊比对）")
-    print("=" * 50)
-
-    set_mode("reference")
-    print(f"当前模式: {get_mode()}")
-
-    # 使用内置 numpy 实现
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    w = np.random.randn(64, 128).astype(np.float32)
-    b = np.random.randn(128).astype(np.float32)
-
-    y = linear(x, w, b)
-    print(f"linear: {x.shape} -> {y.shape}")
-
-    y = relu(x)
-    print(f"relu: {x.shape} -> {y.shape}")
-
-    y = gelu(x)
-    print(f"gelu: {x.shape} -> {y.shape}")
-
-    y = softmax(x)
-    print(f"softmax: {x.shape} -> {y.shape}, sum={y.sum(axis=-1)[0,0]:.4f}")
-
-    gamma = np.ones(64, dtype=np.float32)
-    beta = np.zeros(64, dtype=np.float32)
-    y = layernorm(x, gamma, beta)
-    print(f"layernorm: {x.shape} -> {y.shape}")
-
-
-def demo_golden_mode():
-    """精确比对模式演示"""
-    print("\n" + "=" * 50)
-    print("Golden 模式（精确比对）")
+    print("场景 1: 未注册 Golden 实现")
     print("=" * 50)
 
-    # 先注册 Golden 实现
-    # 实际使用时，这里调用 C++ binding
-    @register_golden("linear")
-    def golden_linear(x, weight, bias=None):
-        """模拟 Golden 实现（实际应调用 C++ 库）"""
-        print("  [调用 Golden linear]")
-        y = np.matmul(x, weight)
-        if bias is not None:
-            y = y + bias
-        return y
-
-    @register_golden("relu")
-    def golden_relu(x):
-        """模拟 Golden 实现"""
-        print("  [调用 Golden relu]")
-        return np.maximum(0, x)
-
-    # 切换到 golden 模式
-    set_mode("golden")
-    print(f"当前模式: {get_mode()}")
-
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    w = np.random.randn(64, 128).astype(np.float32)
-    b = np.random.randn(128).astype(np.float32)
-
-    y = linear(x, w, b)
-    print(f"linear: {x.shape} -> {y.shape}")
-
-    y = relu(x)
-    print(f"relu: {x.shape} -> {y.shape}")
-
-    # gelu 没有注册 Golden，会报错
-    print("\n尝试调用未注册的 gelu:")
-    try:
-        y = gelu(x)
-    except ValueError as e:
-        print(f"  错误: {e}")
-
-
-def demo_workflow():
-    """完整工作流演示"""
-    print("\n" + "=" * 50)
-    print("完整工作流")
-    print("=" * 50)
-
-    clear()  # 清空之前的 trace 记录
-
-    # 1. Reference 模式快速验证
-    print("\n[1] Reference 模式快速验证流程")
-    set_mode("reference")
+    clear()
 
     x = np.random.randn(2, 8, 64).astype(np.float32)
     w = np.random.randn(64, 64).astype(np.float32)
@@ -108,46 +26,99 @@ def demo_workflow():
     y = linear(x, w)
     y = relu(y)
     y = softmax(y)
-    print(f"    输出: {y.shape}")
 
-    # 2. 导出
-    print("\n[2] 导出数据")
-    dump("./workspace", format="raw")
-    csv_path = gen_csv("./workspace", model_name="demo")
-    print(f"    CSV: {csv_path}")
+    print(f"  linear -> relu -> softmax")
+    print(f"  输入: {x.shape}, 输出: {y.shape}")
+    print(f"  softmax sum (should be 1.0): {y.sum(axis=-1)[0, 0]:.4f}")
 
-    # 3. 切换到 Golden 模式精确验证
-    print("\n[3] Golden 模式精确验证")
-    print("    (需要先注册 Golden 实现，然后重新运行)")
+    # 导出
+    dump("./workspace_no_golden", format="raw")
+    csv_path = gen_csv("./workspace_no_golden", model_name="no_golden")
+    print(f"  CSV: {csv_path}")
+    print("  注意: result_bin 列为空，需要后续填充模拟器输出")
+
+
+def demo_with_golden():
+    """注册 golden 实现后"""
+    print("\n" + "=" * 50)
+    print("场景 2: 注册 Golden 实现")
+    print("=" * 50)
+
+    # 注册 golden 实现（模拟 C++ binding）
+    @register_golden("linear")
+    def golden_linear(x, weight, bias=None):
+        """模拟的 Golden 实现（实际应调用 C++ 库）"""
+        # 这里故意加一点噪声，模拟硬件误差
+        y = np.matmul(x, weight)
+        if bias is not None:
+            y = y + bias
+        y = y + np.random.randn(*y.shape).astype(np.float32) * 1e-6
+        return y
+
+    @register_golden("relu")
+    def golden_relu(x):
+        return np.maximum(0, x)
+
+    @register_golden("softmax")
+    def golden_softmax(x, axis=-1):
+        x_max = np.max(x, axis=axis, keepdims=True)
+        x_exp = np.exp(x - x_max)
+        return x_exp / np.sum(x_exp, axis=axis, keepdims=True)
+
+    clear()
+
+    x = np.random.randn(2, 8, 64).astype(np.float32)
+    w = np.random.randn(64, 64).astype(np.float32)
+
+    y = linear(x, w)
+    y = relu(y)
+    y = softmax(y)
+
+    print(f"  linear -> relu -> softmax")
+    print(f"  输入: {x.shape}, 输出: {y.shape}")
+
+    # 导出
+    dump("./workspace_with_golden", format="raw")
+    csv_path = gen_csv("./workspace_with_golden", model_name="with_golden")
+    print(f"  CSV: {csv_path}")
+    print("  注意: result_bin 列已填充，可直接比对")
 
 
 def main():
-    demo_reference_mode()
-    demo_golden_mode()
-    demo_workflow()
+    demo_without_golden()
+    demo_with_golden()
 
     print("\n" + "=" * 50)
-    print("使用说明")
+    print("工作流说明")
     print("=" * 50)
     print("""
-1. Reference 模式（默认）:
-   - 使用内置 numpy 实现
-   - 适合快速验证流程、模糊比对
+1. 未注册 Golden:
+   - 只执行 reference (numpy) 实现
+   - 导出 golden.bin（标准答案）、input.bin、weight.bin
+   - result_bin 留空，等待模拟器运行后填充
 
-2. Golden 模式:
-   - 需要用户注册 Golden 实现
-   - 适合精确比对
+2. 已注册 Golden:
+   - 同时执行 reference 和 golden 两种实现
+   - 导出 golden.bin（numpy）、result.bin（用户实现）
+   - 可直接用 compare 工具比对两者差异
 
-切换模式:
-    from aidevtools.ops import set_mode
-    set_mode("reference")  # 或 "golden"
+使用方法:
+    from aidevtools.ops import register_golden, clear, dump, gen_csv
+    from aidevtools.ops.nn import linear, relu, softmax
 
-注册 Golden:
-    from aidevtools.ops import register_golden
-
+    # 1. 注册 Golden 实现
     @register_golden("linear")
-    def my_golden_linear(x, weight, bias=None):
+    def my_linear(x, weight, bias=None):
         return my_cpp_lib.linear(x, weight, bias)
+
+    # 2. 执行算子流程
+    clear()
+    y = linear(x, w, b)
+    y = relu(y)
+
+    # 3. 导出
+    dump("./output")
+    gen_csv("./output", model_name="my_model")
 """)
 
 
