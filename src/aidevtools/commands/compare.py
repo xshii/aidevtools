@@ -4,7 +4,7 @@ from prettycli import command
 
 from aidevtools.tools.compare.diff import compare_full
 from aidevtools.tools.compare.runner import run_compare, archive
-from aidevtools.tools.compare.quantize import list_quantize
+from aidevtools.formats.quantize import list_quantize
 from aidevtools.trace.tracer import dump, gen_csv, clear
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
@@ -169,7 +169,7 @@ def cmd_compare(
 
     elif action in ("t", "convert"):
         # 类型转换导出
-        from aidevtools.tools.compare.quantize import quantize
+        from aidevtools.formats.quantize import quantize
 
         if not golden:
             logger.error("请指定输入文件: compare t --golden=a.bin --output=out.bin --target_dtype=float16")

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, Dict, Any, List
 
 from aidevtools.core.log import logger
-from aidevtools.tools.compare.quantize import quantize, list_quantize
+from aidevtools.formats.quantize import quantize, list_quantize
 
 
 class FuzzyCase:
