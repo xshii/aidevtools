@@ -51,7 +51,7 @@ failed_cases/
 *.temp
 .DS_Store
 
-# Golden C++ build artifacts
-src/aidevtools/golden/cpp/build/
-src/aidevtools/golden/*.so
+# C++ build artifacts
+src/aidevtools/formats/custom/*/cpp/build/
+src/aidevtools/formats/custom/*/*.so
 

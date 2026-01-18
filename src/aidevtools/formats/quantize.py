@@ -71,4 +71,5 @@ def to_int8_asymmetric(data: np.ndarray, **kwargs) -> tuple:
 
 
 # 导入自定义格式以触发注册
-from aidevtools.formats.custom import gfloat
+from aidevtools.formats.custom.gfloat import golden as _gfloat_golden
+from aidevtools.formats.custom.bfp import golden as _bfp_golden
