@@ -101,3 +101,38 @@ class TestFuzzyCase:
         assert info["name"] == "test"
         assert info["inputs"]["x"]["shape"] == [2, 3]
         assert info["golden_shape"] == [2, 3]
+
+    def test_export_with_int8_meta(self, tmp_path):
+        """导出带 meta 信息的量化数据"""
+        from aidevtools.tools.compare.fuzzy import FuzzyCase
+        from aidevtools.formats.quantize import register_quantize
+
+        # 注册一个带 meta 的量化类型
+        @register_quantize("test_int8")
+        def to_test_int8(data, **kwargs):
+            scale = np.max(np.abs(data)) / 127
+            q_data = np.round(data / scale).astype(np.int8)
+            return q_data, {"scale": float(scale), "zero_point": 0}
+
+        case = FuzzyCase("test_meta", str(tmp_path))
+        x = np.random.randn(4, 4).astype(np.float32)
+        w = np.random.randn(4, 4).astype(np.float32)
+
+        case.set_input("x", x)
+        case.set_weight("w", w)
+        case.set_compute(lambda inputs, weights: np.matmul(inputs["x"], weights["w"]))
+        case.compute_golden()
+
+        paths = case.export(qtype="test_int8")
+
+        # 检查 meta 文件
+        input_meta_path = tmp_path / "test_meta" / "input_x.meta"
+        weight_meta_path = tmp_path / "test_meta" / "weight_w.meta"
+
+        assert input_meta_path.exists()
+        assert weight_meta_path.exists()
+
+        # 检查 meta 内容
+        meta_content = input_meta_path.read_text()
+        assert "scale=" in meta_content
+        assert "zero_point=" in meta_content

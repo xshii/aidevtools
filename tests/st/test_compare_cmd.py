@@ -284,3 +284,66 @@ class TestCompareUnknownCmd:
 
         ret = cmd_compare(action="unknown_action")
         assert ret == 1
+
+
+class TestCompareDumpCmd:
+    """dump 子命令测试"""
+
+    def setup_method(self):
+        from aidevtools.trace.tracer import clear
+        clear()
+
+    def test_dump(self, tmp_path):
+        """导出数据"""
+        from aidevtools.commands.compare import cmd_compare
+        from aidevtools.trace.tracer import trace
+
+        @trace
+        def test_op(x):
+            return x * 2
+
+        x = np.random.randn(2, 4).astype(np.float32)
+        test_op(x)
+
+        ret = cmd_compare(action="dump", output=str(tmp_path))
+        assert ret == 0
+
+        # 检查文件生成
+        assert (tmp_path / "test_op_0_golden.bin").exists()
+
+
+class TestCompareOneClickFlow:
+    """一键式流程测试"""
+
+    def setup_method(self):
+        from aidevtools.trace.tracer import clear
+        clear()
+
+    def test_oneclick_flow(self, tmp_path):
+        """一键式比数流程"""
+        from aidevtools.commands.compare import cmd_compare
+        from aidevtools.trace.tracer import trace
+
+        @trace
+        def my_op(x):
+            return x * 2
+
+        x = np.random.randn(2, 4).astype(np.float32)
+        my_op(x)
+
+        # 执行一键式流程
+        ret = cmd_compare(
+            action="",  # 空 action 触发一键式流程
+            output=str(tmp_path),
+            model="test",
+        )
+
+        assert ret == 0
+
+        # 检查生成的文件
+        csv_files = list(tmp_path.glob("*_compare.csv"))
+        assert len(csv_files) == 1
+
+        # 检查 zip 文件
+        zip_files = list(tmp_path.glob("*.zip"))
+        assert len(zip_files) == 1

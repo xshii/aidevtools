@@ -208,6 +208,166 @@ class TestRunCompare:
             assert len(rows) == 1
             assert rows[0]["op_name"] == "op1"
 
+    def test_run_compare_mode_filter(self, tmp_path):
+        """模式过滤"""
+        from aidevtools.tools.compare.runner import run_compare
+
+        golden = np.random.randn(2, 4).astype(np.float32)
+
+        # 创建两个不同 mode 的算子
+        for op, mode in [("op1", "single"), ("op2", "chain")]:
+            (tmp_path / f"{op}_golden.bin").write_bytes(golden.tobytes())
+            (tmp_path / f"{op}_result.bin").write_bytes(golden.tobytes())
+
+        csv_path = tmp_path / "compare.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "op_name", "mode", "input_bin", "weight_bin", "golden_bin",
+                "result_bin", "dtype", "shape", "qtype", "skip", "note"
+            ])
+            writer.writeheader()
+            for op, mode in [("op1", "single"), ("op2", "chain")]:
+                writer.writerow({
+                    "op_name": op,
+                    "mode": mode,
+                    "input_bin": "",
+                    "weight_bin": "",
+                    "golden_bin": str(tmp_path / f"{op}_golden.bin"),
+                    "result_bin": str(tmp_path / f"{op}_result.bin"),
+                    "dtype": "float32",
+                    "shape": "2,4",
+                    "qtype": "",
+                    "skip": "false",
+                    "note": "",
+                })
+
+        # 只跑 single 模式
+        run_compare(str(csv_path), output_dir=str(tmp_path / "details"), mode_filter="single")
+
+        result_csv = csv_path.with_name("compare_result.csv")
+        with open(result_csv) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            assert len(rows) == 1
+            assert rows[0]["op_name"] == "op1"
+
+    def test_run_compare_with_qtype(self, tmp_path):
+        """模糊比对（带 qtype）"""
+        from aidevtools.tools.compare.runner import run_compare
+
+        golden = np.random.randn(2, 4).astype(np.float32)
+        result = golden + np.random.randn(2, 4).astype(np.float32) * 0.01
+
+        golden_path = tmp_path / "test_op_golden.bin"
+        result_path = tmp_path / "test_op_result.bin"
+        golden.tofile(golden_path)
+        result.tofile(result_path)
+
+        csv_path = tmp_path / "compare.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "op_name", "mode", "input_bin", "weight_bin", "golden_bin",
+                "result_bin", "dtype", "shape", "qtype", "skip", "note"
+            ])
+            writer.writeheader()
+            writer.writerow({
+                "op_name": "test_op",
+                "mode": "single",
+                "input_bin": "",
+                "weight_bin": "",
+                "golden_bin": str(golden_path),
+                "result_bin": str(result_path),
+                "dtype": "float32",
+                "shape": "2,4",
+                "qtype": "float16",  # 触发模糊比对
+                "skip": "false",
+                "note": "",
+            })
+
+        run_compare(str(csv_path), output_dir=str(tmp_path / "details"))
+
+        result_csv = csv_path.with_name("compare_result.csv")
+        with open(result_csv) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            assert len(rows) == 1
+            # 应该有模糊比对指标
+            assert "fuzzy_qsnr" in rows[0]
+            assert "fuzzy_cosine" in rows[0]
+            assert rows[0]["fuzzy_qsnr"] != ""
+
+    def test_run_compare_missing_golden(self, tmp_path):
+        """golden 文件不存在"""
+        from aidevtools.tools.compare.runner import run_compare
+
+        result = np.random.randn(2, 4).astype(np.float32)
+        result_path = tmp_path / "test_op_result.bin"
+        result.tofile(result_path)
+
+        csv_path = tmp_path / "compare.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "op_name", "mode", "input_bin", "weight_bin", "golden_bin",
+                "result_bin", "dtype", "shape", "qtype", "skip", "note"
+            ])
+            writer.writeheader()
+            writer.writerow({
+                "op_name": "test_op",
+                "mode": "single",
+                "input_bin": "",
+                "weight_bin": "",
+                "golden_bin": str(tmp_path / "nonexistent_golden.bin"),
+                "result_bin": str(result_path),
+                "dtype": "float32",
+                "shape": "2,4",
+                "qtype": "",
+                "skip": "false",
+                "note": "",
+            })
+
+        # 不应该崩溃，只是跳过
+        run_compare(str(csv_path), output_dir=str(tmp_path / "details"))
+
+        # 没有有效结果
+        result_csv = csv_path.with_name("compare_result.csv")
+        assert not result_csv.exists()
+
+    def test_run_compare_missing_result(self, tmp_path):
+        """result 文件不存在"""
+        from aidevtools.tools.compare.runner import run_compare
+
+        golden = np.random.randn(2, 4).astype(np.float32)
+        golden_path = tmp_path / "test_op_golden.bin"
+        golden.tofile(golden_path)
+
+        csv_path = tmp_path / "compare.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "op_name", "mode", "input_bin", "weight_bin", "golden_bin",
+                "result_bin", "dtype", "shape", "qtype", "skip", "note"
+            ])
+            writer.writeheader()
+            writer.writerow({
+                "op_name": "test_op",
+                "mode": "single",
+                "input_bin": "",
+                "weight_bin": "",
+                "golden_bin": str(golden_path),
+                "result_bin": str(tmp_path / "nonexistent_result.bin"),
+                "dtype": "float32",
+                "shape": "2,4",
+                "qtype": "",
+                "skip": "false",
+                "note": "",
+            })
+
+        # 不应该崩溃，只是跳过
+        run_compare(str(csv_path), output_dir=str(tmp_path / "details"))
+
+        # 没有有效结果
+        result_csv = csv_path.with_name("compare_result.csv")
+        assert not result_csv.exists()
+
 
 class TestArchive:
     """archive 打包测试"""
