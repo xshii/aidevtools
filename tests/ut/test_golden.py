@@ -79,6 +79,25 @@ class TestGfloatGolden:
         result = is_cpp_available()
         assert isinstance(result, bool)
 
+    def test_check_cpp_error(self):
+        """C++ 不可用时报错"""
+        from aidevtools.golden import gfloat_wrapper
+
+        # 模拟 C++ 不可用
+        original_cpp = gfloat_wrapper._cpp
+        original_error = gfloat_wrapper._import_error
+
+        try:
+            gfloat_wrapper._cpp = None
+            gfloat_wrapper._import_error = ImportError("test error")
+
+            with pytest.raises(ImportError, match="未编译或加载失败"):
+                gfloat_wrapper._check_cpp()
+        finally:
+            # 恢复
+            gfloat_wrapper._cpp = original_cpp
+            gfloat_wrapper._import_error = original_error
+
 
 class TestGfloatGoldenRegister:
     """Golden 注册测试"""
