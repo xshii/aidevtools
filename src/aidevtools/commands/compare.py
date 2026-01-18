@@ -11,21 +11,8 @@ from aidevtools.core.log import logger
 
 # === 分步流程 ===
 
-@command("compare1-dump", help="步骤1: 导出 Golden 数据")
-def cmd_1(output: str = "./workspace", format: str = "raw"):
-    """
-    导出 @trace 记录的 Golden 数据
-
-    Args:
-        output: 输出目录
-        format: 数据格式 (raw/numpy)
-    """
-    dump(output, format=format)
-    return 0
-
-
-@command("compare2-csv", help="步骤2: 生成 compare.csv")
-def cmd_2(output: str = "./workspace", model: str = "model"):
+@command("compare1-csv", help="步骤1: 生成 compare.csv")
+def cmd_1(output: str = "./workspace", model: str = "model"):
     """
     生成 compare.csv 配置表
 
@@ -35,6 +22,19 @@ def cmd_2(output: str = "./workspace", model: str = "model"):
     """
     csv_path = gen_csv(output, model)
     print(f"生成: {csv_path}")
+    return 0
+
+
+@command("compare2-dump", help="步骤2: 导出 Golden 数据")
+def cmd_2(output: str = "./workspace", format: str = "raw"):
+    """
+    导出 @trace 记录的 Golden 数据
+
+    Args:
+        output: 输出目录
+        format: 数据格式 (raw/numpy)
+    """
+    dump(output, format=format)
     return 0
 
 
