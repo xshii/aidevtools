@@ -3,12 +3,20 @@
 每个算子包含两种实现：
 - golden_python: Python Golden 实现（fp32，精确实现）
 - reference: 高精度参考实现（fp64，用于 fuzzy 比对）
+
+使用 @register_op 装饰器自动注册算子元信息。
 """
 import numpy as np
 
 from aidevtools.ops.base import Op
+from aidevtools.ops.registry import register_op
 
 
+@register_op(
+    inputs=["x", "weight"],
+    optional=["bias"],
+    description="线性变换 y = x @ weight + bias",
+)
 class Linear(Op):
     """线性层: y = x @ W + b"""
     name = "linear"
@@ -29,6 +37,10 @@ class Linear(Op):
         return y.astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    description="ReLU 激活 y = max(0, x)",
+)
 class ReLU(Op):
     """ReLU: y = max(0, x)"""
     name = "relu"
@@ -40,6 +52,10 @@ class ReLU(Op):
         return np.maximum(0, x.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    description="GELU 激活 (近似)",
+)
 class GELU(Op):
     """GELU 近似"""
     name = "gelu"
@@ -52,6 +68,10 @@ class GELU(Op):
         return (0.5 * x64 * (1 + np.tanh(np.sqrt(2 / np.pi) * (x64 + 0.044715 * x64 ** 3)))).astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    description="Sigmoid 激活 y = 1 / (1 + exp(-x))",
+)
 class Sigmoid(Op):
     """Sigmoid: y = 1 / (1 + exp(-x))"""
     name = "sigmoid"
@@ -64,6 +84,10 @@ class Sigmoid(Op):
         return (1 / (1 + np.exp(-x64))).astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    description="Tanh 激活",
+)
 class Tanh(Op):
     """Tanh"""
     name = "tanh"
@@ -75,6 +99,12 @@ class Tanh(Op):
         return np.tanh(x.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    optional=["axis"],
+    description="Softmax 激活 (防溢出)",
+    has_cpp_golden=True,
+)
 class Softmax(Op):
     """安全 Softmax（防溢出）"""
     name = "softmax"
@@ -91,6 +121,12 @@ class Softmax(Op):
         return (x_exp / np.sum(x_exp, axis=axis, keepdims=True)).astype(np.float32)
 
 
+@register_op(
+    inputs=["x", "gamma", "beta"],
+    optional=["eps"],
+    description="Layer Normalization",
+    has_cpp_golden=True,
+)
 class LayerNorm(Op):
     """Layer Normalization"""
     name = "layernorm"
@@ -109,6 +145,11 @@ class LayerNorm(Op):
         return (gamma.astype(np.float64) * x_norm + beta.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["x", "gamma", "beta"],
+    optional=["mean", "var", "eps"],
+    description="Batch Normalization",
+)
 class BatchNorm(Op):
     """Batch Normalization"""
     name = "batchnorm"
@@ -137,6 +178,10 @@ class BatchNorm(Op):
         return (gamma.astype(np.float64) * x_norm + beta.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["input_ids", "embed_table"],
+    description="Embedding 查表",
+)
 class Embedding(Op):
     """Embedding 查表"""
     name = "embedding"
@@ -149,6 +194,11 @@ class Embedding(Op):
         return embed_table[input_ids].astype(np.float32)
 
 
+@register_op(
+    inputs=["a", "b"],
+    description="矩阵乘法 c = a @ b",
+    has_cpp_golden=True,
+)
 class MatMul(Op):
     """矩阵乘法"""
     name = "matmul"
@@ -160,6 +210,10 @@ class MatMul(Op):
         return np.matmul(a.astype(np.float64), b.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["a", "b"],
+    description="逐元素加法",
+)
 class Add(Op):
     """加法"""
     name = "add"
@@ -171,6 +225,10 @@ class Add(Op):
         return (a.astype(np.float64) + b.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["a", "b"],
+    description="逐元素乘法",
+)
 class Mul(Op):
     """乘法"""
     name = "mul"
@@ -182,6 +240,10 @@ class Mul(Op):
         return (a.astype(np.float64) * b.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["a", "b"],
+    description="逐元素除法",
+)
 class Div(Op):
     """除法"""
     name = "div"
@@ -193,6 +255,12 @@ class Div(Op):
         return (a.astype(np.float64) / b.astype(np.float64)).astype(np.float32)
 
 
+@register_op(
+    inputs=["x"],
+    optional=["axes"],
+    description="转置 (交换最后两个维度或指定轴)",
+    has_cpp_golden=True,
+)
 class Transpose(Op):
     """Transpose: 支持任意维度转置"""
     name = "transpose"
@@ -215,6 +283,11 @@ class Transpose(Op):
         return np.transpose(x.astype(np.float64), axes).astype(np.float32)
 
 
+@register_op(
+    inputs=["q", "k", "v"],
+    optional=["mask", "scale"],
+    description="Scaled Dot-Product Attention",
+)
 class Attention(Op):
     """Scaled Dot-Product Attention"""
     name = "attention"

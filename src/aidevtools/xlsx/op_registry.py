@@ -1,67 +1,30 @@
 """算子注册表
 
-定义 xlsx 模板中可用的算子列表及其元信息。
+从统一注册表 (ops.registry) 获取算子信息。
+为了向后兼容，保留原有 API。
+
+注意：算子定义现在集中在 ops/nn.py，使用 @register_op 装饰器。
 """
 from typing import Dict, List, Any
 
-# 默认算子注册表
-# key: 算子名
-# value: 算子元信息
-_default_ops: Dict[str, Dict[str, Any]] = {
-    "linear": {
-        "inputs": ["x", "weight"],
-        "optional": ["bias"],
-        "description": "线性变换 y = x @ weight + bias",
-    },
-    "matmul": {
-        "inputs": ["a", "b"],
-        "optional": [],
-        "description": "矩阵乘法 c = a @ b",
-    },
+# 导入 nn 模块以触发算子注册
+from aidevtools.ops import nn as _nn  # noqa: F401
+
+# 从统一注册表导入
+from aidevtools.ops.registry import (
+    get_op_info,
+    list_ops,
+    validate_op,
+    get_all_ops,
+)
+
+# 额外的算子定义（不在 nn.py 中实现的）
+# 这些算子仅用于 xlsx 模板，可能没有对应的 Python 实现
+_extra_ops: Dict[str, Dict[str, Any]] = {
     "conv2d": {
         "inputs": ["x", "weight"],
         "optional": ["bias", "stride", "padding"],
         "description": "2D 卷积",
-    },
-    "relu": {
-        "inputs": ["x"],
-        "optional": [],
-        "description": "ReLU 激活",
-    },
-    "softmax": {
-        "inputs": ["x"],
-        "optional": ["axis"],
-        "description": "Softmax 激活",
-    },
-    "layernorm": {
-        "inputs": ["x", "weight", "bias"],
-        "optional": ["eps"],
-        "description": "Layer Normalization",
-    },
-    "batchnorm": {
-        "inputs": ["x", "mean", "var", "weight", "bias"],
-        "optional": ["eps"],
-        "description": "Batch Normalization",
-    },
-    "attention": {
-        "inputs": ["q", "k", "v"],
-        "optional": ["mask", "scale"],
-        "description": "Scaled Dot-Product Attention",
-    },
-    "add": {
-        "inputs": ["a", "b"],
-        "optional": [],
-        "description": "逐元素加法",
-    },
-    "mul": {
-        "inputs": ["a", "b"],
-        "optional": [],
-        "description": "逐元素乘法",
-    },
-    "transpose": {
-        "inputs": ["x"],
-        "optional": ["axes"],
-        "description": "转置",
     },
     "reshape": {
         "inputs": ["x"],
@@ -87,22 +50,29 @@ _default_ops: Dict[str, Dict[str, Any]] = {
 
 
 def get_default_ops() -> Dict[str, Dict[str, Any]]:
-    """获取默认算子注册表"""
-    return _default_ops.copy()
+    """
+    获取默认算子注册表
+
+    Returns:
+        合并后的算子注册表 (统一注册表 + 额外算子)
+    """
+    # 从统一注册表获取所有算子
+    result = {}
+    for name in list_ops():
+        result[name] = get_op_info(name)
+
+    # 添加额外的算子
+    for name, info in _extra_ops.items():
+        if name not in result:
+            result[name] = info
+
+    return result
 
 
-def get_op_info(name: str) -> Dict[str, Any]:
-    """获取算子信息"""
-    if name not in _default_ops:
-        return {"inputs": ["x"], "optional": [], "description": f"自定义算子: {name}"}
-    return _default_ops[name]
-
-
-def list_ops() -> List[str]:
-    """列出所有注册的算子"""
-    return list(_default_ops.keys())
-
-
-def validate_op(name: str) -> bool:
-    """检查算子是否有效"""
-    return name in _default_ops
+# 重新导出 API (向后兼容)
+__all__ = [
+    "get_op_info",
+    "list_ops",
+    "validate_op",
+    "get_default_ops",
+]
