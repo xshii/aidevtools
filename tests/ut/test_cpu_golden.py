@@ -10,6 +10,13 @@ from pathlib import Path
 CPU_GOLDEN_PATH = Path(__file__).parent.parent.parent / "src/aidevtools/golden/cpu_golden"
 
 
+def skip_if_not_available():
+    """检查 cpu_golden Python wrapper 是否可用"""
+    from aidevtools.golden import is_cpu_golden_available
+    if not is_cpu_golden_available():
+        pytest.skip("cpu_golden not available")
+
+
 def skip_if_not_built():
     """检查 cpu_golden 是否已编译"""
     if not CPU_GOLDEN_PATH.exists():
@@ -357,3 +364,111 @@ class TestCpuGoldenCLI:
             capture_output=True, text=True
         )
         assert result.returncode == 1
+
+
+# ==================== Python Wrapper 测试 ====================
+
+class TestPythonWrapper:
+    """Python Wrapper 测试"""
+
+    def setup_method(self):
+        skip_if_not_available()
+
+    def test_matmul_wrapper(self):
+        """matmul Python wrapper"""
+        from aidevtools.golden import matmul
+
+        M, K, N = 4, 8, 16
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        c = matmul(a, b, dtype="gfp16")
+
+        assert c.shape == (M, N)
+        assert c.dtype == np.float32
+
+    def test_softmax_wrapper(self):
+        """softmax Python wrapper"""
+        from aidevtools.golden import softmax
+
+        batch, seq = 4, 16
+        x = np.random.randn(batch, seq).astype(np.float32)
+
+        y = softmax(x, dtype="gfp16")
+
+        assert y.shape == (batch, seq)
+        # softmax 输出每行和应该接近 1
+        assert np.allclose(y.sum(axis=1), 1.0, atol=0.05)
+
+    def test_softmax_1d(self):
+        """softmax 1D input"""
+        from aidevtools.golden import softmax
+
+        x = np.random.randn(8).astype(np.float32)
+        y = softmax(x, dtype="gfp16")
+
+        assert y.shape == (8,)
+        assert np.allclose(y.sum(), 1.0, atol=0.05)
+
+    def test_layernorm_wrapper(self):
+        """layernorm Python wrapper"""
+        from aidevtools.golden import layernorm
+
+        batch, hidden = 4, 64
+        x = np.random.randn(batch, hidden).astype(np.float32)
+        gamma = np.ones(hidden, dtype=np.float32)
+        beta = np.zeros(hidden, dtype=np.float32)
+
+        y = layernorm(x, gamma, beta, dtype="gfp16")
+
+        assert y.shape == (batch, hidden)
+        # layernorm 输出每行均值应接近 0
+        assert np.allclose(y.mean(axis=1), 0.0, atol=0.1)
+
+
+class TestRegisterCpuGolden:
+    """注册 CPU Golden 到 ops 框架测试"""
+
+    def setup_method(self):
+        skip_if_not_available()
+        from aidevtools.ops.base import clear, set_golden_mode, _golden_cpp_registry
+        clear()
+        _golden_cpp_registry.clear()
+        set_golden_mode("python")
+
+    def teardown_method(self):
+        from aidevtools.ops.base import set_golden_mode, _golden_cpp_registry
+        _golden_cpp_registry.clear()
+        set_golden_mode("python")
+
+    def test_register_all(self):
+        """register_all_cpu_golden"""
+        from aidevtools.golden import register_all_cpu_golden
+        from aidevtools.ops.base import has_golden_cpp
+
+        register_all_cpu_golden("gfp16")
+
+        assert has_golden_cpp("matmul")
+        assert has_golden_cpp("softmax")
+        assert has_golden_cpp("layernorm")
+
+    def test_use_cpp_golden_mode(self):
+        """使用 cpp golden mode"""
+        from aidevtools.golden import register_all_cpu_golden
+        from aidevtools.ops.base import set_golden_mode, clear, get_records
+        from aidevtools.ops.nn import softmax
+
+        register_all_cpu_golden("gfp16")
+        set_golden_mode("cpp")
+        clear()
+
+        x = np.random.randn(2, 8).astype(np.float32)
+        y = softmax(x)
+
+        assert y.shape == (2, 8)
+        # softmax 输出每行和应该接近 1
+        assert np.allclose(y.sum(axis=1), 1.0, atol=0.1)
+
+        records = get_records()
+        assert len(records) == 1
+        assert records[0]["golden"] is not None
