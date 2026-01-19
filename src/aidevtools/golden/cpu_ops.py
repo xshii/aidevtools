@@ -95,11 +95,11 @@ def _get_gfloat_numpy_dtype(dtype: GFloatType):
 
 def matmul(a: np.ndarray, b: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndarray:
     """
-    MatMul: C = A @ B
+    MatMul: C = A @ B (支持 batch)
 
     Args:
         a: 输入矩阵 A, shape [..., M, K]
-        b: 输入矩阵 B, shape [..., K, N]
+        b: 输入矩阵 B, shape [..., K, N] 或 [K, N]
         dtype: gfloat 类型 (gfp4, gfp8, gfp16)
 
     Returns:
@@ -107,17 +107,57 @@ def matmul(a: np.ndarray, b: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndar
     """
     _check_cpu_golden()
 
-    # 处理 batch 维度 (暂时只支持 2D)
     a = np.asarray(a, dtype=np.float32)
     b = np.asarray(b, dtype=np.float32)
 
-    if a.ndim != 2 or b.ndim != 2:
-        raise ValueError(f"matmul only supports 2D matrices, got {a.ndim}D and {b.ndim}D")
+    # 处理 batch 维度
+    a_batch_shape = a.shape[:-2] if a.ndim > 2 else ()
+    b_batch_shape = b.shape[:-2] if b.ndim > 2 else ()
 
-    M, K = a.shape
-    K2, N = b.shape
+    # 获取 M, K, N
+    M, K = a.shape[-2:]
+    if b.ndim == 1:
+        K2, N = b.shape[0], 1
+        b = b.reshape(K2, N)
+    else:
+        K2, N = b.shape[-2:]
+
     assert K == K2, f"Shape mismatch: a.shape={a.shape}, b.shape={b.shape}"
 
+    # 处理 2D 情况 (快速路径)
+    if a.ndim == 2 and b.ndim == 2:
+        return _matmul_2d(a, b, M, K, N, dtype)
+
+    # 处理 batch: flatten batch dims, 循环调用 2D matmul
+    if a.ndim > 2:
+        batch_size = int(np.prod(a_batch_shape))
+        a_flat = a.reshape(batch_size, M, K)
+    else:
+        batch_size = 1
+        a_flat = a.reshape(1, M, K)
+
+    # b 可能没有 batch (广播)
+    if b.ndim == 2:
+        b_batched = False
+        b_flat = b.reshape(1, K, N)
+    else:
+        b_batched = True
+        b_flat = b.reshape(batch_size, K, N)
+
+    # 逐 batch 计算
+    c_flat = np.zeros((batch_size, M, N), dtype=np.float32)
+    for i in range(batch_size):
+        a_i = a_flat[i]
+        b_i = b_flat[i] if b_batched else b_flat[0]
+        c_flat[i] = _matmul_2d(a_i, b_i, M, K, N, dtype)
+
+    # 恢复 batch shape
+    output_shape = a_batch_shape + (M, N)
+    return c_flat.reshape(output_shape)
+
+
+def _matmul_2d(a: np.ndarray, b: np.ndarray, M: int, K: int, N: int, dtype: GFloatType) -> np.ndarray:
+    """2D 矩阵乘法 (内部函数)"""
     with tempfile.TemporaryDirectory() as tmpdir:
         a_path = Path(tmpdir) / "a.bin"
         b_path = Path(tmpdir) / "b.bin"
@@ -330,12 +370,13 @@ def register_all_cpu_golden(dtype: GFloatType = "gfp16"):
         return matmul(a, b, dtype=dtype)
 
     @register_golden_cpp("softmax")
-    def _softmax(x):
+    def _softmax(x, axis=-1):
+        # cpp softmax 沿最后一维计算，忽略 axis 参数
         return softmax(x, dtype=dtype)
 
     @register_golden_cpp("layernorm")
-    def _layernorm(x, gamma, beta):
-        return layernorm(x, gamma, beta, dtype=dtype)
+    def _layernorm(x, gamma, beta, eps=1e-5):
+        return layernorm(x, gamma, beta, dtype=dtype, eps=eps)
 
     @register_golden_cpp("transpose")
     def _transpose(x, axes=None):

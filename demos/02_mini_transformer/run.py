@@ -1,19 +1,21 @@
 #!/usr/bin/env python
-"""MiniTransformer Demo - 使用简化 ops API
+"""MiniTransformer Demo - 完整比对流程演示
 
-演示：
-1. 使用 ops API 定义算子序列（自动生成数据）
-2. 执行 golden + reference
-3. 构造假的 DUT 数据（模拟 bfp 格式处理流程）
-4. 使用框架比对工具比对
+演示完整的 golden 生成与比对流程：
+1. 使用 ops API 定义算子序列
+2. 执行 cpp golden (via subprocess) 和 reference (pure fp32)
+3. 构造假的 DUT 数据（模拟 bfp 格式处理）
+4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
 
-真实流程：
-- Golden: fp32 计算 → bfp8 量化 → fp32 反量化 (带精度损失)
-- DUT: 以 bfp8 格式计算 → bfp8 输出 → fp32 反量化 (用于比对)
+比对流程说明：
+- reference: fp32/fp64 高精度计算（用于 fuzzy_pure 比对）
+- golden: cpp golden 计算（带量化，用于 fuzzy_qnt 比对）
+- DUT: 芯片输出（本 demo 用模拟数据）
 
-本 demo 的假 DUT 模拟：
-- 对 fp32 golden 结果进行 bfp8 量化/反量化
-- 添加小噪声模拟 DUT 计算误差
+三列比对：
+- exact: DUT vs golden 的 bit 级精确比对
+- fuzzy_pure: DUT vs reference (不考虑量化误差)
+- fuzzy_qnt: DUT vs golden (量化感知比对)
 """
 import sys
 from pathlib import Path
@@ -21,9 +23,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
 from aidevtools import ops
-from aidevtools.ops.base import get_records
+from aidevtools.ops.base import get_records, set_golden_mode
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import simulate_quantize
+
+# 注册 cpp golden (通过 subprocess 调用)
+from aidevtools.golden.cpu_ops import register_all_cpu_golden
+register_all_cpu_golden("gfp16")  # 使用 gfp16 格式
+
+# 设置使用 cpp golden
+set_golden_mode("cpp")
 
 
 def run_model():
@@ -31,8 +40,10 @@ def run_model():
     ops.seed(42)
     ops.clear()
 
-    # 定义模型: Linear -> LayerNorm -> Softmax
-    y = ops.linear((2, 8, 64), 32, dtype="bfp8")
+    # 定义模型: MatMul -> LayerNorm -> Softmax
+    # 使用有 cpp golden 的算子 (支持 batch)
+    # MatMul: (2, 8, 64) @ (64, 32) -> (2, 8, 32)
+    y = ops.matmul((2, 8, 64), (64, 32), dtype="bfp8")
     y = ops.layernorm(y, 32, dtype="bfp8")
     y = ops.softmax(y, dtype="bfp8")
 
@@ -72,14 +83,16 @@ def generate_fake_dut(
 
 def main():
     print(f"\n{'=' * 70}")
-    print(f"  MiniTransformer Demo - 模拟 bfp 格式比对流程")
+    print(f"  MiniTransformer Demo - 完整比对流程")
     print(f"{'=' * 70}")
+    print(f"  golden_mode: cpp (via subprocess)")
+    print(f"  quantization: gfp16 (cpp) + bfp8 (simulation)")
 
     # 1. 运行模型
-    print("\n[1] 运行模型 (Linear -> LayerNorm -> Softmax)")
-    print("    dtype=bfp8, 框架自动执行:")
-    print("    - reference: fp32/fp64 精确计算")
-    print("    - golden: fp32 → bfp8 量化 → fp32 反量化")
+    print("\n[1] 运行模型 (MatMul -> LayerNorm -> Softmax)")
+    print("    框架自动执行:")
+    print("    - reference: fp32/fp64 高精度计算 (用于 fuzzy_pure)")
+    print("    - golden: cpp golden via subprocess (用于 fuzzy_qnt)")
     records = run_model()
 
     for r in records:

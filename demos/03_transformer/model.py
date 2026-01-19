@@ -16,23 +16,34 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools.trace import trace
 from aidevtools.formats.quantize import simulate_quantize
-from operators import (
-    linear, relu, gelu, softmax_safe, layernorm, attention, embedding
+
+# 直接使用 CPU Golden (通过 subprocess 调用 cpp)
+from aidevtools.golden.cpu_ops import (
+    softmax as cpu_softmax,
+    layernorm as cpu_layernorm,
 )
 
-# Op 实例直接调用（使用配置的 golden 模式 - cpp 或 python）
-# 这里调用 _get_golden 方法，跳过 trace 记录
-def _softmax(x, axis=-1):
-    return softmax_safe._get_golden(x, axis)
+# 没有 cpp 版本的算子使用 python 实现
+from operators import gelu, embedding
+
+# ==================== Golden 函数封装 ====================
+# 使用 cpp golden (gfloat 格式)，默认 gfp16
+
+def _softmax(x, axis=-1, dtype="gfp16"):
+    """Softmax (cpp golden via subprocess)"""
+    return cpu_softmax(x, dtype=dtype)
+
+def _layernorm(x, gamma, beta, eps=1e-5, dtype="gfp16"):
+    """LayerNorm (cpp golden via subprocess)"""
+    return cpu_layernorm(x, gamma, beta, dtype=dtype, eps=eps)
 
 def _gelu(x):
-    return gelu._get_golden(x)
-
-def _layernorm(x, gamma, beta, eps=1e-5):
-    return layernorm._get_golden(x, gamma, beta, eps)
+    """GELU (python, 无 cpp 版本)"""
+    return gelu.golden_python(x)
 
 def _embedding(input_ids, embed_table):
-    return embedding._get_golden(input_ids, embed_table)
+    """Embedding lookup (python, 无需 cpp)"""
+    return embedding.golden_python(input_ids, embed_table)
 
 
 # ==================== 量化快捷函数 ====================
