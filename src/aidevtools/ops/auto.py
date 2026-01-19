@@ -208,28 +208,45 @@ def matmul(
     a: Union[Tuple[int, ...], np.ndarray],
     b: Union[Tuple[int, ...], np.ndarray],
     dtype: str = DEFAULT_DTYPE,
+    dtype_a: str = None,
+    dtype_b: str = None,
 ) -> np.ndarray:
     """
-    矩阵乘法: y = a @ b
+    矩阵乘法: y = a @ b (支持混合精度)
 
     Args:
         a: 输入 a (shape 或 ndarray)
         b: 输入 b (shape 或 ndarray)
-        dtype: 数据类型 (默认 bfp8)
+        dtype: 数据类型 (默认 bfp8)，当 dtype_a/dtype_b 未指定时使用
+        dtype_a: A 矩阵的数据类型 (混合精度)
+        dtype_b: B 矩阵的数据类型 (混合精度)
 
     Returns:
         输出数据
+
+    Example:
+        # 同精度
+        y = matmul((2, 8, 64), (64, 32), dtype="bfp8")
+
+        # 混合精度: A 用 bfp8, B 用 bfp4
+        y = matmul((2, 8, 64), (64, 32), dtype_a="bfp8", dtype_b="bfp4")
     """
     s = _get_seed()
     np.random.seed(s)
+
+    # 确定各自的 dtype
+    if dtype_a is None:
+        dtype_a = dtype
+    if dtype_b is None:
+        dtype_b = dtype
 
     if isinstance(a, tuple):
         a = np.random.randn(*a).astype(np.float32)
     if isinstance(b, tuple):
         b = np.random.randn(*b).astype(np.float32)
 
-    a = _quantize_input(a, dtype)
-    b = _quantize_input(b, dtype)
+    a = _quantize_input(a, dtype_a)
+    b = _quantize_input(b, dtype_b)
 
     return _nn.matmul(a, b)
 

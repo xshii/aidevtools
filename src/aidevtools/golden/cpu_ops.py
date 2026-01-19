@@ -93,22 +93,50 @@ def _get_gfloat_numpy_dtype(dtype: GFloatType):
         return np.uint8
 
 
-def matmul(a: np.ndarray, b: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndarray:
+def matmul(
+    a: np.ndarray,
+    b: np.ndarray,
+    dtype: GFloatType = "gfp16",
+    dtype_a: Optional[GFloatType] = None,
+    dtype_b: Optional[GFloatType] = None,
+    dtype_out: Optional[GFloatType] = None,
+) -> np.ndarray:
     """
-    MatMul: C = A @ B (支持 batch)
+    MatMul: C = A @ B (支持 batch 和混合精度)
 
     Args:
         a: 输入矩阵 A, shape [..., M, K]
         b: 输入矩阵 B, shape [..., K, N] 或 [K, N]
-        dtype: gfloat 类型 (gfp4, gfp8, gfp16)
+        dtype: gfloat 类型 (gfp4, gfp8, gfp16)，当 dtype_a/dtype_b 未指定时使用
+        dtype_a: A 矩阵的 gfloat 类型 (混合精度)
+        dtype_b: B 矩阵的 gfloat 类型 (混合精度)
+        dtype_out: 输出矩阵的 gfloat 类型 (默认与 dtype 相同)
 
     Returns:
         输出矩阵 C, shape [..., M, N]
+
+    Example:
+        # 同精度
+        c = matmul(a, b, dtype="gfp16")
+
+        # 混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        c = matmul(a, b, dtype_a="gfp8", dtype_b="gfp4", dtype_out="gfp16")
     """
     _check_cpu_golden()
 
     a = np.asarray(a, dtype=np.float32)
     b = np.asarray(b, dtype=np.float32)
+
+    # 确定 dtype_a, dtype_b, dtype_out
+    if dtype_a is None:
+        dtype_a = dtype
+    if dtype_b is None:
+        dtype_b = dtype
+    if dtype_out is None:
+        dtype_out = dtype
+
+    # 是否混合精度
+    is_mixed = (dtype_a != dtype_b) or (dtype_a != dtype_out)
 
     # 处理 batch 维度
     a_batch_shape = a.shape[:-2] if a.ndim > 2 else ()
@@ -126,7 +154,10 @@ def matmul(a: np.ndarray, b: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndar
 
     # 处理 2D 情况 (快速路径)
     if a.ndim == 2 and b.ndim == 2:
-        return _matmul_2d(a, b, M, K, N, dtype)
+        if is_mixed:
+            return _matmul_2d_mixed(a, b, M, K, N, dtype_a, dtype_b, dtype_out)
+        else:
+            return _matmul_2d(a, b, M, K, N, dtype)
 
     # 处理 batch: flatten batch dims, 循环调用 2D matmul
     if a.ndim > 2:
@@ -149,7 +180,10 @@ def matmul(a: np.ndarray, b: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndar
     for i in range(batch_size):
         a_i = a_flat[i]
         b_i = b_flat[i] if b_batched else b_flat[0]
-        c_flat[i] = _matmul_2d(a_i, b_i, M, K, N, dtype)
+        if is_mixed:
+            c_flat[i] = _matmul_2d_mixed(a_i, b_i, M, K, N, dtype_a, dtype_b, dtype_out)
+        else:
+            c_flat[i] = _matmul_2d(a_i, b_i, M, K, N, dtype)
 
     # 恢复 batch shape
     output_shape = a_batch_shape + (M, N)
@@ -182,6 +216,40 @@ def _matmul_2d(a: np.ndarray, b: np.ndarray, M: int, K: int, N: int, dtype: GFlo
         np_dtype = _get_gfloat_numpy_dtype(dtype)
         c_gfp = np.fromfile(c_path, dtype=np_dtype)
         c = _gfloat_to_fp32(c_gfp, dtype, M * N).reshape(M, N)
+
+    return c
+
+
+def _matmul_2d_mixed(
+    a: np.ndarray, b: np.ndarray, M: int, K: int, N: int,
+    dtype_a: GFloatType, dtype_b: GFloatType, dtype_out: GFloatType
+) -> np.ndarray:
+    """2D 混合精度矩阵乘法 (内部函数)"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        a_path = Path(tmpdir) / "a.bin"
+        b_path = Path(tmpdir) / "b.bin"
+        c_path = Path(tmpdir) / "c.bin"
+
+        # 保存输入 (各自使用自己的 dtype)
+        _fp32_to_gfloat(a, dtype_a).tofile(a_path)
+        _fp32_to_gfloat(b, dtype_b).tofile(b_path)
+
+        # 调用 cpu_golden matmul_mixed
+        result = subprocess.run(
+            [str(_CPU_GOLDEN_PATH), "matmul_mixed",
+             dtype_a, dtype_b,
+             str(a_path), str(b_path), str(c_path),
+             str(M), str(K), str(N), dtype_out],
+            capture_output=True, text=True
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"cpu_golden matmul_mixed failed: {result.stderr}")
+
+        # 读取结果 (使用 dtype_out)
+        np_dtype = _get_gfloat_numpy_dtype(dtype_out)
+        c_gfp = np.fromfile(c_path, dtype=np_dtype)
+        c = _gfloat_to_fp32(c_gfp, dtype_out, M * N).reshape(M, N)
 
     return c
 
@@ -347,16 +415,32 @@ def transpose(
     return y.reshape(d0, d1, d3, d2)
 
 
-def register_all_cpu_golden(dtype: GFloatType = "gfp16"):
+def register_all_cpu_golden(
+    dtype: GFloatType = "gfp16",
+    dtype_matmul_a: Optional[GFloatType] = None,
+    dtype_matmul_b: Optional[GFloatType] = None,
+    dtype_matmul_out: Optional[GFloatType] = None,
+):
     """
     批量注册所有 CPU Golden 算子
 
     Args:
         dtype: 默认 gfloat 类型
+        dtype_matmul_a: matmul 的 A 矩阵类型 (混合精度)
+        dtype_matmul_b: matmul 的 B 矩阵类型 (混合精度)
+        dtype_matmul_out: matmul 的输出类型 (混合精度)
 
     用法:
         from aidevtools.golden.cpu_ops import register_all_cpu_golden
         register_all_cpu_golden("gfp16")
+
+        # 混合精度 matmul: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        register_all_cpu_golden(
+            dtype="gfp16",
+            dtype_matmul_a="gfp8",
+            dtype_matmul_b="gfp4",
+            dtype_matmul_out="gfp16"
+        )
 
         # 之后设置 golden_mode="cpp" 即可使用
         from aidevtools.ops import set_golden_mode
@@ -364,10 +448,15 @@ def register_all_cpu_golden(dtype: GFloatType = "gfp16"):
     """
     from aidevtools.ops.base import register_golden_cpp
 
+    # matmul 的 dtype 配置
+    ma = dtype_matmul_a or dtype
+    mb = dtype_matmul_b or dtype
+    mo = dtype_matmul_out or dtype
+
     # 创建带默认 dtype 的闭包
     @register_golden_cpp("matmul")
     def _matmul(a, b):
-        return matmul(a, b, dtype=dtype)
+        return matmul(a, b, dtype=dtype, dtype_a=ma, dtype_b=mb, dtype_out=mo)
 
     @register_golden_cpp("softmax")
     def _softmax(x, axis=-1):

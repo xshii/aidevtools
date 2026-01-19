@@ -31,6 +31,7 @@ void print_usage(const char* prog) {
     std::cerr << "GFloat CPU Golden CLI\n\n"
               << "Usage:\n"
               << "  " << prog << " matmul <dtype> <a.bin> <b.bin> <c.bin> <M> <K> <N>\n"
+              << "  " << prog << " matmul_mixed <dtype_a> <dtype_b> <a.bin> <b.bin> <c.bin> <M> <K> <N> <dtype_out>\n"
               << "  " << prog << " softmax <dtype> <input.bin> <output.bin> <batch> <seq>\n"
               << "  " << prog << " layernorm <dtype> <input.bin> <gamma.bin> <beta.bin> <output.bin> <batch> <hidden>\n"
               << "  " << prog << " transpose <dtype> <input.bin> <output.bin> <d0> <d1> <d2> <d3>\n"
@@ -39,6 +40,7 @@ void print_usage(const char* prog) {
               << "\n"
               << "Examples:\n"
               << "  " << prog << " matmul gfp16 a.bin b.bin c.bin 64 128 256\n"
+              << "  " << prog << " matmul_mixed gfp8 gfp4 a.bin b.bin c.bin 64 128 256 gfp16\n"
               << "  " << prog << " softmax gfp8 input.bin output.bin 4 64\n"
               << "  " << prog << " layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256\n"
               << "  " << prog << " transpose gfp16 x.bin y.bin 2 4 8 32\n";
@@ -225,6 +227,56 @@ int run_transpose(int argc, char* argv[]) {
     return 0;
 }
 
+int run_matmul_mixed(int argc, char* argv[]) {
+    // matmul_mixed <dtype_a> <dtype_b> <a.bin> <b.bin> <c.bin> <M> <K> <N> <dtype_out>
+    if (argc < 11) {
+        std::cerr << "Error: matmul_mixed requires 9 arguments\n";
+        return 1;
+    }
+
+    GFloatType dtype_a = parse_gfloat_type(argv[2]);
+    GFloatType dtype_b = parse_gfloat_type(argv[3]);
+    std::string a_path = argv[4];
+    std::string b_path = argv[5];
+    std::string c_path = argv[6];
+    size_t M = std::stoull(argv[7]);
+    size_t K = std::stoull(argv[8]);
+    size_t N = std::stoull(argv[9]);
+    GFloatType dtype_out = parse_gfloat_type(argv[10]);
+
+    std::cerr << "[cpu_golden] matmul_mixed: " << gfloat_type_to_string(dtype_a)
+              << " x " << gfloat_type_to_string(dtype_b)
+              << " -> " << gfloat_type_to_string(dtype_out)
+              << " [" << M << "," << K << "] @ [" << K << "," << N << "]\n";
+
+    // 加载输入 (各自使用自己的 dtype)
+    auto a_fp32 = load_gfloat_as_fp32(a_path, dtype_a);
+    auto b_fp32 = load_gfloat_as_fp32(b_path, dtype_b);
+
+    // 检查大小
+    if (a_fp32.size() < M * K) {
+        std::cerr << "Error: a.bin size mismatch, expected " << M * K << ", got " << a_fp32.size() << "\n";
+        return 1;
+    }
+    if (b_fp32.size() < K * N) {
+        std::cerr << "Error: b.bin size mismatch, expected " << K * N << ", got " << b_fp32.size() << "\n";
+        return 1;
+    }
+
+    // 计算
+    std::vector<float> c_fp32(M * N);
+    matmul_fp32(a_fp32.data(), b_fp32.data(), c_fp32.data(), M, K, N);
+
+    // 保存输出 (使用 dtype_out)
+    if (!save_as_gfloat(c_fp32.data(), M * N, c_path, dtype_out)) {
+        std::cerr << "Error: failed to save output to " << c_path << "\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden] matmul_mixed done: " << c_path << "\n";
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -236,6 +288,8 @@ int main(int argc, char* argv[]) {
     try {
         if (op == "matmul") {
             return run_matmul(argc, argv);
+        } else if (op == "matmul_mixed") {
+            return run_matmul_mixed(argc, argv);
         } else if (op == "softmax") {
             return run_softmax(argc, argv);
         } else if (op == "layernorm") {

@@ -18,23 +18,33 @@ from pathlib import Path
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+from aidevtools.ops.base import set_golden_mode
+
+# 注册 cpp golden (通过 subprocess 调用)
+from aidevtools.golden.cpu_ops import register_all_cpu_golden
+register_all_cpu_golden("gfp16")
+
+# 设置使用 cpp golden
+set_golden_mode("cpp")
+
 
 def create_transformer_xlsx(xlsx_path: str):
     """
     创建 Transformer 模型的 xlsx 配置
 
     模型结构 (简化版 1 层 Transformer):
-        input_ids → embedding → linear(Q) → linear(K) → linear(V)
-                              → attention → linear(O) → add(residual)
-                              → layernorm → linear(FFN_up) → gelu
-                              → linear(FFN_down) → add(residual) → layernorm
+        input → matmul(Q) → matmul(K) → matmul(V)
+              → attention → matmul(O) → add(residual)
+              → layernorm → matmul(FFN_up) → softmax
+              → matmul(FFN_down) → add(residual) → layernorm
+
+    注意: 使用支持 cpp golden 的算子 (matmul, softmax, layernorm, transpose)
     """
     from aidevtools.xlsx import create_template
 
-    # 创建模板，指定 transformer 相关算子
+    # 创建模板，指定支持 cpp golden 的算子
     create_template(xlsx_path, ops=[
-        "embedding", "linear", "matmul", "attention",
-        "softmax", "layernorm", "gelu", "add"
+        "linear", "matmul", "softmax", "layernorm", "add", "transpose"
     ])
 
     # 编辑 xlsx 添加 transformer 算子配置
@@ -45,37 +55,36 @@ def create_transformer_xlsx(xlsx_path: str):
     # 清空示例数据
     ws_ops.delete_rows(3, ws_ops.max_row)
 
-    # Transformer 配置 (简化版，1 层)
+    # Transformer 配置 (简化版，使用支持 cpp golden 的算子)
     # 格式: id, op_name, shape, dtype, depends, qtype, skip, sim_cmd, note
-    # qtype: bfp4 用于 matmul/linear, bfp8 用于其他
-    # sim_cmd: 留空（不执行仿真命令）
     transformer_ops = [
-        # Embedding
-        (0, "embedding", "1,16", "int32", "", "bfp8", "FALSE", "", "Token Embedding"),
+        # Q, K, V projections (用 linear/matmul)
+        (0, "linear", "1,16,64", "float32", "", "bfp8", "FALSE", "", "Input"),
+        (1, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "Q projection"),
+        (2, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "K projection"),
+        (3, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "V projection"),
 
-        # Self-Attention: Q, K, V projections
-        (1, "linear", "1,16,64", "float32", "0", "bfp4", "FALSE", "", "Q projection"),
-        (2, "linear", "1,16,64", "float32", "0", "bfp4", "FALSE", "", "K projection"),
-        (3, "linear", "1,16,64", "float32", "0", "bfp4", "FALSE", "", "V projection"),
-
-        # Attention
-        (4, "attention", "1,16,64", "float32", "1,2,3", "bfp8", "FALSE", "", "Attention"),
+        # Attention: Q @ K^T (需要 transpose)
+        (4, "transpose", "1,1,16,64", "float32", "2", "bfp8", "FALSE", "", "K transpose"),
+        (5, "matmul", "1,16,64", "float32", "1,4", "bfp8", "FALSE", "", "Q @ K^T"),
+        (6, "softmax", "1,16,64", "float32", "5", "bfp8", "FALSE", "", "Attention weights"),
+        (7, "matmul", "1,16,64", "float32", "6,3", "bfp8", "FALSE", "", "Attention output"),
 
         # Output projection
-        (5, "linear", "1,16,64", "float32", "4", "bfp4", "FALSE", "", "O projection"),
+        (8, "matmul", "1,16,64", "float32", "7", "bfp8", "FALSE", "", "O projection"),
 
         # Residual + LayerNorm
-        (6, "add", "1,16,64", "float32", "0,5", "bfp8", "FALSE", "", "Residual 1"),
-        (7, "layernorm", "1,16,64", "float32", "6", "bfp8", "FALSE", "", "LayerNorm 1"),
+        (9, "add", "1,16,64", "float32", "0,8", "bfp8", "FALSE", "", "Residual 1"),
+        (10, "layernorm", "1,16,64", "float32", "9", "bfp8", "FALSE", "", "LayerNorm 1"),
 
         # FFN
-        (8, "linear", "1,16,256", "float32", "7", "bfp4", "FALSE", "", "FFN up"),
-        (9, "gelu", "1,16,256", "float32", "8", "bfp8", "FALSE", "", "GELU"),
-        (10, "linear", "1,16,64", "float32", "9", "bfp4", "FALSE", "", "FFN down"),
+        (11, "matmul", "1,16,256", "float32", "10", "bfp8", "FALSE", "", "FFN up"),
+        (12, "softmax", "1,16,256", "float32", "11", "bfp8", "FALSE", "", "FFN activation"),
+        (13, "matmul", "1,16,64", "float32", "12", "bfp8", "FALSE", "", "FFN down"),
 
         # Residual + LayerNorm
-        (11, "add", "1,16,64", "float32", "7,10", "bfp8", "FALSE", "", "Residual 2"),
-        (12, "layernorm", "1,16,64", "float32", "11", "bfp8", "FALSE", "", "Output LayerNorm"),
+        (14, "add", "1,16,64", "float32", "10,13", "bfp8", "FALSE", "", "Residual 2"),
+        (15, "layernorm", "1,16,64", "float32", "14", "bfp8", "FALSE", "", "Output LayerNorm"),
     ]
 
     for row_idx, config in enumerate(transformer_ops, 3):
@@ -85,6 +94,7 @@ def create_transformer_xlsx(xlsx_path: str):
     wb.save(xlsx_path)
     print(f"    Transformer 配置已写入: {xlsx_path}")
     print(f"    共 {len(transformer_ops)} 个算子")
+    print(f"    使用 cpp golden (gfp16) + bfp8 量化")
 
     return transformer_ops
 
@@ -135,7 +145,7 @@ def run_transformer_xlsx(xlsx_path: str, output_dir: str):
     """运行 xlsx 配置的 Transformer"""
     from aidevtools.xlsx import run_xlsx
 
-    print("\n    运行 Transformer 模型...")
+    print("\n    运行 Transformer 模型 (cpp golden)...")
     results = run_xlsx(xlsx_path, output_dir)
 
     print("\n    [运行结果]")
@@ -184,7 +194,8 @@ def main():
 ║  2. 自动生成 Python 代码                                             ║
 ║  3. 运行模型并比对结果                                               ║
 ║                                                                      ║
-║  量化策略: matmul=bfp4, 其他=bfp8                                    ║
+║  使用 cpp golden (via subprocess)                                    ║
+║  量化: gfp16 (cpp) + bfp8 (input)                                    ║
 ╚══════════════════════════════════════════════════════════════════════╝
 """)
 
@@ -230,15 +241,15 @@ def main():
   Python 代码:  {py_path}
   输出目录:     {output_dir}
 
-量化策略:
-  - linear (matmul): bfp4 (2-bit mantissa, 极端量化)
-  - 其他算子:        bfp8 (4-bit mantissa, 保持精度)
+Golden 配置:
+  - cpp golden via subprocess (gfp16)
+  - 输入量化: bfp8
 
 模型结构:
-  embedding → Q/K/V projection → attention → O projection
-           → add (residual) → layernorm
-           → FFN_up → gelu → FFN_down
-           → add (residual) → layernorm
+  linear → Q/K/V matmul → transpose → attention matmul → softmax
+        → matmul → add (residual) → layernorm
+        → FFN matmul → softmax → FFN matmul
+        → add (residual) → layernorm
 """)
 
 

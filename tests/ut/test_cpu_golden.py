@@ -472,3 +472,173 @@ class TestRegisterCpuGolden:
         records = get_records()
         assert len(records) == 1
         assert records[0]["golden"] is not None
+
+
+# ==================== 混合精度 MatMul 测试 ====================
+
+class TestMixedPrecisionMatmul:
+    """混合精度 MatMul 测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_matmul_mixed_gfp8_gfp4(self):
+        """MatMul 混合精度: gfp8 x gfp4 -> gfp16"""
+        M, K, N = 4, 8, 16
+
+        # 生成测试数据
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        # A 用 gfp8, B 用 gfp4
+        a_gfp = fp32_to_gfloat8(a)
+        b_gfp = fp32_to_gfloat4(b)
+
+        # 保存输入
+        a_path = Path(self.temp_dir) / "a.bin"
+        b_path = Path(self.temp_dir) / "b.bin"
+        c_path = Path(self.temp_dir) / "c.bin"
+
+        a_gfp.tofile(a_path)
+        b_gfp.tofile(b_path)
+
+        # 调用 cpu_golden matmul_mixed
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "matmul_mixed", "gfp8", "gfp4",
+             str(a_path), str(b_path), str(c_path),
+             str(M), str(K), str(N), "gfp16"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        # 读取结果 (gfp16)
+        c_gfp = np.fromfile(c_path, dtype=np.uint16)
+        c = gfloat16_to_fp32(c_gfp).reshape(M, N)
+
+        # 验证 shape
+        assert c.shape == (M, N)
+        assert c.dtype == np.float32
+
+    def test_matmul_mixed_gfp16_gfp8(self):
+        """MatMul 混合精度: gfp16 x gfp8 -> gfp16"""
+        M, K, N = 2, 4, 8
+
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        a_gfp = fp32_to_gfloat16(a)
+        b_gfp = fp32_to_gfloat8(b)
+
+        a_path = Path(self.temp_dir) / "a.bin"
+        b_path = Path(self.temp_dir) / "b.bin"
+        c_path = Path(self.temp_dir) / "c.bin"
+
+        a_gfp.tofile(a_path)
+        b_gfp.tofile(b_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "matmul_mixed", "gfp16", "gfp8",
+             str(a_path), str(b_path), str(c_path),
+             str(M), str(K), str(N), "gfp16"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        c_gfp = np.fromfile(c_path, dtype=np.uint16)
+        c = gfloat16_to_fp32(c_gfp).reshape(M, N)
+
+        assert c.shape == (M, N)
+
+
+class TestPythonWrapperMixedPrecision:
+    """Python Wrapper 混合精度测试"""
+
+    def setup_method(self):
+        skip_if_not_available()
+
+    def test_matmul_mixed_wrapper(self):
+        """matmul 混合精度 Python wrapper"""
+        from aidevtools.golden import matmul
+
+        M, K, N = 4, 8, 16
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        # 混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        c = matmul(a, b, dtype_a="gfp8", dtype_b="gfp4", dtype_out="gfp16")
+
+        assert c.shape == (M, N)
+        assert c.dtype == np.float32
+
+    def test_matmul_mixed_batch(self):
+        """matmul 混合精度 batch 支持"""
+        from aidevtools.golden import matmul
+
+        # 3D batch matmul
+        batch, M, K, N = 2, 4, 8, 16
+        a = np.random.randn(batch, M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)  # broadcast
+
+        c = matmul(a, b, dtype_a="gfp16", dtype_b="gfp8", dtype_out="gfp16")
+
+        assert c.shape == (batch, M, N)
+        assert c.dtype == np.float32
+
+    def test_matmul_same_dtype_via_mixed(self):
+        """matmul 同精度通过 mixed 接口"""
+        from aidevtools.golden import matmul
+
+        M, K, N = 4, 8, 16
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        # 所有 dtype 相同，应该走同精度路径
+        c1 = matmul(a, b, dtype="gfp16")
+        c2 = matmul(a, b, dtype_a="gfp16", dtype_b="gfp16", dtype_out="gfp16")
+
+        assert c1.shape == c2.shape
+        assert np.allclose(c1, c2)
+
+
+class TestRegisterMixedPrecision:
+    """注册混合精度 CPU Golden 测试"""
+
+    def setup_method(self):
+        skip_if_not_available()
+        from aidevtools.ops.base import clear, set_golden_mode, _golden_cpp_registry
+        clear()
+        _golden_cpp_registry.clear()
+        set_golden_mode("python")
+
+    def teardown_method(self):
+        from aidevtools.ops.base import set_golden_mode, _golden_cpp_registry
+        _golden_cpp_registry.clear()
+        set_golden_mode("python")
+
+    def test_register_mixed_precision(self):
+        """register_all_cpu_golden with mixed precision"""
+        from aidevtools.golden import register_all_cpu_golden
+        from aidevtools.ops.base import set_golden_mode, clear, get_records
+        from aidevtools.ops.nn import matmul as nn_matmul
+
+        # 注册混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        register_all_cpu_golden(
+            dtype="gfp16",
+            dtype_matmul_a="gfp8",
+            dtype_matmul_b="gfp4",
+            dtype_matmul_out="gfp16"
+        )
+        set_golden_mode("cpp")
+        clear()
+
+        # 执行 matmul
+        a = np.random.randn(4, 8).astype(np.float32)
+        b = np.random.randn(8, 16).astype(np.float32)
+        c = nn_matmul(a, b)
+
+        assert c.shape == (4, 16)
+
+        records = get_records()
+        assert len(records) == 1
+        assert records[0]["golden"] is not None
