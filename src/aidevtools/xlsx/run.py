@@ -253,12 +253,22 @@ def run_xlsx(
         }
 
         if result is not None:
-            # 执行比对
+            # 执行比对 - compare_full
             diff = compare_full(np.asarray(golden), np.asarray(result))
             res["status"] = "PASS" if diff.passed else "FAIL"
             res["max_abs"] = f"{diff.max_abs:.6e}"
             res["qsnr"] = f"{diff.qsnr:.2f}"
             res["cosine"] = f"{diff.cosine:.6f}"
+
+            # 执行比对 - compare_isclose
+            from aidevtools.tools.compare.diff import compare_isclose
+            isclose = compare_isclose(
+                np.asarray(golden), np.asarray(result),
+                atol=1e-4, rtol=1e-2, max_exceed_ratio=0.01
+            )
+            res["isclose_pass"] = "PASS" if isclose.passed else "FAIL"
+            res["exceed_count"] = str(isclose.exceed_count)
+            res["exceed_ratio"] = f"{isclose.exceed_ratio:.4%}"
         else:
             res["status"] = "PENDING"
             res["note"] = "result 待填充"

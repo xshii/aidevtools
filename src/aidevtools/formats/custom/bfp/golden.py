@@ -120,7 +120,7 @@ def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
     if original_shape is not None:
         flat = flat.reshape(original_shape)
 
-    return flat
+    return flat.astype(np.float32)
 
 
 # ==================== 量化注册 ====================

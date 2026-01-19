@@ -20,6 +20,7 @@ from aidevtools.golden.cpu_ops import (
     matmul,
     softmax,
     layernorm,
+    transpose,
     register_all_cpu_golden,
     is_cpu_golden_available,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "matmul",
     "softmax",
     "layernorm",
+    "transpose",
     "register_all_cpu_golden",
     "is_cpu_golden_available",
 ]

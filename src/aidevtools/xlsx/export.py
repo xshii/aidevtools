@@ -226,6 +226,18 @@ def update_compare_results(
         if "note" in col_map and "note" in res:
             ws.cell(row=row, column=col_map["note"], value=res["note"])
 
+        # IsClose 比对结果
+        if "isclose_pass" in col_map and "isclose_pass" in res:
+            cell = ws.cell(row=row, column=col_map["isclose_pass"], value=res["isclose_pass"])
+            if res["isclose_pass"] == "PASS":
+                cell.fill = pass_fill
+            elif res["isclose_pass"] == "FAIL":
+                cell.fill = fail_fill
+        if "exceed_count" in col_map and "exceed_count" in res:
+            ws.cell(row=row, column=col_map["exceed_count"], value=res["exceed_count"])
+        if "exceed_ratio" in col_map and "exceed_ratio" in res:
+            ws.cell(row=row, column=col_map["exceed_ratio"], value=res["exceed_ratio"])
+
     wb.save(xlsx_path)
     logger.info(f"更新比对结果: {xlsx_path}")
     return xlsx_path

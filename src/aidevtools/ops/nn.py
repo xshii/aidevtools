@@ -193,6 +193,28 @@ class Div(Op):
         return (a.astype(np.float64) / b.astype(np.float64)).astype(np.float32)
 
 
+class Transpose(Op):
+    """Transpose: 支持任意维度转置"""
+    name = "transpose"
+
+    def golden_python(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
+        """
+        转置
+
+        Args:
+            x: 输入
+            axes: 轴顺序，如 (0, 1, 3, 2)。None 则交换最后两个维度
+        """
+        if axes is None:
+            return np.swapaxes(x, -2, -1).astype(np.float32)
+        return np.transpose(x, axes).astype(np.float32)
+
+    def reference(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
+        if axes is None:
+            return np.swapaxes(x.astype(np.float64), -2, -1).astype(np.float32)
+        return np.transpose(x.astype(np.float64), axes).astype(np.float32)
+
+
 class Attention(Op):
     """Scaled Dot-Product Attention"""
     name = "attention"
@@ -237,4 +259,5 @@ matmul = MatMul()
 add = Add()
 mul = Mul()
 div = Div()
+transpose = Transpose()
 attention = Attention()
