@@ -20,6 +20,20 @@ from operators import (
     linear, relu, gelu, softmax_safe, layernorm, attention, embedding
 )
 
+# Op 实例直接调用（使用配置的 golden 模式 - cpp 或 python）
+# 这里调用 _get_golden 方法，跳过 trace 记录
+def _softmax(x, axis=-1):
+    return softmax_safe._get_golden(x, axis)
+
+def _gelu(x):
+    return gelu._get_golden(x)
+
+def _layernorm(x, gamma, beta, eps=1e-5):
+    return layernorm._get_golden(x, gamma, beta, eps)
+
+def _embedding(input_ids, embed_table):
+    return embedding._get_golden(input_ids, embed_table)
+
 
 # ==================== 量化快捷函数 ====================
 # 使用全局 simulate_quantize，直接指定 qtype 即可
@@ -127,7 +141,7 @@ def self_attention_block(x: np.ndarray, layer_weights: dict, config: Transformer
     scores = np.matmul(bfp4(q), bfp4(k.transpose(0, 1, 3, 2))) / np.sqrt(d_k)
 
     # Softmax - bfp8 量化
-    attn_weights = softmax_safe.__wrapped__(bfp8(scores), axis=-1)
+    attn_weights = _softmax(bfp8(scores), axis=-1)
 
     # Attention output - bfp4 量化 weights 和 V
     attn_out = np.matmul(bfp4(attn_weights), bfp4(v))
@@ -157,7 +171,7 @@ def ffn_block(x: np.ndarray, layer_weights: dict) -> np.ndarray:
     h = np.matmul(bfp4(x), bfp4(layer_weights["ffn_up"]["w"])) + layer_weights["ffn_up"]["b"]
 
     # Activation (GELU) - bfp8 量化
-    h = gelu.__wrapped__(bfp8(h))
+    h = _gelu(bfp8(h))
 
     # Down projection - bfp4 量化
     out = np.matmul(bfp4(h), bfp4(layer_weights["ffn_down"]["w"])) + layer_weights["ffn_down"]["b"]
@@ -183,14 +197,14 @@ def transformer_layer(x: np.ndarray, layer_weights: dict, config: TransformerCon
     x = bfp8(x + attn_out)
 
     # LayerNorm 1 - bfp8 量化
-    x = layernorm.__wrapped__(bfp8(x), layer_weights["ln1"]["gamma"], layer_weights["ln1"]["beta"])
+    x = _layernorm(bfp8(x), layer_weights["ln1"]["gamma"], layer_weights["ln1"]["beta"])
 
     # FFN + Residual - bfp8 量化
     ffn_out = ffn_block.__wrapped__(x, layer_weights)
     x = bfp8(x + ffn_out)
 
     # LayerNorm 2 - bfp8 量化
-    x = layernorm.__wrapped__(bfp8(x), layer_weights["ln2"]["gamma"], layer_weights["ln2"]["beta"])
+    x = _layernorm(bfp8(x), layer_weights["ln2"]["gamma"], layer_weights["ln2"]["beta"])
 
     return x
 
@@ -209,7 +223,7 @@ def transformer_forward(input_ids: np.ndarray, weights: dict, config: Transforme
         - Embedding 输出: bfp8
     """
     # Embedding - bfp8 量化输出
-    x = bfp8(embedding.__wrapped__(input_ids, weights["embed"]))
+    x = bfp8(_embedding(input_ids, weights["embed"]))
 
     # Transformer Layers
     for i, layer_weights in enumerate(weights["layers"]):

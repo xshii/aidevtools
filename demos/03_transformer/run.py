@@ -12,7 +12,7 @@ from pathlib import Path
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools.trace import trace, dump, gen_csv, clear
+from aidevtools.trace import trace, dump, clear
 
 # 导入本地算子和模型
 from operators import (
@@ -138,11 +138,10 @@ def main():
     print("=" * 50)
 
     dump(str(output_dir), format="raw")
-    csv_path = gen_csv(str(output_dir), model_name="transformer")
 
     print(f"\n完成! 下一步:")
     print(f"  1. 运行仿真器生成 result 数据")
-    print(f"  2. 运行比数: aidev compare 3 --csv={csv_path}")
+    print(f"  2. 运行比数: aidev compare {output_dir}")
 
 
 if __name__ == "__main__":

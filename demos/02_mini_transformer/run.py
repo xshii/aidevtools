@@ -4,8 +4,16 @@
 演示：
 1. 使用 ops API 定义算子序列（自动生成数据）
 2. 执行 golden + reference
-3. 构造假的 DUT 数据
+3. 构造假的 DUT 数据（模拟 bfp 格式处理流程）
 4. 使用框架比对工具比对
+
+真实流程：
+- Golden: fp32 计算 → bfp8 量化 → fp32 反量化 (带精度损失)
+- DUT: 以 bfp8 格式计算 → bfp8 输出 → fp32 反量化 (用于比对)
+
+本 demo 的假 DUT 模拟：
+- 对 fp32 golden 结果进行 bfp8 量化/反量化
+- 添加小噪声模拟 DUT 计算误差
 """
 import sys
 from pathlib import Path
@@ -15,6 +23,7 @@ import numpy as np
 from aidevtools import ops
 from aidevtools.ops.base import get_records
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+from aidevtools.formats.quantize import simulate_quantize
 
 
 def run_model():
@@ -30,30 +39,60 @@ def run_model():
     return get_records()
 
 
-def generate_fake_dut(golden: np.ndarray, noise_level: float = 0.001) -> np.ndarray:
-    """生成假的 DUT 数据（在 golden 基础上加噪声）"""
-    noise = np.random.randn(*golden.shape).astype(np.float32) * noise_level
-    return golden + noise
+def generate_fake_dut(
+    reference: np.ndarray,
+    qtype: str = "bfp8",
+    noise_level: float = 0.001,
+) -> np.ndarray:
+    """
+    生成假的 DUT 数据，模拟真实 bfp 格式处理流程
+
+    模拟流程：
+    1. 从 reference (fp32 精确值) 开始
+    2. 应用 bfp 量化/反量化，模拟 DUT 的 bfp 格式计算
+    3. 添加小噪声，模拟 DUT 的计算误差
+
+    Args:
+        reference: fp32 精确计算结果 (reference)
+        qtype: 量化格式 (bfp4, bfp8, bfp16)
+        noise_level: 噪声水平
+
+    Returns:
+        模拟的 DUT 输出 (fp32)
+    """
+    # Step 1: 对 reference 进行 bfp 量化/反量化，模拟 DUT 的 bfp 格式处理
+    dut_quantized = simulate_quantize(reference.astype(np.float32), qtype)
+
+    # Step 2: 添加小噪声，模拟 DUT 计算误差
+    noise = np.random.randn(*dut_quantized.shape).astype(np.float32) * noise_level
+    dut_result = dut_quantized + noise
+
+    return dut_result
 
 
 def main():
     print(f"\n{'=' * 70}")
-    print(f"  MiniTransformer Demo")
+    print(f"  MiniTransformer Demo - 模拟 bfp 格式比对流程")
     print(f"{'=' * 70}")
 
     # 1. 运行模型
     print("\n[1] 运行模型 (Linear -> LayerNorm -> Softmax)")
+    print("    dtype=bfp8, 框架自动执行:")
+    print("    - reference: fp32/fp64 精确计算")
+    print("    - golden: fp32 → bfp8 量化 → fp32 反量化")
     records = run_model()
 
     for r in records:
         print(f"    {r['name']}: input={r['input'].shape}, golden={r['golden'].shape}")
 
     # 2. 生成假的 DUT 数据
-    print("\n[2] 生成假的 DUT 数据 (golden + noise)")
+    print("\n[2] 生成假的 DUT 数据 (模拟 bfp8 格式处理)")
+    print("    流程: reference → bfp8 量化/反量化 → 加小噪声")
     np.random.seed(123)
     dut_outputs = []
     for r in records:
-        dut = generate_fake_dut(r["golden"], noise_level=0.001)
+        # 使用 reference (fp32 精确值) 生成假 DUT
+        dut = generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001)
         dut_outputs.append(dut)
         print(f"    {r['name']}: dut={dut.shape}")
 
