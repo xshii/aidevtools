@@ -97,7 +97,9 @@ def create_template(
     # 表头
     ops_headers = [
         "id", "op_name", "shape", "dtype", "depends",
-        "qtype", "skip", "sim_cmd", "note"
+        "qtype", "skip", "sim_cmd",
+        "golden_bin", "result_bin", "input_bin", "weight_bin",  # binary 路径
+        "note"
     ]
     for col, header in enumerate(ops_headers, 1):
         cell = ws_ops.cell(row=1, column=col, value=header)
@@ -109,14 +111,14 @@ def create_template(
     # 示例数据（包含说明行）
     if include_examples:
         # 添加说明行
-        ws_ops.cell(row=2, column=1, value="# depends 说明: 空=随机输入, 0=依赖第0行输出, \"1,2\"=双输入依赖, \"q:0,k:1,v:2\"=命名依赖; sim_cmd 占位符: {golden_bin},{result_bin},{input_bin},{weight_bin},{id},{op_name}")
-        ws_ops.merge_cells(start_row=2, start_column=1, end_row=2, end_column=9)
+        ws_ops.cell(row=2, column=1, value="# depends: 空=随机,0=依赖第0行,\"1,2\"=双输入,\"q:0,k:1,v:2\"=命名; *_bin: 留空=自动生成,填写=使用指定路径; sim_cmd占位符: {golden_bin},{result_bin},{input_bin},{weight_bin},{id},{op_name}")
+        ws_ops.merge_cells(start_row=2, start_column=1, end_row=2, end_column=13)
         ws_ops.cell(row=2, column=1).font = Font(italic=True, color="666666")
         examples = [
-            {"id": 0, "op_name": "linear", "shape": "1,64,128", "dtype": "float32", "depends": "", "qtype": "", "skip": "FALSE", "sim_cmd": "", "note": "第一层 linear"},
-            {"id": 1, "op_name": "relu", "shape": "1,64,256", "dtype": "float32", "depends": "0", "qtype": "", "skip": "FALSE", "sim_cmd": "", "note": "依赖第0行输出"},
-            {"id": 2, "op_name": "attention", "shape": "1,8,64,64", "dtype": "float32", "depends": "q:0,k:0,v:1", "qtype": "", "skip": "FALSE", "sim_cmd": "", "note": "命名依赖"},
-            {"id": 3, "op_name": "matmul", "shape": "1,64,64", "dtype": "float32", "depends": "1,2", "qtype": "float16", "skip": "FALSE", "sim_cmd": "./sim.sh {input_bin} {golden_bin} {result_bin}", "note": "带仿真命令"},
+            {"id": 0, "op_name": "linear", "shape": "1,64,128", "dtype": "float32", "depends": "", "qtype": "", "skip": "FALSE", "sim_cmd": "", "golden_bin": "", "result_bin": "", "input_bin": "", "weight_bin": "", "note": "binary路径留空=自动生成"},
+            {"id": 1, "op_name": "relu", "shape": "1,64,256", "dtype": "float32", "depends": "0", "qtype": "", "skip": "FALSE", "sim_cmd": "", "golden_bin": "", "result_bin": "", "input_bin": "", "weight_bin": "", "note": "依赖第0行输出"},
+            {"id": 2, "op_name": "attention", "shape": "1,8,64,64", "dtype": "float32", "depends": "q:0,k:0,v:1", "qtype": "", "skip": "FALSE", "sim_cmd": "", "golden_bin": "", "result_bin": "", "input_bin": "", "weight_bin": "", "note": "命名依赖"},
+            {"id": 3, "op_name": "matmul", "shape": "1,64,64", "dtype": "float32", "depends": "1,2", "qtype": "float16", "skip": "FALSE", "sim_cmd": "./sim.sh {input_bin} {golden_bin} {result_bin}", "golden_bin": "", "result_bin": "/path/to/dut_result.bin", "input_bin": "", "weight_bin": "", "note": "指定DUT输出路径"},
         ]
         for row_idx, ex in enumerate(examples, 3):
             ws_ops.cell(row=row_idx, column=1, value=ex["id"]).border = thin_border
@@ -127,18 +129,26 @@ def create_template(
             ws_ops.cell(row=row_idx, column=6, value=ex["qtype"]).border = thin_border
             ws_ops.cell(row=row_idx, column=7, value=ex["skip"]).border = thin_border
             ws_ops.cell(row=row_idx, column=8, value=ex["sim_cmd"]).border = thin_border
-            ws_ops.cell(row=row_idx, column=9, value=ex["note"]).border = thin_border
+            ws_ops.cell(row=row_idx, column=9, value=ex["golden_bin"]).border = thin_border
+            ws_ops.cell(row=row_idx, column=10, value=ex["result_bin"]).border = thin_border
+            ws_ops.cell(row=row_idx, column=11, value=ex["input_bin"]).border = thin_border
+            ws_ops.cell(row=row_idx, column=12, value=ex["weight_bin"]).border = thin_border
+            ws_ops.cell(row=row_idx, column=13, value=ex["note"]).border = thin_border
 
     # 列宽
-    ws_ops.column_dimensions['A'].width = 8
-    ws_ops.column_dimensions['B'].width = 15
-    ws_ops.column_dimensions['C'].width = 20
-    ws_ops.column_dimensions['D'].width = 12
-    ws_ops.column_dimensions['E'].width = 20
-    ws_ops.column_dimensions['F'].width = 12
-    ws_ops.column_dimensions['G'].width = 8
+    ws_ops.column_dimensions['A'].width = 8   # id
+    ws_ops.column_dimensions['B'].width = 15  # op_name
+    ws_ops.column_dimensions['C'].width = 20  # shape
+    ws_ops.column_dimensions['D'].width = 12  # dtype
+    ws_ops.column_dimensions['E'].width = 20  # depends
+    ws_ops.column_dimensions['F'].width = 12  # qtype
+    ws_ops.column_dimensions['G'].width = 8   # skip
     ws_ops.column_dimensions['H'].width = 40  # sim_cmd
-    ws_ops.column_dimensions['I'].width = 30  # note
+    ws_ops.column_dimensions['I'].width = 35  # golden_bin
+    ws_ops.column_dimensions['J'].width = 35  # result_bin
+    ws_ops.column_dimensions['K'].width = 35  # input_bin
+    ws_ops.column_dimensions['L'].width = 35  # weight_bin
+    ws_ops.column_dimensions['M'].width = 30  # note
 
     # ==================== Sheet 3: compare ====================
     ws_compare = wb.create_sheet("compare")

@@ -945,6 +945,7 @@ class TestSimCmd:
     def test_run_sim_cmd_placeholder_substitution(self):
         """测试 sim_cmd 占位符替换"""
         from aidevtools.xlsx.run import _run_sim_cmd
+        from aidevtools.xlsx.import_ import OpConfig
 
         output_dir = Path(self.temp_dir)
 
@@ -964,11 +965,22 @@ cp "$2" "$3"
         golden_path = output_dir / "test_0_golden.bin"
         golden_data.tofile(golden_path)
 
+        # 创建 OpConfig
+        config = OpConfig(
+            id=0,
+            op_name="test",
+            shape=(),
+            dtype="float32",
+            depends="",
+            qtype="",
+            skip=False,
+            note="",
+        )
+
         # 执行仿真命令
         result = _run_sim_cmd(
             sim_cmd=f"{sim_script} {{input_bin}} {{golden_bin}} {{result_bin}}",
-            op_id=0,
-            op_name="test",
+            config=config,
             output_dir=output_dir,
             name="test_0",
             has_input=True,
@@ -981,11 +993,22 @@ cp "$2" "$3"
     def test_run_sim_cmd_empty(self):
         """测试空 sim_cmd"""
         from aidevtools.xlsx.run import _run_sim_cmd
+        from aidevtools.xlsx.import_ import OpConfig
+
+        config = OpConfig(
+            id=0,
+            op_name="test",
+            shape=(),
+            dtype="float32",
+            depends="",
+            qtype="",
+            skip=False,
+            note="",
+        )
 
         result = _run_sim_cmd(
             sim_cmd="",
-            op_id=0,
-            op_name="test",
+            config=config,
             output_dir=Path(self.temp_dir),
             name="test_0",
         )
@@ -993,8 +1016,7 @@ cp "$2" "$3"
 
         result = _run_sim_cmd(
             sim_cmd="   ",
-            op_id=0,
-            op_name="test",
+            config=config,
             output_dir=Path(self.temp_dir),
             name="test_0",
         )
@@ -1003,11 +1025,22 @@ cp "$2" "$3"
     def test_run_sim_cmd_failure(self):
         """测试 sim_cmd 执行失败"""
         from aidevtools.xlsx.run import _run_sim_cmd
+        from aidevtools.xlsx.import_ import OpConfig
+
+        config = OpConfig(
+            id=0,
+            op_name="test",
+            shape=(),
+            dtype="float32",
+            depends="",
+            qtype="",
+            skip=False,
+            note="",
+        )
 
         result = _run_sim_cmd(
             sim_cmd="exit 1",
-            op_id=0,
-            op_name="test",
+            config=config,
             output_dir=Path(self.temp_dir),
             name="test_0",
         )

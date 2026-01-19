@@ -8,26 +8,27 @@ class TestOpsBase:
     """算子基础框架测试"""
 
     def setup_method(self):
-        from aidevtools.ops.base import clear, _golden_registry
+        from aidevtools.ops.base import clear, _golden_cpp_registry
         clear()
-        _golden_registry.clear()
+        _golden_cpp_registry.clear()
 
-    def test_register_golden(self):
-        """注册 Golden 实现"""
-        from aidevtools.ops.base import register_golden, has_golden
+    def test_register_golden_cpp(self):
+        """注册 C++ Golden 实现"""
+        from aidevtools.ops.base import register_golden_cpp, has_golden_cpp
 
-        @register_golden("test_op")
+        @register_golden_cpp("test_op")
         def golden_test(x):
             return x * 2
 
-        assert has_golden("test_op")
-        assert not has_golden("unknown_op")
+        assert has_golden_cpp("test_op")
+        assert not has_golden_cpp("unknown_op")
 
-    def test_op_without_golden(self):
-        """未注册 golden 时只执行 reference"""
-        from aidevtools.ops.base import clear, get_records
+    def test_op_default_python_mode(self):
+        """默认 python 模式执行 golden_python + reference"""
+        from aidevtools.ops.base import clear, get_records, set_golden_mode
         from aidevtools.ops.nn import relu
 
+        set_golden_mode("python")
         clear()
         x = np.array([[-1, 0, 1], [2, -2, 3]], dtype=np.float32)
         y = relu(x)
@@ -37,19 +38,43 @@ class TestOpsBase:
         assert len(records) == 1
         assert records[0]["name"] == "relu_0"
         assert records[0]["golden"] is not None
-        assert records[0]["result"] is None  # 未注册 golden
+        assert records[0]["reference"] is not None
 
-    def test_op_with_golden(self):
-        """注册 golden 后同时执行两种实现"""
-        from aidevtools.ops.base import register_golden, clear, get_records
+    def test_op_with_cpp_golden(self):
+        """注册 C++ golden 后使用 cpp 模式"""
+        from aidevtools.ops.base import register_golden_cpp, clear, get_records, set_golden_mode
         from aidevtools.ops.nn import ReLU
 
-        @register_golden("relu")
-        def golden_relu(x):
+        @register_golden_cpp("relu")
+        def cpp_relu(x):
             return np.maximum(0, x) + 0.001  # 故意加点误差
 
+        set_golden_mode("cpp")
         clear()
         relu = ReLU()
+        x = np.array([[-1, 0, 1]], dtype=np.float32)
+        y = relu(x)
+
+        # 返回 cpp golden 结果（带误差）
+        assert np.allclose(y, np.array([[0.001, 0.001, 1.001]]))
+
+        records = get_records()
+        assert len(records) == 1
+        assert records[0]["golden"] is not None
+        assert records[0]["reference"] is not None
+        # golden (cpp) 和 reference 应该有微小差异
+        assert not np.allclose(records[0]["golden"], records[0]["reference"])
+
+        # 恢复 python 模式
+        set_golden_mode("python")
+
+    def test_golden_mode_none(self):
+        """golden_mode=none 时跳过 golden 计算"""
+        from aidevtools.ops.base import clear, get_records, set_golden_mode
+        from aidevtools.ops.nn import relu
+
+        set_golden_mode("none")
+        clear()
         x = np.array([[-1, 0, 1]], dtype=np.float32)
         y = relu(x)
 
@@ -58,17 +83,19 @@ class TestOpsBase:
 
         records = get_records()
         assert len(records) == 1
-        assert records[0]["golden"] is not None
-        assert records[0]["result"] is not None
-        # golden 和 result 应该有微小差异
-        assert not np.allclose(records[0]["golden"], records[0]["result"])
+        assert records[0]["golden"] is None  # 跳过 golden
+        assert records[0]["reference"] is not None
+
+        # 恢复 python 模式
+        set_golden_mode("python")
 
 
 class TestNNOps:
     """神经网络算子测试"""
 
     def setup_method(self):
-        from aidevtools.ops.base import clear
+        from aidevtools.ops.base import clear, set_golden_mode
+        set_golden_mode("python")
         clear()
 
     def test_linear(self):
@@ -235,15 +262,15 @@ class TestNNOps:
     def test_op_repr(self):
         """Op.__repr__ 测试"""
         from aidevtools.ops.nn import linear, relu
-        from aidevtools.ops.base import register_golden
+        from aidevtools.ops.base import register_golden_cpp
 
-        # 未注册 golden
+        # 未注册 cpp golden
         assert "linear" in repr(linear)
         assert "✗" in repr(linear)
 
-        # 注册 golden 后
-        @register_golden("relu")
-        def golden_relu(x):
+        # 注册 cpp golden 后
+        @register_golden_cpp("relu")
+        def cpp_relu(x):
             return np.maximum(0, x)
 
         assert "✓" in repr(relu)
@@ -253,7 +280,8 @@ class TestOpsDump:
     """算子数据导出测试"""
 
     def setup_method(self):
-        from aidevtools.ops.base import clear
+        from aidevtools.ops.base import clear, set_golden_mode
+        set_golden_mode("python")
         clear()
 
     def test_dump(self, tmp_path):
@@ -271,7 +299,8 @@ class TestOpsDump:
         dump(str(tmp_path))
 
         assert (tmp_path / "linear_0_golden.bin").exists()
+        assert (tmp_path / "linear_0_reference.bin").exists()
         assert (tmp_path / "linear_0_input.bin").exists()
         assert (tmp_path / "linear_0_weight.bin").exists()
         assert (tmp_path / "relu_0_golden.bin").exists()
-
+        assert (tmp_path / "relu_0_reference.bin").exists()

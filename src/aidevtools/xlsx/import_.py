@@ -32,6 +32,11 @@ class OpConfig:
     skip: bool
     note: str
     sim_cmd: str = ""  # 仿真命令，支持占位符: {golden_bin}, {result_bin}, {input_bin}, {weight_bin}, {id}, {op_name}
+    # binary 路径（留空=自动生成，填写=使用指定路径）
+    golden_bin: str = ""
+    result_bin: str = ""
+    input_bin: str = ""
+    weight_bin: str = ""
 
     def parse_depends(self) -> Dict[str, List[int]]:
         """
@@ -157,6 +162,10 @@ def parse_xlsx(xlsx_path: str) -> Tuple[List[str], List[OpConfig]]:
                 skip=skip,
                 note=str(row_dict.get("note", "") or ""),
                 sim_cmd=str(row_dict.get("sim_cmd", "") or ""),
+                golden_bin=str(row_dict.get("golden_bin", "") or ""),
+                result_bin=str(row_dict.get("result_bin", "") or ""),
+                input_bin=str(row_dict.get("input_bin", "") or ""),
+                weight_bin=str(row_dict.get("weight_bin", "") or ""),
             )
             op_configs.append(config)
 

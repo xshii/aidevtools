@@ -20,8 +20,7 @@ from aidevtools.xlsx.export import update_compare_results
 
 def _run_sim_cmd(
     sim_cmd: str,
-    op_id: int,
-    op_name: str,
+    config: "OpConfig",
     output_dir: Path,
     name: str,
     has_input: bool = True,
@@ -32,8 +31,7 @@ def _run_sim_cmd(
 
     Args:
         sim_cmd: 仿真命令模板，支持占位符
-        op_id: 算子 ID
-        op_name: 算子名称
+        config: 算子配置（包含自定义路径）
         output_dir: 输出目录
         name: 记录名称 (如 "linear_0")
         has_input: 是否有输入文件
@@ -53,11 +51,11 @@ def _run_sim_cmd(
     if not sim_cmd or not sim_cmd.strip():
         return None
 
-    # 构建路径
-    golden_bin = str(output_dir / f"{name}_golden.bin")
-    result_bin = str(output_dir / f"{name}_result.bin")
-    input_bin = str(output_dir / f"{name}_input.bin") if has_input else ""
-    weight_bin = str(output_dir / f"{name}_weight.bin") if has_weight else ""
+    # 构建路径（优先使用配置中的自定义路径）
+    golden_bin = config.golden_bin or str(output_dir / f"{name}_golden.bin")
+    result_bin = config.result_bin or str(output_dir / f"{name}_result.bin")
+    input_bin = config.input_bin or (str(output_dir / f"{name}_input.bin") if has_input else "")
+    weight_bin = config.weight_bin or (str(output_dir / f"{name}_weight.bin") if has_weight else "")
 
     # 替换占位符
     cmd = sim_cmd.format(
@@ -65,8 +63,8 @@ def _run_sim_cmd(
         result_bin=result_bin,
         input_bin=input_bin,
         weight_bin=weight_bin,
-        id=op_id,
-        op_name=op_name,
+        id=config.id,
+        op_name=config.op_name,
     )
 
     logger.info(f"执行仿真命令: {cmd}")
@@ -87,7 +85,7 @@ def _run_sim_cmd(
         if result.stdout:
             logger.debug(f"仿真输出: {result.stdout[:200]}")
 
-        # 检查 result_bin 是否生成
+        # 检查 result_bin 是否存在
         result_path = Path(result_bin)
         if result_path.exists():
             # 读取结果
@@ -105,6 +103,16 @@ def _run_sim_cmd(
     except Exception as e:
         logger.error(f"仿真命令异常: {e}")
         return None
+
+
+def _get_binary_paths(config: "OpConfig", output_dir: Path, name: str, has_input: bool, has_weight: bool) -> dict:
+    """获取 binary 路径（优先使用配置中的自定义路径）"""
+    return {
+        "golden_bin": config.golden_bin or str(output_dir / f"{name}_golden.bin"),
+        "result_bin": config.result_bin or str(output_dir / f"{name}_result.bin"),
+        "input_bin": config.input_bin or (str(output_dir / f"{name}_input.bin") if has_input else ""),
+        "weight_bin": config.weight_bin or (str(output_dir / f"{name}_weight.bin") if has_weight else ""),
+    }
 
 
 def _check_openpyxl():
@@ -210,8 +218,7 @@ def run_xlsx(
 
             sim_result = _run_sim_cmd(
                 sim_cmd=config.sim_cmd,
-                op_id=config.id,
-                op_name=config.op_name,
+                config=config,
                 output_dir=out_path,
                 name=name,
                 has_input=has_input,
