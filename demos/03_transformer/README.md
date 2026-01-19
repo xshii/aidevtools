@@ -1,6 +1,10 @@
 # 03 Transformer 模型示例
 
-完整 Transformer 模型示例，展示实际项目的组织方式。
+使用 ops API 构建完整 Transformer 模型，演示：
+- 使用 `ops.matmul`, `ops.softmax`, `ops.layernorm` 等
+- 自动生成输入和权重
+- 使用 cpp golden (via subprocess)
+- 三列比对：exact / fuzzy_pure / fuzzy_qnt
 
 ## 运行
 
@@ -13,56 +17,56 @@ python run.py
 
 | 文件 | 用途 |
 |------|------|
-| operators.py | 导入核心库算子 (直接使用 `aidevtools.ops.nn`) |
-| model.py | 模型组合 + BFP 量化策略 |
-| run.py | 运行入口，导出 golden 数据 |
+| run.py | 运行入口，使用 ops API 构建模型 |
 
 ## 设计说明
 
-- 算子 golden 实现在核心库 `aidevtools.ops.nn` 中统一定义
-- demo 只负责模型组合和量化策略，不重复定义算子
+- 使用新的 ops API，自动处理：
+  - 输入/权重生成
+  - bfp 量化
+  - cpp golden 计算
+  - reference (fp64) 计算
+- 三列比对：exact / fuzzy_pure / fuzzy_qnt
 
-## 量化策略
+## 量化配置
 
-| 操作 | 量化格式 | 说明 |
-|------|----------|------|
-| matmul/linear | bfp4 | 2-bit mantissa, 极端量化 |
-| 其他 | bfp8 | 4-bit mantissa, 保持精度 |
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| cpp golden | gfp16 | 16-bit gfloat 格式 |
+| 输入量化 | bfp8 | 4-bit mantissa |
 
-## 模型结构
+## 模型结构 (简化版单层 Transformer)
 
 ```
-input_ids
-    ↓
-embedding (bfp8)
+Input Linear
     ↓
 ┌───────────────────────────────────┐
 │  Self-Attention Block              │
-│  ├─ Q/K/V projection (bfp4)       │
-│  ├─ Attention scores (bfp4)       │
-│  ├─ Softmax (bfp8)                │
-│  └─ Output projection (bfp4)      │
+│  ├─ Q/K/V MatMul                  │
+│  ├─ Attention Scores MatMul       │
+│  ├─ Softmax                       │
+│  ├─ Attention Output MatMul       │
+│  └─ O MatMul                      │
 └───────────────────────────────────┘
-    ↓ + residual (bfp8)
-LayerNorm (bfp8)
+    ↓
+LayerNorm
     ↓
 ┌───────────────────────────────────┐
 │  FFN Block                         │
-│  ├─ Up projection (bfp4)          │
-│  ├─ GELU (bfp8)                   │
-│  └─ Down projection (bfp4)        │
+│  ├─ FFN Up MatMul                 │
+│  ├─ Softmax (代替 GELU)           │
+│  └─ FFN Down MatMul               │
 └───────────────────────────────────┘
-    ↓ + residual (bfp8)
-LayerNorm (bfp8)
     ↓
-output
+LayerNorm
+    ↓
+Output
 ```
 
 ## 输出
 
 运行后会在 `./workspace` 目录生成：
-- `*_golden.bin` - Golden 输出 (reference)
-- `*_result.bin` - 用户 golden 实现输出 (如已注册)
+- `*_golden.bin` - cpp golden 输出
+- `*_reference.bin` - fp64 高精度参考
 - `*_input.bin` - 输入数据
 - `*_weight.bin` - 权重数据
-- `transformer_compare.csv` - 比对配置文件

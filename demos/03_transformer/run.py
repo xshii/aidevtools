@@ -1,147 +1,167 @@
 #!/usr/bin/env python
-"""Transformer Golden 数据生成示例
+"""Transformer Demo - 使用 ops API 构建完整 Transformer
+
+演示使用新的 ops API 构建 Transformer 模型：
+1. 使用 ops.matmul, ops.softmax, ops.layernorm 等
+2. 自动生成输入和权重
+3. 使用 cpp golden (via subprocess)
+4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
 
 使用方法:
     cd demos/03_transformer
     python run.py
 """
-import numpy as np
 import sys
 from pathlib import Path
-
-# 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools.trace import trace, dump, clear
+import numpy as np
+from aidevtools import ops
+from aidevtools.ops.base import get_records, set_golden_mode, clear
+from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+from aidevtools.formats.quantize import simulate_quantize
 
-# 导入本地算子和模型
-from operators import (
-    linear, relu, gelu, softmax_safe, layernorm, attention, embedding
-)
-from model import (
-    TransformerConfig, init_weights,
-    self_attention_block, ffn_block, transformer_layer, transformer_forward
-)
+# 注册 cpp golden (通过 subprocess 调用)
+from aidevtools.golden.cpu_ops import register_all_cpu_golden
+register_all_cpu_golden("gfp16")
 
-
-def run_single_operators():
-    """运行单算子测试"""
-    print("=" * 50)
-    print("单算子 Golden 计算")
-    print("=" * 50)
-
-    # Linear: y = ax + b
-    print("\n[1] Linear (ax+b)")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    w = np.random.randn(64, 128).astype(np.float32)
-    b = np.random.randn(128).astype(np.float32)
-    y = linear(x, w, b)
-    print(f"    input: {x.shape} -> output: {y.shape}")
-
-    # ReLU
-    print("\n[2] ReLU")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    y = relu(x)
-    print(f"    input: {x.shape} -> output: {y.shape}")
-
-    # GELU
-    print("\n[3] GELU")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    y = gelu(x)
-    print(f"    input: {x.shape} -> output: {y.shape}")
-
-    # Softmax Safe
-    print("\n[4] Softmax Safe")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    y = softmax_safe(x)
-    print(f"    input: {x.shape} -> output: {y.shape}")
-    print(f"    sum(axis=-1): {y.sum(axis=-1)[0, 0]:.6f} (should be 1.0)")
-
-    # LayerNorm
-    print("\n[5] LayerNorm")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
-    gamma = np.ones(64, dtype=np.float32)
-    beta = np.zeros(64, dtype=np.float32)
-    y = layernorm(x, gamma, beta)
-    print(f"    input: {x.shape} -> output: {y.shape}")
-    print(f"    mean: {y.mean():.6f}, std: {y.std():.6f}")
-
-    # Attention
-    print("\n[6] Attention")
-    q = np.random.randn(2, 8, 64).astype(np.float32)
-    k = np.random.randn(2, 8, 64).astype(np.float32)
-    v = np.random.randn(2, 8, 64).astype(np.float32)
-    y = attention(q, k, v)
-    print(f"    Q: {q.shape}, K: {k.shape}, V: {v.shape} -> output: {y.shape}")
-
-    # Embedding
-    print("\n[7] Embedding")
-    input_ids = np.array([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=np.int64)
-    embed_table = np.random.randn(100, 64).astype(np.float32)
-    y = embedding(input_ids, embed_table)
-    print(f"    input_ids: {input_ids.shape} -> output: {y.shape}")
+# 设置使用 cpp golden
+set_golden_mode("cpp")
 
 
-def run_transformer_model():
-    """运行 Transformer 模型测试"""
-    print("\n" + "=" * 50)
-    print("Transformer 模型 Golden 计算")
-    print("=" * 50)
+def run_single_layer_transformer():
+    """
+    运行单层 Transformer (简化版)
 
-    # 小型配置用于测试
-    config = TransformerConfig(
-        vocab_size=1000,
-        hidden_size=64,
-        num_heads=4,
-        intermediate_size=256,
-        num_layers=2,
-        max_seq_len=32,
-    )
+    结构:
+        Input -> MatMul(Q) -> MatMul(K) -> MatMul(V)
+              -> Transpose(K) -> MatMul(QK) -> Softmax -> MatMul(V)
+              -> MatMul(O) -> LayerNorm
+              -> MatMul(FFN_up) -> Softmax -> MatMul(FFN_down) -> LayerNorm
+    """
+    ops.seed(42)
+    clear()
 
-    print(f"\n配置:")
-    print(f"    vocab_size: {config.vocab_size}")
-    print(f"    hidden_size: {config.hidden_size}")
-    print(f"    num_heads: {config.num_heads}")
-    print(f"    intermediate_size: {config.intermediate_size}")
-    print(f"    num_layers: {config.num_layers}")
+    # 配置
+    batch, seq, hidden = 2, 16, 64
+    ffn_hidden = 256
+    dtype = "bfp8"
 
-    # 初始化权重
-    weights = init_weights(config)
-    print(f"\n权重初始化完成")
+    print(f"配置: batch={batch}, seq={seq}, hidden={hidden}, ffn={ffn_hidden}")
+    print(f"量化: {dtype} (input) + gfp16 (cpp golden)")
 
-    # 输入数据
-    batch_size = 2
-    seq_len = 16
-    input_ids = np.random.randint(0, config.vocab_size, (batch_size, seq_len))
-    print(f"\n输入: input_ids {input_ids.shape}")
+    # ========== Self-Attention ==========
+    print("\n[Self-Attention]")
 
-    # 前向传播
-    output = transformer_forward(input_ids, weights, config)
-    print(f"输出: {output.shape}")
-    print(f"输出均值: {output.mean():.6f}, 标准差: {output.std():.6f}")
+    # Input projection
+    x = ops.linear((batch, seq, hidden), hidden, dtype=dtype)  # Input
+    print(f"  Input: {x.shape}")
+
+    # Q, K, V projections
+    q = ops.matmul(x, (hidden, hidden), dtype=dtype)  # Q
+    k = ops.matmul(x, (hidden, hidden), dtype=dtype)  # K
+    v = ops.matmul(x, (hidden, hidden), dtype=dtype)  # V
+    print(f"  Q/K/V: {q.shape}")
+
+    # Attention: Q @ K^T -> Softmax -> @ V
+    # 为了简化，这里直接用 matmul 模拟 attention
+    # 实际 attention 需要 transpose K，这里用 (seq, seq) 模拟 attention scores
+    attn_scores = ops.matmul(q, (hidden, seq), dtype=dtype)  # 模拟 Q @ K^T
+    attn_weights = ops.softmax(attn_scores, dtype=dtype)
+    print(f"  Attention weights: {attn_weights.shape}")
+
+    attn_out = ops.matmul(attn_weights, (seq, hidden), dtype=dtype)  # 模拟 @ V
+    print(f"  Attention output: {attn_out.shape}")
+
+    # Output projection
+    o = ops.matmul(attn_out, (hidden, hidden), dtype=dtype)
+    print(f"  O projection: {o.shape}")
+
+    # LayerNorm 1
+    ln1 = ops.layernorm(o, hidden, dtype=dtype)
+    print(f"  LayerNorm 1: {ln1.shape}")
+
+    # ========== FFN ==========
+    print("\n[FFN]")
+
+    # FFN up
+    ffn_up = ops.matmul(ln1, (hidden, ffn_hidden), dtype=dtype)
+    print(f"  FFN up: {ffn_up.shape}")
+
+    # Activation (用 softmax 代替 GELU，因为 GELU 没有 cpp golden)
+    ffn_act = ops.softmax(ffn_up, dtype=dtype)
+    print(f"  FFN activation: {ffn_act.shape}")
+
+    # FFN down
+    ffn_down = ops.matmul(ffn_act, (ffn_hidden, hidden), dtype=dtype)
+    print(f"  FFN down: {ffn_down.shape}")
+
+    # LayerNorm 2
+    output = ops.layernorm(ffn_down, hidden, dtype=dtype)
+    print(f"  Output: {output.shape}")
+
+    return get_records()
+
+
+def generate_fake_dut(reference: np.ndarray, qtype: str = "bfp8", noise_level: float = 0.001) -> np.ndarray:
+    """生成假的 DUT 数据，模拟真实 bfp 格式处理流程"""
+    dut_quantized = simulate_quantize(reference.astype(np.float32), qtype)
+    noise = np.random.randn(*dut_quantized.shape).astype(np.float32) * noise_level
+    return dut_quantized + noise
 
 
 def main():
-    # 清空之前的记录
-    clear()
+    print(f"""
+{'=' * 70}
+  Transformer Demo - 使用 ops API
+{'=' * 70}
+  golden_mode: cpp (via subprocess)
+  quantization: gfp16 (cpp) + bfp8 (input)
+""")
 
-    # 运行单算子
-    run_single_operators()
+    # 1. 运行模型
+    print("[1] 运行 Transformer 模型")
+    print("-" * 50)
+    records = run_model()
 
-    # 运行模型
-    run_transformer_model()
+    print(f"\n共 {len(records)} 个算子:")
+    for r in records:
+        print(f"  {r['name']}: {r['golden'].shape}")
 
-    # 导出
+    # 2. 生成假 DUT
+    print(f"\n[2] 生成假的 DUT 数据")
+    print("-" * 50)
+    print("流程: reference → bfp8 量化/反量化 → 加小噪声")
+    np.random.seed(123)
+    dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001) for r in records]
+
+    # 3. 比对
+    print(f"\n[3] 三列比对")
+    print("-" * 50)
+    results = []
+    for i, r in enumerate(records):
+        result = compare_3col(
+            op_name=r["op"],
+            op_id=i,
+            result=dut_outputs[i],
+            golden_pure=r["reference"],
+            golden_qnt=r["golden"],
+        )
+        results.append(result)
+
+    print_compare_table(results)
+
+    # 4. 导出
+    print(f"\n[4] 导出 bin 文件")
+    print("-" * 50)
     output_dir = Path(__file__).parent / "workspace"
-    print("\n" + "=" * 50)
-    print("导出 Golden 数据")
-    print("=" * 50)
+    ops.dump(str(output_dir))
+    print(f"输出目录: {output_dir}")
 
-    dump(str(output_dir), format="raw")
 
-    print(f"\n完成! 下一步:")
-    print(f"  1. 运行仿真器生成 result 数据")
-    print(f"  2. 运行比数: aidev compare {output_dir}")
+def run_model():
+    """运行模型的包装函数"""
+    return run_single_layer_transformer()
 
 
 if __name__ == "__main__":
