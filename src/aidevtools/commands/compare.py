@@ -6,6 +6,7 @@ from aidevtools.tools.compare.diff import compare_full
 from aidevtools.formats.quantize import list_quantize
 from aidevtools.formats.base import load
 from aidevtools.core.log import logger
+from aidevtools.core.utils import parse_shape, parse_dtype, parse_list
 from aidevtools.ops.base import get_records, dump, clear
 
 
@@ -84,8 +85,8 @@ def cmd_compare(
         if not golden or not result:
             logger.error("请指定文件: compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32")
             return 1
-        dt = getattr(np, dtype)
-        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        dt = parse_dtype(dtype)
+        sh = parse_shape(shape)
         g = load(golden, format="raw", dtype=dt, shape=sh)
         r = load(result, format="raw", dtype=dt, shape=sh)
         diff = compare_full(g, r)
@@ -102,8 +103,8 @@ def cmd_compare(
         if not golden or not result:
             logger.error("请指定文件: compare fuzzy --golden=a.bin --result=b.bin")
             return 1
-        dt = getattr(np, dtype)
-        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        dt = parse_dtype(dtype)
+        sh = parse_shape(shape)
         g = load(golden, format="raw", dtype=dt, shape=sh)
         r = load(result, format="raw", dtype=dt, shape=sh)
 
@@ -145,8 +146,8 @@ def cmd_compare(
         if not output or output == "./workspace":
             output = golden.replace(".bin", f"_{target_dtype}.bin")
 
-        dt = getattr(np, dtype)
-        sh = tuple(int(x) for x in shape.split(",")) if shape else None
+        dt = parse_dtype(dtype)
+        sh = parse_shape(shape)
         data = load(golden, format="raw", dtype=dt, shape=sh)
 
         # 使用量化框架转换
@@ -190,7 +191,7 @@ def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, format
     if subaction in ("template", "t"):
         # 生成空模板
         out_path = xlsx_path if xlsx_path else f"{output}/{model}_config.xlsx"
-        ops_list = [o.strip() for o in ops_str.split(",") if o.strip()] if ops_str else None
+        ops_list = parse_list(ops_str) or None
         create_template(out_path, ops=ops_list)
         print(f"生成 xlsx 模板: {out_path}")
         if ops_list:

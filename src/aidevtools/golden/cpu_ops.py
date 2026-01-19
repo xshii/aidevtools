@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import numpy as np
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, List, Dict, Tuple
 
 # CPU Golden 可执行文件路径
 _CPU_GOLDEN_PATH = Path(__file__).parent / "cpu_golden"
@@ -35,6 +35,73 @@ def _check_cpu_golden():
             f"cpu_golden not found: {_CPU_GOLDEN_PATH}\n"
             f"Please build it first: cd {_CPU_GOLDEN_PATH.parent}/cpp && ./build.sh"
         )
+
+
+# ============================================================
+# 通用 subprocess 执行函数 (消除重复代码)
+# ============================================================
+
+def _run_golden_subprocess(
+    op_name: str,
+    cmd_args: List[str],
+    inputs: Dict[str, Tuple[np.ndarray, GFloatType]],
+    output_name: str,
+    output_dtype: GFloatType,
+    output_size: int,
+    output_shape: Tuple[int, ...],
+) -> np.ndarray:
+    """
+    通用 CPU Golden 执行函数
+
+    Args:
+        op_name: 算子名称 (用于错误信息)
+        cmd_args: 命令行参数 (不含输入输出文件路径)
+        inputs: 输入数据 {文件名: (数组, dtype)}
+        output_name: 输出文件名
+        output_dtype: 输出数据的 gfloat 类型
+        output_size: 输出元素数量
+        output_shape: 输出 shape
+
+    Returns:
+        输出数组
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # 保存输入文件
+        input_paths = {}
+        for name, (arr, dtype) in inputs.items():
+            path = tmpdir / name
+            _fp32_to_gfloat(arr, dtype).tofile(path)
+            input_paths[name] = str(path)
+
+        # 输出路径
+        output_path = tmpdir / output_name
+
+        # 构建完整命令 (替换占位符)
+        full_cmd = [str(_CPU_GOLDEN_PATH)]
+        for arg in cmd_args:
+            if arg == "@output":
+                # @output -> 输出文件路径
+                full_cmd.append(str(output_path))
+            elif arg.startswith("@"):
+                # @input_name -> 对应输入文件的路径
+                full_cmd.append(input_paths.get(arg[1:], str(tmpdir / arg[1:])))
+            else:
+                full_cmd.append(arg)
+
+        # 执行 subprocess
+        result = subprocess.run(full_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            raise RuntimeError(f"cpu_golden {op_name} failed: {result.stderr}")
+
+        # 读取输出
+        np_dtype = _get_gfloat_numpy_dtype(output_dtype)
+        out_gfp = np.fromfile(output_path, dtype=np_dtype)
+        out = _gfloat_to_fp32(out_gfp, output_dtype, output_size)
+
+    return out.reshape(output_shape)
 
 
 def _fp32_to_gfloat(x: np.ndarray, dtype: GFloatType) -> np.ndarray:
@@ -192,32 +259,15 @@ def matmul(
 
 def _matmul_2d(a: np.ndarray, b: np.ndarray, M: int, K: int, N: int, dtype: GFloatType) -> np.ndarray:
     """2D 矩阵乘法 (内部函数)"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        a_path = Path(tmpdir) / "a.bin"
-        b_path = Path(tmpdir) / "b.bin"
-        c_path = Path(tmpdir) / "c.bin"
-
-        # 保存输入
-        _fp32_to_gfloat(a, dtype).tofile(a_path)
-        _fp32_to_gfloat(b, dtype).tofile(b_path)
-
-        # 调用 cpu_golden
-        result = subprocess.run(
-            [str(_CPU_GOLDEN_PATH), "matmul", dtype,
-             str(a_path), str(b_path), str(c_path),
-             str(M), str(K), str(N)],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"cpu_golden matmul failed: {result.stderr}")
-
-        # 读取结果
-        np_dtype = _get_gfloat_numpy_dtype(dtype)
-        c_gfp = np.fromfile(c_path, dtype=np_dtype)
-        c = _gfloat_to_fp32(c_gfp, dtype, M * N).reshape(M, N)
-
-    return c
+    return _run_golden_subprocess(
+        op_name="matmul",
+        cmd_args=["matmul", dtype, "@a.bin", "@b.bin", "@output", str(M), str(K), str(N)],
+        inputs={"a.bin": (a, dtype), "b.bin": (b, dtype)},
+        output_name="c.bin",
+        output_dtype=dtype,
+        output_size=M * N,
+        output_shape=(M, N),
+    )
 
 
 def _matmul_2d_mixed(
@@ -225,33 +275,15 @@ def _matmul_2d_mixed(
     dtype_a: GFloatType, dtype_b: GFloatType, dtype_out: GFloatType
 ) -> np.ndarray:
     """2D 混合精度矩阵乘法 (内部函数)"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        a_path = Path(tmpdir) / "a.bin"
-        b_path = Path(tmpdir) / "b.bin"
-        c_path = Path(tmpdir) / "c.bin"
-
-        # 保存输入 (各自使用自己的 dtype)
-        _fp32_to_gfloat(a, dtype_a).tofile(a_path)
-        _fp32_to_gfloat(b, dtype_b).tofile(b_path)
-
-        # 调用 cpu_golden matmul_mixed
-        result = subprocess.run(
-            [str(_CPU_GOLDEN_PATH), "matmul_mixed",
-             dtype_a, dtype_b,
-             str(a_path), str(b_path), str(c_path),
-             str(M), str(K), str(N), dtype_out],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"cpu_golden matmul_mixed failed: {result.stderr}")
-
-        # 读取结果 (使用 dtype_out)
-        np_dtype = _get_gfloat_numpy_dtype(dtype_out)
-        c_gfp = np.fromfile(c_path, dtype=np_dtype)
-        c = _gfloat_to_fp32(c_gfp, dtype_out, M * N).reshape(M, N)
-
-    return c
+    return _run_golden_subprocess(
+        op_name="matmul_mixed",
+        cmd_args=["matmul_mixed", dtype_a, dtype_b, "@a.bin", "@b.bin", "@output", str(M), str(K), str(N), dtype_out],
+        inputs={"a.bin": (a, dtype_a), "b.bin": (b, dtype_b)},
+        output_name="c.bin",
+        output_dtype=dtype_out,
+        output_size=M * N,
+        output_shape=(M, N),
+    )
 
 
 def softmax(x: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndarray:
@@ -278,25 +310,15 @@ def softmax(x: np.ndarray, dtype: GFloatType = "gfp16") -> np.ndarray:
 
     batch, seq = x.shape
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        input_path = Path(tmpdir) / "input.bin"
-        output_path = Path(tmpdir) / "output.bin"
-
-        _fp32_to_gfloat(x, dtype).tofile(input_path)
-
-        result = subprocess.run(
-            [str(_CPU_GOLDEN_PATH), "softmax", dtype,
-             str(input_path), str(output_path),
-             str(batch), str(seq)],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"cpu_golden softmax failed: {result.stderr}")
-
-        np_dtype = _get_gfloat_numpy_dtype(dtype)
-        y_gfp = np.fromfile(output_path, dtype=np_dtype)
-        y = _gfloat_to_fp32(y_gfp, dtype, batch * seq).reshape(batch, seq)
+    y = _run_golden_subprocess(
+        op_name="softmax",
+        cmd_args=["softmax", dtype, "@input.bin", "@output", str(batch), str(seq)],
+        inputs={"input.bin": (x, dtype)},
+        output_name="output.bin",
+        output_dtype=dtype,
+        output_size=batch * seq,
+        output_shape=(batch, seq),
+    )
 
     return y.reshape(original_shape)
 
@@ -341,29 +363,19 @@ def layernorm(
     assert gamma.shape == (hidden,), f"gamma shape mismatch: {gamma.shape} vs ({hidden},)"
     assert beta.shape == (hidden,), f"beta shape mismatch: {beta.shape} vs ({hidden},)"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        x_path = Path(tmpdir) / "x.bin"
-        gamma_path = Path(tmpdir) / "gamma.bin"
-        beta_path = Path(tmpdir) / "beta.bin"
-        y_path = Path(tmpdir) / "y.bin"
-
-        _fp32_to_gfloat(x, dtype).tofile(x_path)
-        _fp32_to_gfloat(gamma, dtype).tofile(gamma_path)
-        _fp32_to_gfloat(beta, dtype).tofile(beta_path)
-
-        result = subprocess.run(
-            [str(_CPU_GOLDEN_PATH), "layernorm", dtype,
-             str(x_path), str(gamma_path), str(beta_path), str(y_path),
-             str(batch), str(hidden)],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"cpu_golden layernorm failed: {result.stderr}")
-
-        np_dtype = _get_gfloat_numpy_dtype(dtype)
-        y_gfp = np.fromfile(y_path, dtype=np_dtype)
-        y = _gfloat_to_fp32(y_gfp, dtype, batch * hidden).reshape(batch, hidden)
+    y = _run_golden_subprocess(
+        op_name="layernorm",
+        cmd_args=["layernorm", dtype, "@x.bin", "@gamma.bin", "@beta.bin", "@output", str(batch), str(hidden)],
+        inputs={
+            "x.bin": (x, dtype),
+            "gamma.bin": (gamma, dtype),
+            "beta.bin": (beta, dtype),
+        },
+        output_name="y.bin",
+        output_dtype=dtype,
+        output_size=batch * hidden,
+        output_shape=(batch, hidden),
+    )
 
     return y.reshape(original_shape)
 
@@ -391,28 +403,16 @@ def transpose(
 
     d0, d1, d2, d3 = x.shape
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        x_path = Path(tmpdir) / "x.bin"
-        y_path = Path(tmpdir) / "y.bin"
-
-        _fp32_to_gfloat(x, dtype).tofile(x_path)
-
-        result = subprocess.run(
-            [str(_CPU_GOLDEN_PATH), "transpose", dtype,
-             str(x_path), str(y_path),
-             str(d0), str(d1), str(d2), str(d3)],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"cpu_golden transpose failed: {result.stderr}")
-
-        np_dtype = _get_gfloat_numpy_dtype(dtype)
-        y_gfp = np.fromfile(y_path, dtype=np_dtype)
-        y = _gfloat_to_fp32(y_gfp, dtype, d0 * d1 * d2 * d3)
-
     # 输出 shape: [d0, d1, d3, d2]
-    return y.reshape(d0, d1, d3, d2)
+    return _run_golden_subprocess(
+        op_name="transpose",
+        cmd_args=["transpose", dtype, "@x.bin", "@output", str(d0), str(d1), str(d2), str(d3)],
+        inputs={"x.bin": (x, dtype)},
+        output_name="y.bin",
+        output_dtype=dtype,
+        output_size=d0 * d1 * d2 * d3,
+        output_shape=(d0, d1, d3, d2),
+    )
 
 
 def register_all_cpu_golden(

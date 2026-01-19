@@ -13,6 +13,7 @@ except ImportError:
     HAS_OPENPYXL = False
 
 from aidevtools.core.log import logger
+from aidevtools.core.utils import parse_shape, parse_list
 
 
 def _check_openpyxl():
@@ -60,8 +61,7 @@ class OpConfig:
         # 检查是否是命名依赖 (包含 ":")
         if ":" in depends_str:
             # 命名依赖: "q:0,k:1,v:2"
-            parts = depends_str.split(",")
-            for part in parts:
+            for part in parse_list(depends_str):
                 if ":" not in part:
                     continue
                 name, idx_str = part.split(":", 1)
@@ -73,7 +73,7 @@ class OpConfig:
                     logger.warn(f"无效的依赖索引: {part}")
         else:
             # 简单依赖: "0" 或 "1,2"
-            parts = [p.strip() for p in depends_str.split(",") if p.strip()]
+            parts = parse_list(depends_str)
             if len(parts) == 1:
                 # 单依赖
                 try:
@@ -143,10 +143,7 @@ def parse_xlsx(xlsx_path: str) -> Tuple[List[str], List[OpConfig]]:
 
             # 解析 shape
             shape_str = str(row_dict.get("shape", "") or "")
-            try:
-                shape = tuple(int(x.strip()) for x in shape_str.split(",") if x.strip())
-            except ValueError:
-                shape = ()
+            shape = parse_shape(shape_str) or ()
 
             # 解析 skip
             skip_str = str(row_dict.get("skip", "FALSE") or "FALSE").upper()
