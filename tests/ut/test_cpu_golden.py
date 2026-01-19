@@ -1,0 +1,359 @@
+"""CPU Golden 单元测试"""
+import pytest
+import numpy as np
+import subprocess
+import tempfile
+from pathlib import Path
+
+
+# CPU Golden 可执行文件路径
+CPU_GOLDEN_PATH = Path(__file__).parent.parent.parent / "src/aidevtools/golden/cpu_golden"
+
+
+def skip_if_not_built():
+    """检查 cpu_golden 是否已编译"""
+    if not CPU_GOLDEN_PATH.exists():
+        pytest.skip(f"cpu_golden not built: {CPU_GOLDEN_PATH}")
+
+
+# ==================== GFloat 格式转换 ====================
+
+def fp32_to_gfloat16(x: np.ndarray) -> np.ndarray:
+    """fp32 -> gfloat16 (取高16位)"""
+    bits = x.view(np.uint32)
+    return (bits >> 16).astype(np.uint16)
+
+
+def gfloat16_to_fp32(x: np.ndarray) -> np.ndarray:
+    """gfloat16 -> fp32 (低16位补零)"""
+    bits = x.astype(np.uint32) << 16
+    return bits.view(np.float32)
+
+
+def fp32_to_gfloat8(x: np.ndarray) -> np.ndarray:
+    """fp32 -> gfloat8 (取高8位)"""
+    bits = x.view(np.uint32)
+    return (bits >> 24).astype(np.uint8)
+
+
+def gfloat8_to_fp32(x: np.ndarray) -> np.ndarray:
+    """gfloat8 -> fp32 (低24位补零)"""
+    bits = x.astype(np.uint32) << 24
+    return bits.view(np.float32)
+
+
+def fp32_to_gfloat4(x: np.ndarray) -> np.ndarray:
+    """fp32 -> gfloat4 (取高4位, packed)"""
+    bits = x.view(np.uint32)
+    val4 = (bits >> 28).astype(np.uint8)
+    # Pack: 2个4-bit值打包到1个uint8
+    size = x.size
+    packed_size = (size + 1) // 2
+    packed = np.zeros(packed_size, dtype=np.uint8)
+    for i in range(size):
+        byte_idx = i // 2
+        if i % 2 == 0:
+            packed[byte_idx] |= (val4.flat[i] << 4)
+        else:
+            packed[byte_idx] |= val4.flat[i]
+    return packed
+
+
+def gfloat4_to_fp32(packed: np.ndarray, size: int) -> np.ndarray:
+    """gfloat4 -> fp32 (低28位补零)"""
+    output = np.zeros(size, dtype=np.float32)
+    for i in range(size):
+        byte_idx = i // 2
+        if i % 2 == 0:
+            val4 = (packed[byte_idx] >> 4) & 0x0F
+        else:
+            val4 = packed[byte_idx] & 0x0F
+        bits = np.uint32(val4) << 28
+        output[i] = np.array([bits], dtype=np.uint32).view(np.float32)[0]
+    return output
+
+
+class TestCpuGoldenMatmul:
+    """MatMul 测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_matmul_gfp16(self):
+        """MatMul gfloat16"""
+        M, K, N = 4, 8, 16
+
+        # 生成测试数据
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        # 转换为 gfloat16
+        a_gfp = fp32_to_gfloat16(a)
+        b_gfp = fp32_to_gfloat16(b)
+
+        # 保存输入
+        a_path = Path(self.temp_dir) / "a.bin"
+        b_path = Path(self.temp_dir) / "b.bin"
+        c_path = Path(self.temp_dir) / "c.bin"
+
+        a_gfp.tofile(a_path)
+        b_gfp.tofile(b_path)
+
+        # 调用 cpu_golden
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "matmul", "gfp16",
+             str(a_path), str(b_path), str(c_path),
+             str(M), str(K), str(N)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        # 读取结果
+        c_gfp = np.fromfile(c_path, dtype=np.uint16)
+        c = gfloat16_to_fp32(c_gfp).reshape(M, N)
+
+        # 用量化后的输入计算参考值
+        a_quant = gfloat16_to_fp32(a_gfp)
+        b_quant = gfloat16_to_fp32(b_gfp)
+        c_ref = np.matmul(a_quant, b_quant)
+
+        # 验证 (考虑 gfloat16 量化误差)
+        assert c.shape == (M, N)
+        assert np.allclose(c, c_ref, rtol=1e-2, atol=1e-2)
+
+    def test_matmul_gfp8(self):
+        """MatMul gfloat8"""
+        M, K, N = 2, 4, 8
+
+        a = np.random.randn(M, K).astype(np.float32)
+        b = np.random.randn(K, N).astype(np.float32)
+
+        a_gfp = fp32_to_gfloat8(a)
+        b_gfp = fp32_to_gfloat8(b)
+
+        a_path = Path(self.temp_dir) / "a.bin"
+        b_path = Path(self.temp_dir) / "b.bin"
+        c_path = Path(self.temp_dir) / "c.bin"
+
+        a_gfp.tofile(a_path)
+        b_gfp.tofile(b_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "matmul", "gfp8",
+             str(a_path), str(b_path), str(c_path),
+             str(M), str(K), str(N)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        c_gfp = np.fromfile(c_path, dtype=np.uint8)
+        c = gfloat8_to_fp32(c_gfp).reshape(M, N)
+
+        assert c.shape == (M, N)
+
+
+class TestCpuGoldenSoftmax:
+    """Softmax 测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_softmax_gfp16(self):
+        """Softmax gfloat16"""
+        batch, seq = 4, 16
+
+        x = np.random.randn(batch, seq).astype(np.float32)
+        x_gfp = fp32_to_gfloat16(x)
+
+        input_path = Path(self.temp_dir) / "input.bin"
+        output_path = Path(self.temp_dir) / "output.bin"
+
+        x_gfp.tofile(input_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "softmax", "gfp16",
+             str(input_path), str(output_path),
+             str(batch), str(seq)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        y_gfp = np.fromfile(output_path, dtype=np.uint16)
+        y = gfloat16_to_fp32(y_gfp).reshape(batch, seq)
+
+        # softmax 输出每行和应该接近 1
+        row_sums = y.sum(axis=1)
+        assert y.shape == (batch, seq)
+        assert np.allclose(row_sums, 1.0, atol=0.05)  # gfloat16 有量化误差
+
+    def test_softmax_gfp8(self):
+        """Softmax gfloat8"""
+        batch, seq = 2, 8
+
+        x = np.random.randn(batch, seq).astype(np.float32)
+        x_gfp = fp32_to_gfloat8(x)
+
+        input_path = Path(self.temp_dir) / "input.bin"
+        output_path = Path(self.temp_dir) / "output.bin"
+
+        x_gfp.tofile(input_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "softmax", "gfp8",
+             str(input_path), str(output_path),
+             str(batch), str(seq)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        y_gfp = np.fromfile(output_path, dtype=np.uint8)
+        y = gfloat8_to_fp32(y_gfp).reshape(batch, seq)
+
+        assert y.shape == (batch, seq)
+
+
+class TestCpuGoldenLayernorm:
+    """LayerNorm 测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_layernorm_gfp16(self):
+        """LayerNorm gfloat16"""
+        batch, hidden = 4, 64
+
+        x = np.random.randn(batch, hidden).astype(np.float32)
+        gamma = np.ones(hidden, dtype=np.float32)
+        beta = np.zeros(hidden, dtype=np.float32)
+
+        x_gfp = fp32_to_gfloat16(x)
+        gamma_gfp = fp32_to_gfloat16(gamma)
+        beta_gfp = fp32_to_gfloat16(beta)
+
+        x_path = Path(self.temp_dir) / "x.bin"
+        gamma_path = Path(self.temp_dir) / "gamma.bin"
+        beta_path = Path(self.temp_dir) / "beta.bin"
+        y_path = Path(self.temp_dir) / "y.bin"
+
+        x_gfp.tofile(x_path)
+        gamma_gfp.tofile(gamma_path)
+        beta_gfp.tofile(beta_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "layernorm", "gfp16",
+             str(x_path), str(gamma_path), str(beta_path), str(y_path),
+             str(batch), str(hidden)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        y_gfp = np.fromfile(y_path, dtype=np.uint16)
+        y = gfloat16_to_fp32(y_gfp).reshape(batch, hidden)
+
+        # layernorm 输出每行均值应接近 0，方差接近 1
+        assert y.shape == (batch, hidden)
+        assert np.allclose(y.mean(axis=1), 0.0, atol=0.1)
+        assert np.allclose(y.var(axis=1), 1.0, atol=0.2)
+
+    def test_layernorm_with_scale_bias(self):
+        """LayerNorm with gamma/beta"""
+        batch, hidden = 2, 32
+
+        x = np.random.randn(batch, hidden).astype(np.float32)
+        gamma = np.random.randn(hidden).astype(np.float32) * 0.5 + 1.0
+        beta = np.random.randn(hidden).astype(np.float32) * 0.1
+
+        x_gfp = fp32_to_gfloat16(x)
+        gamma_gfp = fp32_to_gfloat16(gamma)
+        beta_gfp = fp32_to_gfloat16(beta)
+
+        x_path = Path(self.temp_dir) / "x.bin"
+        gamma_path = Path(self.temp_dir) / "gamma.bin"
+        beta_path = Path(self.temp_dir) / "beta.bin"
+        y_path = Path(self.temp_dir) / "y.bin"
+
+        x_gfp.tofile(x_path)
+        gamma_gfp.tofile(gamma_path)
+        beta_gfp.tofile(beta_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "layernorm", "gfp16",
+             str(x_path), str(gamma_path), str(beta_path), str(y_path),
+             str(batch), str(hidden)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        y_gfp = np.fromfile(y_path, dtype=np.uint16)
+        y = gfloat16_to_fp32(y_gfp).reshape(batch, hidden)
+
+        assert y.shape == (batch, hidden)
+
+
+class TestCpuGoldenGfloat4:
+    """GFloat4 格式测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_softmax_gfp4(self):
+        """Softmax gfloat4"""
+        batch, seq = 2, 8
+
+        x = np.random.randn(batch, seq).astype(np.float32)
+        x_gfp = fp32_to_gfloat4(x)
+
+        input_path = Path(self.temp_dir) / "input.bin"
+        output_path = Path(self.temp_dir) / "output.bin"
+
+        x_gfp.tofile(input_path)
+
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "softmax", "gfp4",
+             str(input_path), str(output_path),
+             str(batch), str(seq)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Failed: {result.stderr}"
+
+        y_gfp = np.fromfile(output_path, dtype=np.uint8)
+        y = gfloat4_to_fp32(y_gfp, batch * seq).reshape(batch, seq)
+
+        assert y.shape == (batch, seq)
+
+
+class TestCpuGoldenCLI:
+    """CLI 测试"""
+
+    def setup_method(self):
+        skip_if_not_built()
+
+    def test_help(self):
+        """--help 选项"""
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "--help"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert "GFloat CPU Golden CLI" in result.stderr
+
+    def test_unknown_op(self):
+        """未知算子"""
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "unknown_op"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 1
+        assert "unknown op" in result.stderr
+
+    def test_missing_args(self):
+        """缺少参数"""
+        result = subprocess.run(
+            [str(CPU_GOLDEN_PATH), "matmul", "gfp16"],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 1
