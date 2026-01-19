@@ -156,6 +156,7 @@ def create_template(
     # 表头
     compare_headers = [
         "id", "op_name", "status", "max_abs", "qsnr", "cosine",
+        "isclose_pass", "exceed_count", "exceed_ratio",
         "golden_bin", "result_bin", "note"
     ]
     for col, header in enumerate(compare_headers, 1):

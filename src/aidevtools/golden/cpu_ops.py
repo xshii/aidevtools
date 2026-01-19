@@ -260,6 +260,53 @@ def layernorm(
     return y.reshape(original_shape)
 
 
+def transpose(
+    x: np.ndarray,
+    dtype: GFloatType = "gfp16",
+) -> np.ndarray:
+    """
+    Transpose 4D: 交换最后两个维度
+
+    Args:
+        x: 输入数组, shape [d0, d1, d2, d3]
+        dtype: gfloat 类型 (gfp4, gfp8, gfp16)
+
+    Returns:
+        输出数组, shape [d0, d1, d3, d2]
+    """
+    _check_cpu_golden()
+
+    x = np.asarray(x, dtype=np.float32)
+
+    if x.ndim != 4:
+        raise ValueError(f"transpose requires 4D input, got {x.ndim}D")
+
+    d0, d1, d2, d3 = x.shape
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        x_path = Path(tmpdir) / "x.bin"
+        y_path = Path(tmpdir) / "y.bin"
+
+        _fp32_to_gfloat(x, dtype).tofile(x_path)
+
+        result = subprocess.run(
+            [str(_CPU_GOLDEN_PATH), "transpose", dtype,
+             str(x_path), str(y_path),
+             str(d0), str(d1), str(d2), str(d3)],
+            capture_output=True, text=True
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"cpu_golden transpose failed: {result.stderr}")
+
+        np_dtype = _get_gfloat_numpy_dtype(dtype)
+        y_gfp = np.fromfile(y_path, dtype=np_dtype)
+        y = _gfloat_to_fp32(y_gfp, dtype, d0 * d1 * d2 * d3)
+
+    # 输出 shape: [d0, d1, d3, d2]
+    return y.reshape(d0, d1, d3, d2)
+
+
 def register_all_cpu_golden(dtype: GFloatType = "gfp16"):
     """
     批量注册所有 CPU Golden 算子
@@ -289,6 +336,11 @@ def register_all_cpu_golden(dtype: GFloatType = "gfp16"):
     @register_golden_cpp("layernorm")
     def _layernorm(x, gamma, beta):
         return layernorm(x, gamma, beta, dtype=dtype)
+
+    @register_golden_cpp("transpose")
+    def _transpose(x, axes=None):
+        # CPU golden 只支持 4D 交换最后两维
+        return transpose(x, dtype=dtype)
 
 
 def is_cpu_golden_available() -> bool:

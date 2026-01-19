@@ -158,4 +158,16 @@ void softmax_fp32(const float* input, float* output,
 void layernorm_fp32(const float* input, const float* gamma, const float* beta,
                     float* output, size_t batch, size_t hidden, float eps = 1e-5f);
 
+/**
+ * Transpose 4D: 交换最后两个维度
+ * 输入: [d0, d1, d2, d3] -> 输出: [d0, d1, d3, d2]
+ */
+void transpose_4d_fp32(const float* input, float* output,
+                       size_t d0, size_t d1, size_t d2, size_t d3);
+
+/**
+ * Transpose 2D: [M, N] -> [N, M]
+ */
+void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N);
+
 }  // namespace gfloat_ops

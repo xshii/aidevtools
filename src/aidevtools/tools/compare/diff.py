@@ -29,6 +29,27 @@ class ExactResult:
 
 
 @dataclass
+class IsCloseResult:
+    """
+    IsClose 比对结果
+
+    类似 numpy.isclose: |a - b| <= atol + rtol * |b|
+    """
+    passed: bool              # 是否通过精度要求
+    total_elements: int       # 总元素数
+    exceed_count: int         # 超过门限的元素数
+    exceed_ratio: float       # 超限比例 (exceed_count / total_elements)
+    max_abs_error: float      # 最大绝对误差
+    max_rel_error: float      # 最大相对误差
+    mean_abs_error: float     # 平均绝对误差
+    mean_rel_error: float     # 平均相对误差
+    # 参数
+    atol: float               # 绝对误差门限
+    rtol: float               # 相对误差门限
+    max_exceed_ratio: float   # 允许的最大超限比例
+
+
+@dataclass
 class FullCompareResult:
     """
     完整比对结果 (3 列)
@@ -86,8 +107,10 @@ def compare_exact(golden: np.ndarray, result: np.ndarray,
     max_abs_actual = float(abs_err.max()) if len(abs_err) > 0 else 0.0
 
     if max_abs == 0:
-        # bit 级精确比对
-        mismatch_mask = (golden.view(np.uint8) != result.view(np.uint8))
+        # bit 级精确比对 (需要 contiguous 数组)
+        g_cont = np.ascontiguousarray(golden)
+        r_cont = np.ascontiguousarray(result)
+        mismatch_mask = (g_cont.view(np.uint8) != r_cont.view(np.uint8))
         mismatch_count = int(np.sum(mismatch_mask))
         first_diff = np.argmax(mismatch_mask) if mismatch_count > 0 else -1
     else:
@@ -192,6 +215,104 @@ def calc_cosine(a: np.ndarray, b: np.ndarray) -> float:
     if norm_a < 1e-12 or norm_b < 1e-12:
         return 0.0
     return float(np.dot(a_flat, b_flat) / (norm_a * norm_b))
+
+
+def compare_isclose(
+    golden: np.ndarray,
+    result: np.ndarray,
+    atol: float = 1e-5,
+    rtol: float = 1e-3,
+    max_exceed_ratio: float = 0.0,
+) -> IsCloseResult:
+    """
+    IsClose 比对 - 逐元素误差检查
+
+    判断条件: |result - golden| <= atol + rtol * |golden|
+    通过条件: exceed_ratio <= max_exceed_ratio
+
+    Args:
+        golden: 参考数据 (golden)
+        result: 待比对数据 (DUT 输出)
+        atol: 绝对误差门限 (absolute tolerance)
+        rtol: 相对误差门限 (relative tolerance)
+        max_exceed_ratio: 允许的最大超限比例 (0.0 = 不允许任何超限)
+
+    Returns:
+        IsCloseResult 包含详细统计信息
+
+    示例:
+        >>> result = compare_isclose(golden, dut, atol=1e-4, rtol=1e-2, max_exceed_ratio=0.01)
+        >>> print(f"Pass: {result.passed}, Exceed: {result.exceed_ratio:.2%}")
+    """
+    # 转换为 fp32 高精度
+    g = golden.astype(np.float32).flatten()
+    r = result.astype(np.float32).flatten()
+
+    if len(g) != len(r):
+        raise ValueError(f"Shape mismatch: golden={golden.shape}, result={result.shape}")
+
+    total_elements = len(g)
+
+    # 计算绝对误差
+    abs_error = np.abs(r - g)
+
+    # 计算相对误差 (避免除零)
+    g_abs = np.abs(g)
+    rel_error = np.where(g_abs > 1e-12, abs_error / g_abs, 0.0)
+
+    # 计算综合门限: atol + rtol * |golden|
+    threshold = atol + rtol * g_abs
+
+    # 统计超限元素
+    exceed_mask = abs_error > threshold
+    exceed_count = int(np.sum(exceed_mask))
+    exceed_ratio = exceed_count / total_elements if total_elements > 0 else 0.0
+
+    # 判断是否通过
+    passed = exceed_ratio <= max_exceed_ratio
+
+    # 统计指标
+    max_abs_error = float(np.max(abs_error)) if total_elements > 0 else 0.0
+    mean_abs_error = float(np.mean(abs_error)) if total_elements > 0 else 0.0
+    max_rel_error = float(np.max(rel_error)) if total_elements > 0 else 0.0
+    mean_rel_error = float(np.mean(rel_error)) if total_elements > 0 else 0.0
+
+    return IsCloseResult(
+        passed=passed,
+        total_elements=total_elements,
+        exceed_count=exceed_count,
+        exceed_ratio=exceed_ratio,
+        max_abs_error=max_abs_error,
+        max_rel_error=max_rel_error,
+        mean_abs_error=mean_abs_error,
+        mean_rel_error=mean_rel_error,
+        atol=atol,
+        rtol=rtol,
+        max_exceed_ratio=max_exceed_ratio,
+    )
+
+
+def print_isclose_result(result: IsCloseResult, name: str = ""):
+    """打印 IsClose 比对结果"""
+    status = "PASS" if result.passed else "FAIL"
+    name_str = f"[{name}] " if name else ""
+
+    print(f"\n{name_str}IsClose 比对结果: {status}")
+    print("-" * 50)
+    print(f"  参数:")
+    print(f"    atol (绝对门限):     {result.atol:.2e}")
+    print(f"    rtol (相对门限):     {result.rtol:.2e}")
+    print(f"    max_exceed_ratio:    {result.max_exceed_ratio:.2%}")
+    print(f"  统计:")
+    print(f"    总元素数:            {result.total_elements:,}")
+    print(f"    超限元素数:          {result.exceed_count:,}")
+    print(f"    超限比例:            {result.exceed_ratio:.4%}")
+    print(f"  误差:")
+    print(f"    最大绝对误差:        {result.max_abs_error:.6e}")
+    print(f"    平均绝对误差:        {result.mean_abs_error:.6e}")
+    print(f"    最大相对误差:        {result.max_rel_error:.6e}")
+    print(f"    平均相对误差:        {result.mean_rel_error:.6e}")
+    print("-" * 50)
 
 
 def compare_3col(

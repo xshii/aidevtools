@@ -33,13 +33,15 @@ void print_usage(const char* prog) {
               << "  " << prog << " matmul <dtype> <a.bin> <b.bin> <c.bin> <M> <K> <N>\n"
               << "  " << prog << " softmax <dtype> <input.bin> <output.bin> <batch> <seq>\n"
               << "  " << prog << " layernorm <dtype> <input.bin> <gamma.bin> <beta.bin> <output.bin> <batch> <hidden>\n"
+              << "  " << prog << " transpose <dtype> <input.bin> <output.bin> <d0> <d1> <d2> <d3>\n"
               << "\n"
               << "dtype: gfp4, gfp8, gfp16 (or gfloat4, gfloat8, gfloat16, 4, 8, 16)\n"
               << "\n"
               << "Examples:\n"
               << "  " << prog << " matmul gfp16 a.bin b.bin c.bin 64 128 256\n"
               << "  " << prog << " softmax gfp8 input.bin output.bin 4 64\n"
-              << "  " << prog << " layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256\n";
+              << "  " << prog << " layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256\n"
+              << "  " << prog << " transpose gfp16 x.bin y.bin 2 4 8 32\n";
 }
 
 int run_matmul(int argc, char* argv[]) {
@@ -180,6 +182,49 @@ int run_layernorm(int argc, char* argv[]) {
     return 0;
 }
 
+int run_transpose(int argc, char* argv[]) {
+    // transpose <dtype> <input.bin> <output.bin> <d0> <d1> <d2> <d3>
+    if (argc < 9) {
+        std::cerr << "Error: transpose requires 7 arguments\n";
+        return 1;
+    }
+
+    GFloatType dtype = parse_gfloat_type(argv[2]);
+    std::string input_path = argv[3];
+    std::string output_path = argv[4];
+    size_t d0 = std::stoull(argv[5]);
+    size_t d1 = std::stoull(argv[6]);
+    size_t d2 = std::stoull(argv[7]);
+    size_t d3 = std::stoull(argv[8]);
+
+    std::cerr << "[cpu_golden] transpose: " << gfloat_type_to_string(dtype)
+              << " [" << d0 << "," << d1 << "," << d2 << "," << d3 << "] -> ["
+              << d0 << "," << d1 << "," << d3 << "," << d2 << "]\n";
+
+    // 加载输入
+    auto input_fp32 = load_gfloat_as_fp32(input_path, dtype);
+
+    size_t total = d0 * d1 * d2 * d3;
+    if (input_fp32.size() < total) {
+        std::cerr << "Error: input.bin size mismatch, expected " << total
+                  << ", got " << input_fp32.size() << "\n";
+        return 1;
+    }
+
+    // 计算
+    std::vector<float> output_fp32(total);
+    transpose_4d_fp32(input_fp32.data(), output_fp32.data(), d0, d1, d2, d3);
+
+    // 保存输出
+    if (!save_as_gfloat(output_fp32.data(), total, output_path, dtype)) {
+        std::cerr << "Error: failed to save output to " << output_path << "\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden] transpose done: " << output_path << "\n";
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -195,6 +240,8 @@ int main(int argc, char* argv[]) {
             return run_softmax(argc, argv);
         } else if (op == "layernorm") {
             return run_layernorm(argc, argv);
+        } else if (op == "transpose") {
+            return run_transpose(argc, argv);
         } else if (op == "-h" || op == "--help" || op == "help") {
             print_usage(argv[0]);
             return 0;

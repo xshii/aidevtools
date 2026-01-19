@@ -258,4 +258,35 @@ void layernorm_fp32(const float* input, const float* gamma, const float* beta,
     }
 }
 
+// ==================== Transpose ====================
+
+void transpose_4d_fp32(const float* input, float* output,
+                       size_t d0, size_t d1, size_t d2, size_t d3) {
+    // [d0, d1, d2, d3] -> [d0, d1, d3, d2]
+    // 输入 stride: [d1*d2*d3, d2*d3, d3, 1]
+    // 输出 stride: [d1*d3*d2, d3*d2, 1, d2]
+    for (size_t i0 = 0; i0 < d0; ++i0) {
+        for (size_t i1 = 0; i1 < d1; ++i1) {
+            for (size_t i2 = 0; i2 < d2; ++i2) {
+                for (size_t i3 = 0; i3 < d3; ++i3) {
+                    // 输入索引: [i0, i1, i2, i3]
+                    size_t in_idx = i0 * (d1 * d2 * d3) + i1 * (d2 * d3) + i2 * d3 + i3;
+                    // 输出索引: [i0, i1, i3, i2] (交换最后两维)
+                    size_t out_idx = i0 * (d1 * d3 * d2) + i1 * (d3 * d2) + i3 * d2 + i2;
+                    output[out_idx] = input[in_idx];
+                }
+            }
+        }
+    }
+}
+
+void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N) {
+    // [M, N] -> [N, M]
+    for (size_t i = 0; i < M; ++i) {
+        for (size_t j = 0; j < N; ++j) {
+            output[j * M + i] = input[i * N + j];
+        }
+    }
+}
+
 }  // namespace gfloat_ops
