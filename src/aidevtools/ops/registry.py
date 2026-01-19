@@ -167,9 +167,39 @@ def get_all_ops() -> Dict[str, OpMeta]:
     return _op_registry.copy()
 
 
-# ============================================================
-# 算子基类 (从 base.py 移入，避免循环导入)
-# ============================================================
+def get_cpp_golden_ops() -> List[str]:
+    """
+    获取所有标记为有 C++ golden 实现的算子
 
-# 注意: Op 基类仍在 base.py 中定义
-# 这里只导出注册相关的 API
+    Returns:
+        算子名列表
+
+    用法:
+        from aidevtools.ops.registry import get_cpp_golden_ops
+
+        # 获取应该有 C++ golden 的算子
+        cpp_ops = get_cpp_golden_ops()
+        # ['matmul', 'softmax', 'layernorm', 'transpose']
+    """
+    return [name for name, meta in _op_registry.items() if meta.has_cpp_golden]
+
+
+def check_cpp_golden_registered() -> Dict[str, bool]:
+    """
+    检查 C++ golden 注册状态
+
+    Returns:
+        {算子名: 是否已注册}
+
+    用法:
+        from aidevtools.ops.registry import check_cpp_golden_registered
+
+        status = check_cpp_golden_registered()
+        # {'matmul': True, 'softmax': True, 'layernorm': False, ...}
+    """
+    from aidevtools.ops.base import has_golden_cpp
+
+    result = {}
+    for name in get_cpp_golden_ops():
+        result[name] = has_golden_cpp(name)
+    return result

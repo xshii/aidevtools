@@ -124,3 +124,44 @@ class TestXlsxOpRegistry:
         assert xlsx_validate_op("linear")
         assert "linear" in xlsx_list_ops()
         assert "inputs" in xlsx_get_op_info("linear")
+
+
+class TestCppGoldenIntegration:
+    """测试 C++ Golden 与注册表的集成"""
+
+    def test_get_cpp_golden_ops(self):
+        """获取所有标记 has_cpp_golden 的算子"""
+        from aidevtools.ops.registry import get_cpp_golden_ops
+
+        cpp_ops = get_cpp_golden_ops()
+        assert "matmul" in cpp_ops
+        assert "softmax" in cpp_ops
+        assert "layernorm" in cpp_ops
+        assert "transpose" in cpp_ops
+        # relu 没有 C++ golden
+        assert "relu" not in cpp_ops
+
+    def test_check_cpp_golden_registered(self):
+        """检查 C++ golden 注册状态"""
+        from aidevtools.ops.registry import check_cpp_golden_registered
+        from aidevtools.ops.cpu_golden import register_all_cpu_golden
+
+        # 先注册
+        register_all_cpu_golden("gfp16")
+
+        # 检查状态
+        status = check_cpp_golden_registered()
+        assert status["matmul"] is True
+        assert status["softmax"] is True
+        assert status["layernorm"] is True
+        assert status["transpose"] is True
+
+    def test_register_all_returns_list(self):
+        """register_all_cpu_golden 返回注册的算子列表"""
+        from aidevtools.ops.cpu_golden import register_all_cpu_golden
+
+        registered = register_all_cpu_golden("gfp16")
+        assert "matmul" in registered
+        assert "softmax" in registered
+        assert "layernorm" in registered
+        assert "transpose" in registered

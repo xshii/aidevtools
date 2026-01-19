@@ -4,7 +4,7 @@
 可直接用于 @register_golden_cpp 注册。
 
 用法:
-    from aidevtools.golden.cpu_ops import matmul, softmax, layernorm
+    from aidevtools.ops.cpu_golden import matmul, softmax, layernorm
     from aidevtools.ops.base import register_golden_cpp
 
     # 方式1: 直接注册
@@ -13,7 +13,11 @@
     register_golden_cpp("layernorm")(layernorm)
 
     # 方式2: 批量注册
-    from aidevtools.golden.cpu_ops import register_all_cpu_golden
+    from aidevtools.ops.cpu_golden import register_all_cpu_golden
+    register_all_cpu_golden()
+
+    # 方式3: 通过 golden 模块 (向后兼容)
+    from aidevtools.golden import register_all_cpu_golden
     register_all_cpu_golden()
 """
 import subprocess
@@ -22,8 +26,8 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Literal, List, Dict, Tuple
 
-# CPU Golden 可执行文件路径
-_CPU_GOLDEN_PATH = Path(__file__).parent / "cpu_golden"
+# CPU Golden 可执行文件路径 (在 golden 目录)
+_CPU_GOLDEN_PATH = Path(__file__).parent.parent / "golden" / "cpu_golden"
 
 GFloatType = Literal["gfp4", "gfp8", "gfp16"]
 
@@ -424,6 +428,8 @@ def register_all_cpu_golden(
     """
     批量注册所有 CPU Golden 算子
 
+    自动注册所有在 ops.registry 中标记 has_cpp_golden=True 的算子。
+
     Args:
         dtype: 默认 gfloat 类型
         dtype_matmul_a: matmul 的 A 矩阵类型 (混合精度)
@@ -453,24 +459,41 @@ def register_all_cpu_golden(
     mb = dtype_matmul_b or dtype
     mo = dtype_matmul_out or dtype
 
-    # 创建带默认 dtype 的闭包
-    @register_golden_cpp("matmul")
-    def _matmul(a, b):
-        return matmul(a, b, dtype=dtype, dtype_a=ma, dtype_b=mb, dtype_out=mo)
+    # CPU Golden 实现映射
+    # key: 算子名, value: (注册函数, 是否已实现)
+    _cpu_golden_impls = {
+        "matmul": lambda: register_golden_cpp("matmul")(
+            lambda a, b: matmul(a, b, dtype=dtype, dtype_a=ma, dtype_b=mb, dtype_out=mo)
+        ),
+        "softmax": lambda: register_golden_cpp("softmax")(
+            lambda x, axis=-1: softmax(x, dtype=dtype)
+        ),
+        "layernorm": lambda: register_golden_cpp("layernorm")(
+            lambda x, gamma, beta, eps=1e-5: layernorm(x, gamma, beta, dtype=dtype, eps=eps)
+        ),
+        "transpose": lambda: register_golden_cpp("transpose")(
+            lambda x, axes=None: transpose(x, dtype=dtype)
+        ),
+    }
 
-    @register_golden_cpp("softmax")
-    def _softmax(x, axis=-1):
-        # cpp softmax 沿最后一维计算，忽略 axis 参数
-        return softmax(x, dtype=dtype)
+    # 注册已实现的算子
+    registered = []
+    for op_name, register_fn in _cpu_golden_impls.items():
+        register_fn()
+        registered.append(op_name)
 
-    @register_golden_cpp("layernorm")
-    def _layernorm(x, gamma, beta, eps=1e-5):
-        return layernorm(x, gamma, beta, dtype=dtype, eps=eps)
+    # 检查注册表中标记的算子是否都已实现
+    try:
+        from aidevtools.ops.registry import get_cpp_golden_ops
+        expected_ops = get_cpp_golden_ops()
+        missing = set(expected_ops) - set(registered)
+        if missing:
+            from aidevtools.core.log import logger
+            logger.warning(f"以下算子标记了 has_cpp_golden=True 但未实现 CPU golden: {missing}")
+    except ImportError:
+        pass  # registry 未加载时跳过检查
 
-    @register_golden_cpp("transpose")
-    def _transpose(x, axes=None):
-        # CPU golden 只支持 4D 交换最后两维
-        return transpose(x, dtype=dtype)
+    return registered
 
 
 def is_cpu_golden_available() -> bool:
