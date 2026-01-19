@@ -157,3 +157,22 @@ def to_bfp8(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
     ])
 
     return packed, meta
+
+
+@register_quantize("bfp4")
+def to_bfp4(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
+    """
+    fp32 -> BFP4 (block_size=64, mantissa=2bit)
+
+    极端量化格式，仅保留 2 位尾数，适用于极致压缩场景
+    """
+    block_size = kwargs.get("block_size", 64)
+    mantissas, shared_exps, meta = fp32_to_bfp(data, block_size=block_size, mantissa_bits=2)
+
+    # 打包: [shared_exps..., mantissas...]
+    packed = np.concatenate([
+        shared_exps.astype(np.int8),
+        mantissas.astype(np.int8)
+    ])
+
+    return packed, meta

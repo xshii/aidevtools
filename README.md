@@ -1,6 +1,15 @@
 # AI Dev Tools
 
-AI 算子开发工具集，用于自研芯片算子的 Golden 对比验证。
+AI 算子开发工具集，用于自研芯片算子的 Golden 生成与精度验证。
+
+## 特性
+
+- **统一 Tensor 格式**：同时包含 fp32 (最高精度) 和 quantized (量化) 数据
+- **双轨 Golden 验证**：pure (纯 fp32) / quant (量化感知) 两种精度模式
+- **三列比对机制**：exact + fuzzy_pure + fuzzy_qnt，精确定位误差来源
+- **状态判定**：PERFECT → PASS → QUANT_ISSUE → FAIL
+- **多种量化格式**：BFP (块浮点)、GFloat、float16 等
+- **Python/C++ 双模式**：Golden 算子同时支持 Python 和 C++ 实现
 
 ## 快速上手
 
@@ -11,92 +20,142 @@ AI 算子开发工具集，用于自研芯片算子的 Golden 对比验证。
 # 2. 激活环境
 source .venv/bin/activate
 
-# 3. 使用
-python -c "from aidevtools import trace; print('OK')"
+# 3. 运行 Demo
+python demos/unified_workflow_demo.py
+
+# 4. 运行测试
+pytest tests/ -v
 ```
 
-## 环境依赖
+## 基础使用
 
-- Python >= 3.8, < 3.11
-- numpy
-- pyyaml (可选)
+```python
+from aidevtools.core import (
+    set_config, get_config,
+    Tensor, generate_random, generate_weight,
+    get_engine, clear, list_ops,
+)
+from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 
-## 功能概览
+# 1. 配置全局参数
+set_config(
+    golden_mode="python",  # python | cpp
+    precision="quant",     # pure | quant
+    seed=42,
+)
 
-| 模块 | 功能 |
-|------|------|
-| trace | 插桩捕获算子输入输出 |
-| formats | 多格式数据读写 (raw/numpy/自定义) |
-| compare | 比数验证 (bit/block/full) |
+# 2. 生成测试数据
+x = generate_random(shape=(2, 4, 64), qtype="bfp8", seed=42)
+w = generate_weight(shape=(64, 128), qtype="bfp8", seed=43)
 
-## 需求分解
+# 3. 执行算子
+engine = get_engine()
+y = engine.run_op("linear", inputs=[x], weights=[w], qtype="bfp8")
 
-### 核心功能
+# 4. 获取 Golden 结果
+for r in engine.get_records():
+    print(f"{r.op_name}: golden_pure={r.golden_pure.shape}, golden_quant={r.golden_quant.shape}")
+```
 
-- [x] 日志模块
-- [x] 格式插件 (raw, numpy)
-- [x] Trace 插桩
-- [x] 比数核心 (diff, report, export)
-- [x] CSV 配置表生成
-- [x] SVG 热力图
-- [x] 失败用例导出
-- [x] Zip 归档
+## 架构概览
 
-### 扩展功能
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           应用层 (Application)                           │
+│   demos/  │  xlsx 工作流  │  Python API  │  CLI                         │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+┌─────────────────────────────────▼───────────────────────────────────────┐
+│                            核心层 (Core)                                 │
+│   config (全局配置)  │  tensor (统一张量)  │  op (算子)  │  engine (引擎) │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+┌─────────────────────────────────▼───────────────────────────────────────┐
+│                            工具层 (Tools)                                │
+│   compare (三列比对)  │  trace (插桩)  │  xlsx (表格)  │  archive (打包) │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+┌─────────────────────────────────▼───────────────────────────────────────┐
+│                           格式层 (Formats)                               │
+│   numpy (npy/npz)  │  raw (二进制)  │  bfp (块浮点)  │  gfloat (自定义)  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-- [ ] Protobuf 格式
-- [ ] 自定义格式示例
-- [ ] ONNX 支持
-- [ ] CLI 命令集成
+## 三列比对
 
-### 文档
+| 列 | 说明 |
+|----|------|
+| **exact** | 精确比对 (bit-level 或阈值内) |
+| **fuzzy_pure** | 模糊比对 vs 纯 fp32 Golden |
+| **fuzzy_qnt** | 模糊比对 vs 量化感知 Golden |
 
-- [x] 架构设计 (docs/architecture.md)
-- [x] 子工具指导 (docs/tools/)
-- [x] 比数套件指导 (docs/compare_guide.md)
-- [x] 用例正交表 (tests/matrix/)
+### 状态判定
 
-## 完成情况
-
-| 模块 | 状态 | 说明 |
+| 状态 | 条件 | 含义 |
 |------|------|------|
-| core/log | ✅ | 日志模块 |
-| formats | ✅ | raw + numpy |
-| trace | ✅ | 插桩 + 导出 + CSV |
-| compare/diff | ✅ | bit/block/full + QSNR |
-| compare/report | ✅ | 文本 + SVG |
-| compare/export | ✅ | 失败用例导出 |
-| compare/archive | ✅ | zip 打包 |
-| tests | ✅ | pytest 覆盖 |
-| CI | ✅ | ci.sh |
+| PERFECT | exact ✓ | 完全一致 |
+| PASS | fuzzy_qnt ✓ | 误差在容差内 |
+| QUANT_ISSUE | fuzzy_pure ✓ 且 fuzzy_qnt ✗ | 量化引入的误差 |
+| FAIL | 都 ✗ | 算法实现错误 |
+
+### 输出示例
+
+```
+====================================================================================================
+op_name          exact  f_pure   f_qnt     max_abs     qsnr   cosine    status
+----------------------------------------------------------------------------------------------------
+linear_0           ✓       ✓       ✓      0.00e+00      inf 1.000000   PERFECT
+relu_0             ✗       ✓       ✓      9.54e-07    129.2 1.000000     PASS
+softmax_0          ✗       ✓       ✗      1.00e-01     29.0 0.999896 QUANT_ISSUE
+matmul_0           ✗       ✗       ✗      1.00e+00      8.8 0.993808     FAIL
+====================================================================================================
+Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
+```
+
+## 支持的量化格式
+
+| 格式 | 说明 | 存储类型 |
+|------|------|----------|
+| float32 | 原始精度 | float32 |
+| float16 | 半精度 | float16 |
+| bfp16 | 块浮点 (8-bit mantissa) | int8 + shared_exp |
+| bfp8 | 块浮点 (4-bit mantissa) | int8 + shared_exp |
+| bfp4 | 块浮点 (2-bit mantissa) | int8 + shared_exp |
+| gfloat16 | 自定义 16 位 (1+8+7) | uint16 |
+| gfloat8 | 自定义 8 位 (1+4+3) | uint8 |
+| gfloat4 | 自定义 4 位 (1+2+1) | uint8 |
+
+## 内置算子
+
+- **线性变换**: linear, matmul
+- **激活函数**: relu, gelu, softmax
+- **归一化**: layernorm
+- **注意力**: attention
+- **元素运算**: add, mul
+- **嵌入**: embedding
 
 ## 目录结构
 
 ```
 aidevtools/
-├── README.md
-├── install.sh              # 安装脚本
-├── ci.sh                   # 一键 CI
-├── docs/
-│   ├── architecture.md     # 架构设计
-│   ├── compare_guide.md    # 比数套件指导
-│   └── tools/              # 子工具指导
 ├── src/aidevtools/
-│   ├── core/               # 核心 (log)
-│   ├── formats/            # 数据格式
+│   ├── core/               # 核心: config, tensor, op, engine
+│   ├── formats/            # 格式: numpy, raw, bfp, gfloat
+│   ├── tools/compare/      # 比对: diff, report, export
 │   ├── trace/              # 插桩
-│   └── tools/compare/      # 比数工具
-├── tests/
-│   ├── matrix/             # 用例正交表
-│   ├── test_formats.py
-│   ├── test_trace.py
-│   └── test_compare.py
-└── libs/prettycli/         # CLI 框架
+│   └── xlsx/               # Excel 工作流
+├── demos/                  # 示例脚本
+├── tests/                  # 测试用例
+└── docs/                   # 文档
+    └── architecture.md     # 架构设计
 ```
 
-## 使用指导
+## 文档
 
-详见 [docs/compare_guide.md](docs/compare_guide.md)
+- [架构设计](docs/architecture.md) - 详细架构说明
+- [比数指南](docs/compare_guide.md) - 比对工具使用
+- [BFP 格式](src/aidevtools/formats/custom/bfp/guide.md) - 块浮点格式
+- [GFloat 格式](src/aidevtools/formats/custom/gfloat/guide.md) - 自定义浮点格式
 
 ## 开发
 
@@ -107,9 +166,19 @@ aidevtools/
 # 运行测试
 pytest tests/ -v
 
+# 运行覆盖率
+pytest tests/ --cov=aidevtools --cov-report=term-missing
+
 # 一键 CI
 ./ci.sh
 ```
+
+## 环境要求
+
+- Python >= 3.8
+- numpy
+- openpyxl (xlsx 工作流)
+- pybind11 (C++ 扩展，可选)
 
 ## License
 

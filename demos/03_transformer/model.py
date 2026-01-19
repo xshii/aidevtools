@@ -1,10 +1,31 @@
-"""Transformer 模型组合 (fp32 Golden 实现)"""
+"""Transformer 模型组合 (BFP 量化版本)
+
+量化策略:
+- matmul 操作: bfp4 (2-bit mantissa, 极端量化)
+- 其他操作: bfp8 (4-bit mantissa, 保持精度)
+
+使用全局量化函数 simulate_quantize 模拟量化精度损失。
+"""
 import numpy as np
+import sys
+from pathlib import Path
+from functools import partial
+
+# 添加 src 到 path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools.trace import trace
-from transformer.operators import (
+from aidevtools.formats.quantize import simulate_quantize
+from operators import (
     linear, relu, gelu, softmax_safe, layernorm, attention, embedding
 )
+
+
+# ==================== 量化快捷函数 ====================
+# 使用全局 simulate_quantize，直接指定 qtype 即可
+
+bfp4 = partial(simulate_quantize, qtype="bfp4")  # matmul 用，极端量化
+bfp8 = partial(simulate_quantize, qtype="bfp8")  # 其他操作用
 
 
 class TransformerConfig:
@@ -76,82 +97,100 @@ def init_weights(config: TransformerConfig) -> dict:
 @trace(name="self_attention")
 def self_attention_block(x: np.ndarray, layer_weights: dict, config: TransformerConfig) -> np.ndarray:
     """
-    Multi-Head Self-Attention
+    Multi-Head Self-Attention (BFP 量化版本)
 
     Args:
         x: 输入 (batch, seq_len, hidden_size)
         layer_weights: 层权重
         config: 模型配置
+
+    量化策略:
+        - Q/K/V 投影 (matmul): bfp4
+        - Attention scores (matmul): bfp4
+        - Softmax: bfp8
+        - 输出投影 (matmul): bfp4
     """
     batch, seq_len, _ = x.shape
 
-    # Q, K, V 投影
-    q = linear.__wrapped__(x, layer_weights["q_proj"]["w"], layer_weights["q_proj"]["b"])
-    k = linear.__wrapped__(x, layer_weights["k_proj"]["w"], layer_weights["k_proj"]["b"])
-    v = linear.__wrapped__(x, layer_weights["v_proj"]["w"], layer_weights["v_proj"]["b"])
+    # Q, K, V 投影 - bfp4 量化输入和权重
+    q = np.matmul(bfp4(x), bfp4(layer_weights["q_proj"]["w"])) + layer_weights["q_proj"]["b"]
+    k = np.matmul(bfp4(x), bfp4(layer_weights["k_proj"]["w"])) + layer_weights["k_proj"]["b"]
+    v = np.matmul(bfp4(x), bfp4(layer_weights["v_proj"]["w"])) + layer_weights["v_proj"]["b"]
 
     # 拆分多头
     q = q.reshape(batch, seq_len, config.num_heads, config.head_dim).transpose(0, 2, 1, 3)
     k = k.reshape(batch, seq_len, config.num_heads, config.head_dim).transpose(0, 2, 1, 3)
     v = v.reshape(batch, seq_len, config.num_heads, config.head_dim).transpose(0, 2, 1, 3)
 
-    # Attention
+    # Attention scores - bfp4 量化 Q, K
     d_k = config.head_dim
-    scores = np.matmul(q, k.transpose(0, 1, 3, 2)) / np.sqrt(d_k)
-    attn_weights = softmax_safe.__wrapped__(scores, axis=-1)
-    attn_out = np.matmul(attn_weights, v)
+    scores = np.matmul(bfp4(q), bfp4(k.transpose(0, 1, 3, 2))) / np.sqrt(d_k)
+
+    # Softmax - bfp8 量化
+    attn_weights = softmax_safe.__wrapped__(bfp8(scores), axis=-1)
+
+    # Attention output - bfp4 量化 weights 和 V
+    attn_out = np.matmul(bfp4(attn_weights), bfp4(v))
 
     # 合并多头
     attn_out = attn_out.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
-    # 输出投影
-    out = linear.__wrapped__(attn_out, layer_weights["o_proj"]["w"], layer_weights["o_proj"]["b"])
+    # 输出投影 - bfp4 量化
+    out = np.matmul(bfp4(attn_out), bfp4(layer_weights["o_proj"]["w"])) + layer_weights["o_proj"]["b"]
     return out
 
 
 @trace(name="ffn")
 def ffn_block(x: np.ndarray, layer_weights: dict) -> np.ndarray:
     """
-    Feed-Forward Network
+    Feed-Forward Network (BFP 量化版本)
 
     Args:
         x: 输入 (batch, seq_len, hidden_size)
         layer_weights: 层权重
+
+    量化策略:
+        - Up/Down projection (matmul): bfp4
+        - GELU 激活: bfp8
     """
-    # Up projection
-    h = linear.__wrapped__(x, layer_weights["ffn_up"]["w"], layer_weights["ffn_up"]["b"])
+    # Up projection - bfp4 量化
+    h = np.matmul(bfp4(x), bfp4(layer_weights["ffn_up"]["w"])) + layer_weights["ffn_up"]["b"]
 
-    # Activation (GELU)
-    h = gelu.__wrapped__(h)
+    # Activation (GELU) - bfp8 量化
+    h = gelu.__wrapped__(bfp8(h))
 
-    # Down projection
-    out = linear.__wrapped__(h, layer_weights["ffn_down"]["w"], layer_weights["ffn_down"]["b"])
+    # Down projection - bfp4 量化
+    out = np.matmul(bfp4(h), bfp4(layer_weights["ffn_down"]["w"])) + layer_weights["ffn_down"]["b"]
     return out
 
 
 @trace(name="transformer_layer")
 def transformer_layer(x: np.ndarray, layer_weights: dict, config: TransformerConfig) -> np.ndarray:
     """
-    单层 Transformer
+    单层 Transformer (BFP 量化版本)
 
     Args:
         x: 输入 (batch, seq_len, hidden_size)
         layer_weights: 层权重
         config: 模型配置
+
+    量化策略:
+        - LayerNorm: bfp8
+        - 残差连接: bfp8
     """
-    # Self-Attention + Residual
+    # Self-Attention + Residual - bfp8 量化
     attn_out = self_attention_block.__wrapped__(x, layer_weights, config)
-    x = x + attn_out
+    x = bfp8(x + attn_out)
 
-    # LayerNorm 1
-    x = layernorm.__wrapped__(x, layer_weights["ln1"]["gamma"], layer_weights["ln1"]["beta"])
+    # LayerNorm 1 - bfp8 量化
+    x = layernorm.__wrapped__(bfp8(x), layer_weights["ln1"]["gamma"], layer_weights["ln1"]["beta"])
 
-    # FFN + Residual
+    # FFN + Residual - bfp8 量化
     ffn_out = ffn_block.__wrapped__(x, layer_weights)
-    x = x + ffn_out
+    x = bfp8(x + ffn_out)
 
-    # LayerNorm 2
-    x = layernorm.__wrapped__(x, layer_weights["ln2"]["gamma"], layer_weights["ln2"]["beta"])
+    # LayerNorm 2 - bfp8 量化
+    x = layernorm.__wrapped__(bfp8(x), layer_weights["ln2"]["gamma"], layer_weights["ln2"]["beta"])
 
     return x
 
@@ -159,15 +198,18 @@ def transformer_layer(x: np.ndarray, layer_weights: dict, config: TransformerCon
 @trace(name="transformer")
 def transformer_forward(input_ids: np.ndarray, weights: dict, config: TransformerConfig) -> np.ndarray:
     """
-    Transformer 前向传播
+    Transformer 前向传播 (BFP 量化版本)
 
     Args:
         input_ids: 输入 token ID (batch, seq_len)
         weights: 模型权重
         config: 模型配置
+
+    量化策略:
+        - Embedding 输出: bfp8
     """
-    # Embedding
-    x = embedding.__wrapped__(input_ids, weights["embed"])
+    # Embedding - bfp8 量化输出
+    x = bfp8(embedding.__wrapped__(input_ids, weights["embed"]))
 
     # Transformer Layers
     for i, layer_weights in enumerate(weights["layers"]):

@@ -1,35 +1,24 @@
 #!/usr/bin/env python
-"""
-Transformer Golden 数据生成示例
+"""Transformer Golden 数据生成示例
 
 使用方法:
-    1. 运行 Golden 计算:
-       python examples/transformer/run_golden.py
-
-    2. 导出数据并生成 compare.csv:
-       aidev
-       > compare 1 --output=./workspace --model=transformer
-       > compare 2 --output=./workspace
-
-    3. 运行仿真器生成 result 数据 (用户自行完成)
-
-    4. 运行比数:
-       > compare 3 --csv=./workspace/transformer_compare.csv
+    cd demos/03_transformer
+    python run.py
 """
 import numpy as np
 import sys
 from pathlib import Path
 
-# 添加 workspace 到 path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 添加 src 到 path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools.trace import trace, dump, gen_csv, clear
 
 # 导入本地算子和模型
-from transformer.operators import (
+from operators import (
     linear, relu, gelu, softmax_safe, layernorm, attention, embedding
 )
-from transformer.model import (
+from model import (
     TransformerConfig, init_weights,
     self_attention_block, ffn_block, transformer_layer, transformer_forward
 )
@@ -143,13 +132,13 @@ def main():
     run_transformer_model()
 
     # 导出
-    output_dir = "./workspace"
+    output_dir = Path(__file__).parent / "workspace"
     print("\n" + "=" * 50)
     print("导出 Golden 数据")
     print("=" * 50)
 
-    dump(output_dir, format="raw")
-    csv_path = gen_csv(output_dir, model_name="transformer")
+    dump(str(output_dir), format="raw")
+    csv_path = gen_csv(str(output_dir), model_name="transformer")
 
     print(f"\n完成! 下一步:")
     print(f"  1. 运行仿真器生成 result 数据")
