@@ -1,46 +1,99 @@
 """算子基础框架
 
 设计说明：
-- 调用算子时，同时执行 golden 和 reference 两种实现
-- golden: 用户注册的精确实现（如 C++ binding）
-- reference: 内置的 numpy 参考实现
-- 两者的输出分别保存，供后续比对
+- 每个算子包含3种计算形式：
+  1. golden_cpp: C++ Golden 实现（通过注册）
+  2. golden_python: Python Golden 实现（子类实现）
+  3. reference: 高精度参考实现（numpy fp32/fp64，用于 fuzzy 比对）
+
+- 调用算子时，根据全局配置 golden_mode 选择执行哪种 golden：
+  - golden_mode="cpp": 使用 golden_cpp
+  - golden_mode="python": 使用 golden_python
+
+- reference 始终执行，用于 fuzzy 比对
 """
 import numpy as np
-from typing import Callable, Dict, Any, List
+from typing import Callable, Dict, Any, List, Optional
 from pathlib import Path
 
 from aidevtools.core.log import logger
 
-# Golden 实现注册表
-_golden_registry: Dict[str, Callable] = {}
+# Golden 实现注册表 (C++ bindings)
+_golden_cpp_registry: Dict[str, Callable] = {}
 
 # 记录列表
 _records: List[Dict[str, Any]] = []
 _counter: Dict[str, int] = {}
 
+# 全局配置
+_config = {
+    "golden_mode": "python",  # "cpp" | "python" | "none"
+    "compute_golden": True,   # 是否执行 golden 计算（golden 可能在外部计算）
+}
 
-def register_golden(name: str):
+
+def set_golden_mode(mode: str):
     """
-    注册 Golden 实现（用户的精确实现，如 C++ binding）
+    设置 Golden 模式
+
+    Args:
+        mode: "cpp" | "python" | "none"
+            - "cpp": 使用注册的 C++ golden 实现
+            - "python": 使用内置的 Python golden 实现
+            - "none": 不计算 golden（golden 在外部计算）
+    """
+    if mode not in ("cpp", "python", "none"):
+        raise ValueError(f"golden_mode 必须是 'cpp', 'python' 或 'none'，而不是 '{mode}'")
+    _config["golden_mode"] = mode
+    if mode == "none":
+        _config["compute_golden"] = False
+    else:
+        _config["compute_golden"] = True
+    logger.info(f"设置 golden_mode = {mode}")
+
+
+def set_compute_golden(enabled: bool):
+    """
+    设置是否执行 golden 计算
+
+    Args:
+        enabled: True=执行本地 golden 计算, False=跳过（golden 在外部计算）
+    """
+    _config["compute_golden"] = enabled
+    logger.info(f"设置 compute_golden = {enabled}")
+
+
+def get_compute_golden() -> bool:
+    """获取是否执行 golden 计算"""
+    return _config["compute_golden"]
+
+
+def get_golden_mode() -> str:
+    """获取当前 Golden 模式"""
+    return _config["golden_mode"]
+
+
+def register_golden_cpp(name: str):
+    """
+    注册 C++ Golden 实现
 
     示例:
         from my_cpp_lib import cpp_linear
 
-        @register_golden("linear")
+        @register_golden_cpp("linear")
         def golden_linear(x, weight, bias=None):
             return cpp_linear(x, weight, bias)
     """
     def decorator(func: Callable):
-        _golden_registry[name] = func
-        logger.info(f"注册 Golden 实现: {name}")
+        _golden_cpp_registry[name] = func
+        logger.info(f"注册 C++ Golden 实现: {name}")
         return func
     return decorator
 
 
-def has_golden(name: str) -> bool:
-    """检查是否有 Golden 实现"""
-    return name in _golden_registry
+def has_golden_cpp(name: str) -> bool:
+    """检查是否有 C++ Golden 实现"""
+    return name in _golden_cpp_registry
 
 
 def get_records() -> List[Dict[str, Any]]:
@@ -58,11 +111,18 @@ class Op:
     """
     算子基类
 
-    调用时同时执行:
-    1. reference 实现 (numpy) -> 保存为 golden（参考标准）
-    2. golden 实现 (用户注册) -> 保存为 result（待验证结果）
+    子类必须实现：
+    - name: 算子名称
+    - golden_python(): Python Golden 实现
+    - reference(): 高精度参考实现（用于 fuzzy 比对）
 
-    如果未注册 golden，则只执行 reference，result 留空待后续填充。
+    可选：
+    - 通过 @register_golden_cpp 注册 C++ Golden 实现
+
+    调用时：
+    1. 根据 golden_mode 执行 golden_cpp 或 golden_python -> 保存为 golden
+    2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
+    3. 返回 golden 的结果（作为数据流）
     """
     name: str = None  # 算子名，子类必须定义
 
@@ -70,38 +130,62 @@ class Op:
         if self.name is None:
             raise ValueError("算子必须定义 name 属性")
 
+    def golden_python(self, *args, **kwargs) -> np.ndarray:
+        """
+        Python Golden 实现，子类必须实现
+
+        这是 Python 版本的精确实现
+        """
+        raise NotImplementedError(f"{self.name} 未实现 golden_python 方法")
+
     def reference(self, *args, **kwargs) -> np.ndarray:
         """
-        参考实现（numpy），子类必须实现
+        高精度参考实现（numpy fp32/fp64）
 
-        这是标准答案，用于比对
+        用于 fuzzy 比对，子类必须实现
         """
         raise NotImplementedError(f"{self.name} 未实现 reference 方法")
+
+    def _get_golden(self, *args, **kwargs) -> np.ndarray:
+        """
+        获取 Golden 输出（根据配置选择 cpp 或 python）
+        """
+        mode = get_golden_mode()
+
+        if mode == "cpp":
+            if not has_golden_cpp(self.name):
+                raise RuntimeError(
+                    f"算子 '{self.name}' 没有注册 C++ Golden 实现，"
+                    f"请使用 @register_golden_cpp('{self.name}') 注册，"
+                    f"或设置 set_golden_mode('python') 使用 Python 实现"
+                )
+            return _golden_cpp_registry[self.name](*args, **kwargs)
+        else:
+            return self.golden_python(*args, **kwargs)
 
     def __call__(self, *args, **kwargs) -> np.ndarray:
         """
         调用算子
 
-        同时执行 reference 和 golden（如已注册），记录两者输出
-        返回 reference 的结果（作为流程中的数据流）
+        执行流程：
+        1. 如果 compute_golden=True，执行 golden (cpp 或 python) -> 保存为 golden
+        2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
+        3. 返回 golden 或 reference 的结果
         """
         # 计数
         idx = _counter.get(self.name, 0)
         _counter[self.name] = idx + 1
         full_name = f"{self.name}_{idx}"
 
-        # 执行 reference（numpy 参考实现）
-        ref_output = self.reference(*args, **kwargs)
-
-        # 执行 golden（如已注册）
+        # 执行 golden（如果启用）
         golden_output = None
-        if has_golden(self.name):
-            try:
-                golden_impl = _golden_registry[self.name]
-                golden_output = golden_impl(*args, **kwargs)
-                logger.debug(f"{full_name}: golden 执行完成")
-            except Exception as e:
-                logger.warn(f"{full_name}: golden 执行失败 - {e}")
+        if get_compute_golden():
+            golden_output = self._get_golden(*args, **kwargs)
+            logger.debug(f"{full_name}: golden ({get_golden_mode()}) 执行完成")
+
+        # 执行 reference（用于 fuzzy 比对）
+        ref_output = self.reference(*args, **kwargs)
+        logger.debug(f"{full_name}: reference 执行完成")
 
         # 记录
         record = {
@@ -109,17 +193,17 @@ class Op:
             "op": self.name,
             "input": args[0] if args else None,
             "weight": args[1] if len(args) > 1 else kwargs.get("weight"),
-            "golden": ref_output,      # reference 输出作为 golden（标准答案）
-            "result": golden_output,   # 用户 golden 实现的输出作为 result（待验证）
+            "golden": golden_output,      # golden 输出（cpp 或 python），可能为 None
+            "reference": ref_output,      # 高精度参考（用于 fuzzy 比对）
         }
         _records.append(record)
 
-        # 返回 reference 结果，保持数据流
-        return ref_output
+        # 返回结果：优先 golden，否则 reference
+        return golden_output if golden_output is not None else ref_output
 
     def __repr__(self):
-        has_g = "✓" if has_golden(self.name) else "✗"
-        return f"<Op {self.name} golden={has_g}>"
+        has_cpp = "✓" if has_golden_cpp(self.name) else "✗"
+        return f"<Op {self.name} cpp={has_cpp}>"
 
 
 def _is_array_like(obj):
@@ -134,6 +218,12 @@ def dump(output_dir: str = "./workspace", format: str = "raw"):
     Args:
         output_dir: 输出目录
         format: 数据格式 ("raw", "npy", "npz")
+
+    导出文件：
+        - {name}_golden.bin: Golden 输出
+        - {name}_reference.bin: 高精度参考（用于 fuzzy 比对）
+        - {name}_input.bin: 输入数据
+        - {name}_weight.bin: 权重数据
     """
     from aidevtools.formats.base import save as save_data
 
@@ -142,12 +232,12 @@ def dump(output_dir: str = "./workspace", format: str = "raw"):
 
     for r in _records:
         name = r["name"]
-        # 保存 golden（reference 输出，标准答案）
+        # 保存 golden
         if r["golden"] is not None and _is_array_like(r["golden"]):
             save_data(str(path / f"{name}_golden.bin"), np.asarray(r["golden"]), format=format)
-        # 保存 result（用户 golden 实现的输出）
-        if r["result"] is not None and _is_array_like(r["result"]):
-            save_data(str(path / f"{name}_result.bin"), np.asarray(r["result"]), format=format)
+        # 保存 reference
+        if r["reference"] is not None and _is_array_like(r["reference"]):
+            save_data(str(path / f"{name}_reference.bin"), np.asarray(r["reference"]), format=format)
         # 保存输入
         if r["input"] is not None and _is_array_like(r["input"]):
             save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), format=format)

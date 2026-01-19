@@ -1,32 +1,41 @@
 """算子 API
 
 使用方法:
-    from aidevtools.ops import register_golden, clear, dump
+    from aidevtools.ops import set_golden_mode, register_golden_cpp, clear, dump
     from aidevtools.ops.nn import linear, relu, softmax
 
-    # 1. 注册用户的 golden 实现（如 C++ binding）
-    @register_golden("linear")
+    # 1. 设置 golden 模式 (默认 "python"，可选 "cpp")
+    set_golden_mode("python")
+
+    # 2. 注册 C++ golden 实现（可选）
+    @register_golden_cpp("linear")
     def my_linear(x, weight, bias=None):
         return my_cpp_lib.linear(x, weight, bias)
 
-    # 2. 调用算子（自动同时执行 reference 和 golden）
+    # 3. 调用算子（自动执行 golden + reference）
     clear()  # 清空之前的记录
     y = linear(x, w, b)
     y = relu(y)
     y = softmax(y)
 
-    # 3. 导出数据
+    # 4. 导出数据
     dump("./workspace")
 
-    # 4. 使用 xlsx 配置比对（推荐）
-    #    aidev compare xlsx run --xlsx=config.xlsx
+算子包含3种计算形式:
+    - golden_cpp: C++ Golden 实现（通过 @register_golden_cpp 注册）
+    - golden_python: Python Golden 实现（内置）
+    - reference: 高精度参考实现（fp64，用于 fuzzy 比对）
 """
 from aidevtools.ops.base import (
     Op,
-    register_golden,
-    has_golden,
+    register_golden_cpp,
+    has_golden_cpp,
     get_records,
     clear,
     dump,
+    set_golden_mode,
+    get_golden_mode,
+    set_compute_golden,
+    get_compute_golden,
 )
 from aidevtools.ops import nn  # 触发算子实例化
