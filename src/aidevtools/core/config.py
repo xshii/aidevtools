@@ -21,12 +21,23 @@ class FuzzyConfig:
 
 
 @dataclass
+class CpuGoldenConfig:
+    """CPU Golden 配置"""
+    dtype: str = "gfp16"           # gfp4 | gfp8 | gfp16
+    dtype_matmul_a: Optional[str] = None   # matmul A 矩阵类型 (混合精度)
+    dtype_matmul_b: Optional[str] = None   # matmul B 矩阵类型 (混合精度)
+    dtype_matmul_out: Optional[str] = None # matmul 输出类型 (混合精度)
+
+
+@dataclass
 class GlobalConfig:
     """全局配置"""
     golden_mode: str = "python"    # python | cpp
     precision: str = "quant"       # pure | quant
     seed: int = 42
+    compute_golden: bool = True    # 是否计算 golden
 
+    cpu_golden: CpuGoldenConfig = field(default_factory=CpuGoldenConfig)
     exact: ExactConfig = field(default_factory=ExactConfig)
     fuzzy: FuzzyConfig = field(default_factory=FuzzyConfig)
 
@@ -36,6 +47,9 @@ class GlobalConfig:
             raise ValueError(f"golden_mode must be 'python' or 'cpp', got '{self.golden_mode}'")
         if self.precision not in ("pure", "quant"):
             raise ValueError(f"precision must be 'pure' or 'quant', got '{self.precision}'")
+        valid_dtypes = ("gfp4", "gfp8", "gfp16")
+        if self.cpu_golden.dtype not in valid_dtypes:
+            raise ValueError(f"cpu_golden.dtype must be one of {valid_dtypes}")
 
 
 # 全局配置实例 (线程安全)
@@ -56,10 +70,32 @@ def set_config(
     golden_mode: str = None,
     precision: str = None,
     seed: int = None,
+    compute_golden: bool = None,
+    cpu_golden_dtype: str = None,
+    cpu_golden_dtype_matmul_a: str = None,
+    cpu_golden_dtype_matmul_b: str = None,
+    cpu_golden_dtype_matmul_out: str = None,
     exact: ExactConfig = None,
     fuzzy: FuzzyConfig = None,
 ) -> GlobalConfig:
-    """设置全局配置"""
+    """
+    设置全局配置
+
+    Args:
+        golden_mode: "python" 或 "cpp"
+        precision: "pure" 或 "quant"
+        seed: 随机种子
+        compute_golden: 是否计算 golden
+        cpu_golden_dtype: CPU golden 默认 dtype (gfp4/gfp8/gfp16)
+        cpu_golden_dtype_matmul_a: matmul A 矩阵类型 (混合精度)
+        cpu_golden_dtype_matmul_b: matmul B 矩阵类型 (混合精度)
+        cpu_golden_dtype_matmul_out: matmul 输出类型 (混合精度)
+        exact: 精确比对配置
+        fuzzy: 模糊比对配置
+
+    Returns:
+        更新后的配置
+    """
     global _global_config
     with _config_lock:
         if _global_config is None:
@@ -71,6 +107,19 @@ def set_config(
             _global_config.precision = precision
         if seed is not None:
             _global_config.seed = seed
+        if compute_golden is not None:
+            _global_config.compute_golden = compute_golden
+
+        # CPU Golden 配置
+        if cpu_golden_dtype is not None:
+            _global_config.cpu_golden.dtype = cpu_golden_dtype
+        if cpu_golden_dtype_matmul_a is not None:
+            _global_config.cpu_golden.dtype_matmul_a = cpu_golden_dtype_matmul_a
+        if cpu_golden_dtype_matmul_b is not None:
+            _global_config.cpu_golden.dtype_matmul_b = cpu_golden_dtype_matmul_b
+        if cpu_golden_dtype_matmul_out is not None:
+            _global_config.cpu_golden.dtype_matmul_out = cpu_golden_dtype_matmul_out
+
         if exact is not None:
             _global_config.exact = exact
         if fuzzy is not None:

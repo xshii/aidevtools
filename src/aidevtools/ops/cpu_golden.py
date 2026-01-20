@@ -37,19 +37,14 @@ _GOLDEN_DIR = Path(__file__).parent.parent / "golden"
 _CPU_GOLDEN_PATH = _GOLDEN_DIR / "cpu_golden"
 _CPP_DIR = _GOLDEN_DIR / "cpp"
 
+from aidevtools.core.config import get_config, set_config
+
 GFloatType = Literal["gfp4", "gfp8", "gfp16"]
+
 
 # ============================================================
 # 全局配置
 # ============================================================
-
-_config = {
-    "dtype": "gfp16",  # 默认 gfloat 类型
-    "dtype_matmul_a": None,  # matmul A 矩阵类型 (混合精度)
-    "dtype_matmul_b": None,  # matmul B 矩阵类型 (混合精度)
-    "dtype_matmul_out": None,  # matmul 输出类型 (混合精度)
-}
-
 
 def set_cpu_golden_dtype(
     dtype: GFloatType = "gfp16",
@@ -77,25 +72,30 @@ def set_cpu_golden_dtype(
             dtype_matmul_b="gfp4",
             dtype_matmul_out="gfp16"
         )
+
+    注意: 也可使用 set_config(cpu_golden_dtype=...) 统一设置
     """
-    _config["dtype"] = dtype
-    _config["dtype_matmul_a"] = dtype_matmul_a
-    _config["dtype_matmul_b"] = dtype_matmul_b
-    _config["dtype_matmul_out"] = dtype_matmul_out
+    set_config(
+        cpu_golden_dtype=dtype,
+        cpu_golden_dtype_matmul_a=dtype_matmul_a,
+        cpu_golden_dtype_matmul_b=dtype_matmul_b,
+        cpu_golden_dtype_matmul_out=dtype_matmul_out,
+    )
 
 
 def get_cpu_golden_dtype() -> GFloatType:
     """获取当前 CPU Golden dtype"""
-    return _config["dtype"]
+    return get_config().cpu_golden.dtype
 
 
 def get_matmul_dtypes() -> Tuple[GFloatType, GFloatType, GFloatType]:
     """获取 matmul 混合精度配置"""
-    dtype = _config["dtype"]
+    cfg = get_config().cpu_golden
+    dtype = cfg.dtype
     return (
-        _config["dtype_matmul_a"] or dtype,
-        _config["dtype_matmul_b"] or dtype,
-        _config["dtype_matmul_out"] or dtype,
+        cfg.dtype_matmul_a or dtype,
+        cfg.dtype_matmul_b or dtype,
+        cfg.dtype_matmul_out or dtype,
     )
 
 

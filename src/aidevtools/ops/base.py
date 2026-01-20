@@ -17,6 +17,7 @@ from typing import Callable, Dict, Any, List, Optional
 from pathlib import Path
 
 from aidevtools.core.log import logger
+from aidevtools.core.config import get_config, set_config
 
 # Golden 实现注册表 (C++ bindings)
 _golden_cpp_registry: Dict[str, Callable] = {}
@@ -24,12 +25,6 @@ _golden_cpp_registry: Dict[str, Callable] = {}
 # 记录列表
 _records: List[Dict[str, Any]] = []
 _counter: Dict[str, int] = {}
-
-# 全局配置
-_config = {
-    "golden_mode": "python",  # "cpp" | "python" | "none"
-    "compute_golden": True,   # 是否执行 golden 计算（golden 可能在外部计算）
-}
 
 
 def set_golden_mode(mode: str):
@@ -41,14 +36,15 @@ def set_golden_mode(mode: str):
             - "cpp": 使用注册的 C++ golden 实现
             - "python": 使用内置的 Python golden 实现
             - "none": 不计算 golden（golden 在外部计算）
+
+    注意: 也可使用 set_config(golden_mode=...) 统一设置
     """
     if mode not in ("cpp", "python", "none"):
         raise ValueError(f"golden_mode 必须是 'cpp', 'python' 或 'none'，而不是 '{mode}'")
-    _config["golden_mode"] = mode
     if mode == "none":
-        _config["compute_golden"] = False
+        set_config(golden_mode="python", compute_golden=False)
     else:
-        _config["compute_golden"] = True
+        set_config(golden_mode=mode, compute_golden=True)
     logger.info(f"设置 golden_mode = {mode}")
 
 
@@ -58,19 +54,21 @@ def set_compute_golden(enabled: bool):
 
     Args:
         enabled: True=执行本地 golden 计算, False=跳过（golden 在外部计算）
+
+    注意: 也可使用 set_config(compute_golden=...) 统一设置
     """
-    _config["compute_golden"] = enabled
+    set_config(compute_golden=enabled)
     logger.info(f"设置 compute_golden = {enabled}")
 
 
 def get_compute_golden() -> bool:
     """获取是否执行 golden 计算"""
-    return _config["compute_golden"]
+    return get_config().compute_golden
 
 
 def get_golden_mode() -> str:
     """获取当前 Golden 模式"""
-    return _config["golden_mode"]
+    return get_config().golden_mode
 
 
 def register_golden_cpp(name: str):

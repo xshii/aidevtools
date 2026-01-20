@@ -2,71 +2,25 @@
 
 必须加载 C++ 实现，失败时报错。
 """
-import sys
-import glob
 import numpy as np
 from pathlib import Path
 from typing import Tuple
 
 from aidevtools.core.log import logger
-
-# BFP 模块目录
-_BFP_DIR = Path(__file__).parent
-_CPP_DIR = _BFP_DIR / "cpp"
+from aidevtools.formats.custom.cpp_loader import CppExtensionLoader
 
 # 加载 C++ 扩展
-_cpp = None
-_import_error = None
-_import_detail = ""
-
-try:
-    from aidevtools.formats.custom.bfp import bfp_golden as _cpp
-    logger.debug("BFP C++ Golden API 加载成功")
-except ImportError as e:
-    _import_error = e
-
-    # 收集诊断信息
-    so_files = list(_BFP_DIR.glob("*.so")) + list(_BFP_DIR.glob("*.pyd"))
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    expected_suffix = f"cpython-{sys.version_info.major}{sys.version_info.minor}"
-
-    if not so_files:
-        _import_detail = f"未找到编译产物 (.so/.pyd 文件)"
-    else:
-        so_names = [f.name for f in so_files]
-        if not any(expected_suffix in name for name in so_names):
-            _import_detail = (
-                f"Python 版本不匹配\n"
-                f"  当前 Python: {python_version} (需要 {expected_suffix})\n"
-                f"  已有文件: {so_names}"
-            )
-        else:
-            _import_detail = f"文件存在但加载失败: {so_names}"
-
-    logger.warning(f"BFP C++ Golden API 加载失败: {e}")
-
-
-def _check_cpp():
-    """检查 C++ 扩展是否可用"""
-    if _cpp is None:
-        error_msg = (
-            f"BFP C++ Golden API 加载失败\n"
-            f"{'=' * 50}\n"
-            f"原因: {_import_detail}\n"
-            f"原始错误: {_import_error}\n"
-            f"{'=' * 50}\n"
-            f"目录: {_BFP_DIR}\n"
-            f"{'=' * 50}\n"
-            f"解决方法:\n"
-            f"  cd {_CPP_DIR}\n"
-            f"  bash build.sh\n"
-        )
-        raise ImportError(error_msg)
+_loader = CppExtensionLoader(
+    name="BFP",
+    module_path=Path(__file__).parent,
+    import_path="aidevtools.formats.custom.bfp",
+    module_name="bfp_golden",
+)
 
 
 def is_cpp_available() -> bool:
     """检查 C++ 实现是否可用"""
-    return _cpp is not None
+    return _loader.is_available()
 
 
 # ==================== 统一接口 ====================
@@ -83,9 +37,9 @@ def fp32_to_bfp(data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8) 
     Returns:
         (mantissas, shared_exps)
     """
-    _check_cpp()
+    _loader.check()
     data = np.ascontiguousarray(data.flatten(), dtype=np.float32)
-    return _cpp.fp32_to_bfp(data, block_size, mantissa_bits)
+    return _loader.module.fp32_to_bfp(data, block_size, mantissa_bits)
 
 
 def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
@@ -102,10 +56,10 @@ def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
     Returns:
         还原的 float32 数据
     """
-    _check_cpp()
+    _loader.check()
     mantissas = np.ascontiguousarray(mantissas, dtype=np.int8)
     shared_exps = np.ascontiguousarray(shared_exps, dtype=np.int8)
-    return _cpp.bfp_to_fp32(mantissas, shared_exps, block_size, mantissa_bits)
+    return _loader.module.bfp_to_fp32(mantissas, shared_exps, block_size, mantissa_bits)
 
 
 # ==================== Golden 注册 ====================
@@ -116,7 +70,7 @@ def register_bfp_golden():
 
     必须先编译 C++ 扩展，否则报错。
     """
-    _check_cpp()
+    _loader.check()
 
     from aidevtools.formats.quantize import register_quantize
 
