@@ -70,7 +70,7 @@ class OpConfig:
                     idx = int(idx_str.strip())
                     result[name] = [idx]
                 except ValueError:
-                    logger.warn(f"无效的依赖索引: {part}")
+                    logger.warning(f"无效的依赖索引: {part}")
         else:
             # 简单依赖: "0" 或 "1,2"
             parts = parse_list(depends_str)
@@ -79,7 +79,7 @@ class OpConfig:
                 try:
                     result["x"] = [int(parts[0])]
                 except ValueError:
-                    logger.warn(f"无效的依赖索引: {parts[0]}")
+                    logger.warning(f"无效的依赖索引: {parts[0]}")
             else:
                 # 双输入依赖
                 input_names = ["a", "b", "c", "d", "e", "f"]
@@ -88,7 +88,7 @@ class OpConfig:
                         name = input_names[i] if i < len(input_names) else f"in{i}"
                         result[name] = [int(part)]
                     except ValueError:
-                        logger.warn(f"无效的依赖索引: {part}")
+                        logger.warning(f"无效的依赖索引: {part}")
 
         return result
 

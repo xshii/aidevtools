@@ -59,7 +59,7 @@ def export_xlsx(
                 logger.debug(f"保留 {len(existing_compare_data)} 条已有比对结果")
             existing_wb.close()
         except Exception as e:
-            logger.warn(f"读取已有结果失败: {e}")
+            logger.warning(f"读取已有结果失败: {e}")
 
     # 创建或加载工作簿
     if output_path.exists():

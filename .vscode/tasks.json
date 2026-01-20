@@ -2,75 +2,22 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "初始化环境",
+      "label": "编译 C++ Golden",
       "type": "shell",
-      "command": "./install.sh",
-      "args": ["${input:installType}"],
-      "group": "build",
-      "presentation": {
-        "reveal": "always",
-        "panel": "new"
-      }
-    },
-    {
-      "label": "运行 AI Dev Tools",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/python",
-      "args": ["-m", "aidevtools.cli"],
-      "group": "build",
-      "presentation": {
-        "reveal": "always",
-        "panel": "new"
-      }
-    },
-    {
-      "label": "运行 PrettyCLI",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/python",
-      "args": ["-m", "prettycli"],
-      "group": "build",
-      "presentation": {
-        "reveal": "always",
-        "panel": "new"
-      }
-    },
-    {
-      "label": "测试: 全部",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/pytest",
-      "args": ["-v"],
+      "command": "bash",
+      "args": [
+        "-c",
+        "echo '=== 编译 CPU Golden ===' && cd ${workspaceFolder}/src/aidevtools/golden/cpp && ./build.sh && echo '=== 编译 BFP Golden ===' && cd ${workspaceFolder}/src/aidevtools/formats/custom/bfp/cpp && PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES bfp.cpp bfp_pybind.cpp -o ../bfp_golden$SUFFIX && echo '=== 编译完成 ==='"
+      ],
       "group": {
-        "kind": "test",
+        "kind": "build",
         "isDefault": true
-      }
-    },
-    {
-      "label": "测试: PrettyCLI",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/pytest",
-      "args": ["libs/prettycli/tests/", "-v"],
-      "group": "test"
-    },
-    {
-      "label": "Lint 检查",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/ruff",
-      "args": ["check", "src/", "libs/prettycli/src/"]
-    },
-    {
-      "label": "格式化代码",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/ruff",
-      "args": ["format", "src/", "libs/prettycli/src/"]
-    }
-  ],
-  "inputs": [
-    {
-      "id": "installType",
-      "type": "pickString",
-      "description": "选择安装类型",
-      "options": ["base", "dev", "vscode", "all"],
-      "default": "dev"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": "$gcc"
     }
   ]
 }

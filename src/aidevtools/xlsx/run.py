@@ -94,7 +94,7 @@ def _run_sim_cmd(
             logger.info(f"仿真结果: {result_bin}, shape={data.shape}")
             return data
         else:
-            logger.warn(f"仿真命令执行完成，但未生成 result 文件: {result_bin}")
+            logger.warning(f"仿真命令执行完成，但未生成 result 文件: {result_bin}")
             return None
 
     except subprocess.TimeoutExpired:
@@ -168,7 +168,7 @@ def run_xlsx(
 
         # 检查算子是否启用
         if enabled_ops and config.op_name not in enabled_ops:
-            logger.warn(f"算子 {config.op_name} 未在 op_registry 中启用，跳过")
+            logger.warning(f"算子 {config.op_name} 未在 op_registry 中启用，跳过")
             results.append({
                 "id": config.id,
                 "status": "SKIP",
@@ -305,7 +305,7 @@ def _generate_inputs(config: OpConfig, outputs: Dict[int, np.ndarray]) -> Dict[s
             if dep_id in outputs:
                 inputs[name] = outputs[dep_id]
             else:
-                logger.warn(f"依赖 {dep_id} 不存在，使用随机数据")
+                logger.warning(f"依赖 {dep_id} 不存在，使用随机数据")
                 shape = config.shape if config.shape else (1, 64)
                 inputs[name] = np.random.randn(*shape).astype(dtype)
 

@@ -43,7 +43,7 @@ except ImportError as e:
         else:
             _import_detail = f"文件存在但加载失败: {so_names}"
 
-    logger.warn(f"BFP C++ Golden API 加载失败: {e}")
+    logger.warning(f"BFP C++ Golden API 加载失败: {e}")
 
 
 def _check_cpp():

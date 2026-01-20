@@ -44,6 +44,9 @@ class Logger:
     def warn(self, msg: str):
         _log(WARN, self.module, msg)
 
+    # 标准 logging 兼容别名
+    warning = warn
+
     def error(self, msg: str):
         _log(ERROR, self.module, msg)
 

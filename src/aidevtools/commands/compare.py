@@ -206,7 +206,7 @@ def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, format
             xlsx_path = f"{output}/{model}_config.xlsx"
         records = get_records()
         if not records:
-            logger.warn("没有 trace 记录，请先运行算子")
+            logger.warning("没有 trace 记录，请先运行算子")
             # 仍然创建空模板
             create_template(xlsx_path)
             print(f"生成空模板 (无记录): {xlsx_path}")

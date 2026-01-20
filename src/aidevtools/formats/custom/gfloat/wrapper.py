@@ -16,7 +16,7 @@ try:
     logger.debug("GFloat C++ Golden API 加载成功")
 except ImportError as e:
     _import_error = e
-    logger.warn(f"GFloat C++ Golden API 加载失败: {e}")
+    logger.warning(f"GFloat C++ Golden API 加载失败: {e}")
 
 
 def _check_cpp():
