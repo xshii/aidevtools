@@ -27,11 +27,9 @@ from aidevtools.ops.base import get_records, set_golden_mode
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import simulate_quantize
 
-# 注册 cpp golden (通过 subprocess 调用)
-from aidevtools.golden.cpu_ops import register_all_cpu_golden
-register_all_cpu_golden("gfp16")  # 使用 gfp16 格式
-
-# 设置使用 cpp golden
+# 设置 cpu golden dtype 并使用 cpp golden
+from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+set_cpu_golden_dtype("gfp16")  # 使用 gfp16 格式
 set_golden_mode("cpp")
 
 

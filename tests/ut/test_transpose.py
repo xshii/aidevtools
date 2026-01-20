@@ -57,15 +57,19 @@ class TestTransposeCppGolden:
 
     def test_transpose_gfp16(self):
         """测试 gfp16 格式"""
-        from aidevtools.golden import transpose, is_cpu_golden_available
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available, set_cpu_golden_dtype
+        from aidevtools.ops.nn import Transpose
         from aidevtools.tools.compare.diff import calc_qsnr
 
         if not is_cpu_golden_available():
             pytest.skip("CPU golden not available")
 
+        set_cpu_golden_dtype("gfp16")
         np.random.seed(42)
         x = np.random.randn(2, 4, 8, 32).astype(np.float32)
-        y = transpose(x, dtype="gfp16")
+
+        op = Transpose()
+        y = op.cpu_golden(x)
 
         expected = np.swapaxes(x, -2, -1)
         qsnr = calc_qsnr(expected, y)
@@ -75,14 +79,18 @@ class TestTransposeCppGolden:
 
     def test_transpose_gfp8(self):
         """测试 gfp8 格式 (低精度，仅验证形状正确)"""
-        from aidevtools.golden import transpose, is_cpu_golden_available
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available, set_cpu_golden_dtype
+        from aidevtools.ops.nn import Transpose
 
         if not is_cpu_golden_available():
             pytest.skip("CPU golden not available")
 
+        set_cpu_golden_dtype("gfp8")
         np.random.seed(42)
         x = np.random.randn(2, 4, 8, 32).astype(np.float32)
-        y = transpose(x, dtype="gfp8")
+
+        op = Transpose()
+        y = op.cpu_golden(x)
 
         expected = np.swapaxes(x, -2, -1)
 

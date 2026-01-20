@@ -142,26 +142,12 @@ class TestCppGoldenIntegration:
         assert "relu" not in cpp_ops
 
     def test_check_cpp_golden_registered(self):
-        """检查 C++ golden 注册状态"""
+        """检查 C++ golden 注册状态 (检查类是否有 cpu_golden 方法)"""
         from aidevtools.ops.registry import check_cpp_golden_registered
-        from aidevtools.ops.cpu_golden import register_all_cpu_golden
 
-        # 先注册
-        register_all_cpu_golden("gfp16")
-
-        # 检查状态
+        # 检查状态 (现在检查类是否有 cpu_golden 方法)
         status = check_cpp_golden_registered()
         assert status["matmul"] is True
         assert status["softmax"] is True
         assert status["layernorm"] is True
         assert status["transpose"] is True
-
-    def test_register_all_returns_list(self):
-        """register_all_cpu_golden 返回注册的算子列表"""
-        from aidevtools.ops.cpu_golden import register_all_cpu_golden
-
-        registered = register_all_cpu_golden("gfp16")
-        assert "matmul" in registered
-        assert "softmax" in registered
-        assert "layernorm" in registered
-        assert "transpose" in registered

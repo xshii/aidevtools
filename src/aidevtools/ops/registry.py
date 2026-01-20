@@ -189,17 +189,26 @@ def check_cpp_golden_registered() -> Dict[str, bool]:
     检查 C++ golden 注册状态
 
     Returns:
-        {算子名: 是否已注册}
+        {算子名: 是否已实现 cpu_golden 方法}
 
     用法:
         from aidevtools.ops.registry import check_cpp_golden_registered
 
         status = check_cpp_golden_registered()
-        # {'matmul': True, 'softmax': True, 'layernorm': False, ...}
+        # {'matmul': True, 'softmax': True, 'layernorm': True, ...}
     """
-    from aidevtools.ops.base import has_golden_cpp
+    from aidevtools.ops.base import Op
 
     result = {}
     for name in get_cpp_golden_ops():
-        result[name] = has_golden_cpp(name)
+        meta = _op_registry.get(name)
+        if meta and meta.op_class:
+            # 检查类是否实现了 cpu_golden 方法
+            has_method = (
+                hasattr(meta.op_class, 'cpu_golden') and
+                meta.op_class.cpu_golden is not Op.cpu_golden
+            )
+            result[name] = has_method
+        else:
+            result[name] = False
     return result

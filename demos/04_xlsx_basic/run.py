@@ -20,11 +20,9 @@ from aidevtools import ops
 from aidevtools.ops.base import get_records, set_golden_mode, clear
 from aidevtools.xlsx import create_template, export_xlsx, import_xlsx, run_xlsx
 
-# 注册 cpp golden (通过 subprocess 调用)
-from aidevtools.golden.cpu_ops import register_all_cpu_golden
-register_all_cpu_golden("gfp16")
-
-# 设置使用 cpp golden
+# 设置 cpu golden dtype 并使用 cpp golden
+from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+set_cpu_golden_dtype("gfp16")
 set_golden_mode("cpp")
 
 

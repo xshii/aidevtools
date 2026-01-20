@@ -20,11 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools.ops.base import set_golden_mode
 
-# 注册 cpp golden (通过 subprocess 调用)
-from aidevtools.golden.cpu_ops import register_all_cpu_golden
-register_all_cpu_golden("gfp16")
-
-# 设置使用 cpp golden
+# 设置 cpu golden dtype 并使用 cpp golden
+from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+set_cpu_golden_dtype("gfp16")
 set_golden_mode("cpp")
 
 

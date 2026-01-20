@@ -12,7 +12,7 @@ CPU_GOLDEN_PATH = Path(__file__).parent.parent.parent / "src/aidevtools/golden/c
 
 def skip_if_not_available():
     """检查 cpu_golden Python wrapper 是否可用"""
-    from aidevtools.golden import is_cpu_golden_available
+    from aidevtools.ops.cpu_golden import is_cpu_golden_available
     if not is_cpu_golden_available():
         pytest.skip("cpu_golden not available")
 
@@ -366,99 +366,105 @@ class TestCpuGoldenCLI:
         assert result.returncode == 1
 
 
-# ==================== Python Wrapper 测试 ====================
+# ==================== Op 类 cpu_golden 方法测试 ====================
 
-class TestPythonWrapper:
-    """Python Wrapper 测试"""
+class TestOpCpuGoldenMethod:
+    """Op 类 cpu_golden 方法测试"""
 
     def setup_method(self):
         skip_if_not_available()
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+        set_cpu_golden_dtype("gfp16")
 
-    def test_matmul_wrapper(self):
-        """matmul Python wrapper"""
-        from aidevtools.golden import matmul
+    def test_matmul_cpu_golden(self):
+        """MatMul.cpu_golden 方法"""
+        from aidevtools.ops.nn import MatMul
 
         M, K, N = 4, 8, 16
         a = np.random.randn(M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)
 
-        c = matmul(a, b, dtype="gfp16")
+        op = MatMul()
+        c = op.cpu_golden(a, b)
 
         assert c.shape == (M, N)
         assert c.dtype == np.float32
 
-    def test_softmax_wrapper(self):
-        """softmax Python wrapper"""
-        from aidevtools.golden import softmax
+    def test_softmax_cpu_golden(self):
+        """Softmax.cpu_golden 方法"""
+        from aidevtools.ops.nn import Softmax
 
         batch, seq = 4, 16
         x = np.random.randn(batch, seq).astype(np.float32)
 
-        y = softmax(x, dtype="gfp16")
+        op = Softmax()
+        y = op.cpu_golden(x)
 
         assert y.shape == (batch, seq)
         # softmax 输出每行和应该接近 1
         assert np.allclose(y.sum(axis=1), 1.0, atol=0.05)
 
-    def test_softmax_1d(self):
-        """softmax 1D input"""
-        from aidevtools.golden import softmax
+    def test_softmax_1d_cpu_golden(self):
+        """Softmax.cpu_golden 1D 输入"""
+        from aidevtools.ops.nn import Softmax
 
         x = np.random.randn(8).astype(np.float32)
-        y = softmax(x, dtype="gfp16")
+
+        op = Softmax()
+        y = op.cpu_golden(x)
 
         assert y.shape == (8,)
         assert np.allclose(y.sum(), 1.0, atol=0.05)
 
-    def test_layernorm_wrapper(self):
-        """layernorm Python wrapper"""
-        from aidevtools.golden import layernorm
+    def test_layernorm_cpu_golden(self):
+        """LayerNorm.cpu_golden 方法"""
+        from aidevtools.ops.nn import LayerNorm
 
         batch, hidden = 4, 64
         x = np.random.randn(batch, hidden).astype(np.float32)
         gamma = np.ones(hidden, dtype=np.float32)
         beta = np.zeros(hidden, dtype=np.float32)
 
-        y = layernorm(x, gamma, beta, dtype="gfp16")
+        op = LayerNorm()
+        y = op.cpu_golden(x, gamma, beta)
 
         assert y.shape == (batch, hidden)
         # layernorm 输出每行均值应接近 0
         assert np.allclose(y.mean(axis=1), 0.0, atol=0.1)
 
+    def test_transpose_cpu_golden(self):
+        """Transpose.cpu_golden 方法"""
+        from aidevtools.ops.nn import Transpose
 
-class TestRegisterCpuGolden:
-    """注册 CPU Golden 到 ops 框架测试"""
+        d0, d1, d2, d3 = 2, 4, 8, 16
+        x = np.random.randn(d0, d1, d2, d3).astype(np.float32)
+
+        op = Transpose()
+        y = op.cpu_golden(x)
+
+        assert y.shape == (d0, d1, d3, d2)
+
+
+class TestCppGoldenMode:
+    """使用 cpp golden mode 测试"""
 
     def setup_method(self):
         skip_if_not_available()
-        from aidevtools.ops.base import clear, set_golden_mode, _golden_cpp_registry
+        from aidevtools.ops.base import clear, set_golden_mode
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
         clear()
-        _golden_cpp_registry.clear()
         set_golden_mode("python")
+        set_cpu_golden_dtype("gfp16")
 
     def teardown_method(self):
-        from aidevtools.ops.base import set_golden_mode, _golden_cpp_registry
-        _golden_cpp_registry.clear()
+        from aidevtools.ops.base import set_golden_mode
         set_golden_mode("python")
-
-    def test_register_all(self):
-        """register_all_cpu_golden"""
-        from aidevtools.golden import register_all_cpu_golden
-        from aidevtools.ops.base import has_golden_cpp
-
-        register_all_cpu_golden("gfp16")
-
-        assert has_golden_cpp("matmul")
-        assert has_golden_cpp("softmax")
-        assert has_golden_cpp("layernorm")
 
     def test_use_cpp_golden_mode(self):
         """使用 cpp golden mode"""
-        from aidevtools.golden import register_all_cpu_golden
         from aidevtools.ops.base import set_golden_mode, clear, get_records
         from aidevtools.ops.nn import softmax
 
-        register_all_cpu_golden("gfp16")
         set_golden_mode("cpp")
         clear()
 
@@ -468,6 +474,24 @@ class TestRegisterCpuGolden:
         assert y.shape == (2, 8)
         # softmax 输出每行和应该接近 1
         assert np.allclose(y.sum(axis=1), 1.0, atol=0.1)
+
+        records = get_records()
+        assert len(records) == 1
+        assert records[0]["golden"] is not None
+
+    def test_matmul_cpp_mode(self):
+        """MatMul cpp golden mode"""
+        from aidevtools.ops.base import set_golden_mode, clear, get_records
+        from aidevtools.ops.nn import matmul
+
+        set_golden_mode("cpp")
+        clear()
+
+        a = np.random.randn(4, 8).astype(np.float32)
+        b = np.random.randn(8, 16).astype(np.float32)
+        c = matmul(a, b)
+
+        assert c.shape == (4, 16)
 
         records = get_records()
         assert len(records) == 1
@@ -551,79 +575,82 @@ class TestMixedPrecisionMatmul:
         assert c.shape == (M, N)
 
 
-class TestPythonWrapperMixedPrecision:
-    """Python Wrapper 混合精度测试"""
+class TestMixedPrecisionCpuGolden:
+    """混合精度 cpu_golden 测试"""
 
     def setup_method(self):
         skip_if_not_available()
 
-    def test_matmul_mixed_wrapper(self):
-        """matmul 混合精度 Python wrapper"""
-        from aidevtools.golden import matmul
+    def test_matmul_mixed_cpu_golden(self):
+        """MatMul 混合精度 cpu_golden"""
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+        from aidevtools.ops.nn import MatMul
+
+        # 设置混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        set_cpu_golden_dtype(
+            dtype="gfp16",
+            dtype_matmul_a="gfp8",
+            dtype_matmul_b="gfp4",
+            dtype_matmul_out="gfp16"
+        )
 
         M, K, N = 4, 8, 16
         a = np.random.randn(M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)
 
-        # 混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
-        c = matmul(a, b, dtype_a="gfp8", dtype_b="gfp4", dtype_out="gfp16")
+        op = MatMul()
+        c = op.cpu_golden(a, b)
 
         assert c.shape == (M, N)
         assert c.dtype == np.float32
 
     def test_matmul_mixed_batch(self):
-        """matmul 混合精度 batch 支持"""
-        from aidevtools.golden import matmul
+        """MatMul 混合精度 batch 支持"""
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+        from aidevtools.ops.nn import MatMul
+
+        set_cpu_golden_dtype(
+            dtype="gfp16",
+            dtype_matmul_a="gfp16",
+            dtype_matmul_b="gfp8",
+            dtype_matmul_out="gfp16"
+        )
 
         # 3D batch matmul
         batch, M, K, N = 2, 4, 8, 16
         a = np.random.randn(batch, M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)  # broadcast
 
-        c = matmul(a, b, dtype_a="gfp16", dtype_b="gfp8", dtype_out="gfp16")
+        op = MatMul()
+        c = op.cpu_golden(a, b)
 
         assert c.shape == (batch, M, N)
         assert c.dtype == np.float32
 
-    def test_matmul_same_dtype_via_mixed(self):
-        """matmul 同精度通过 mixed 接口"""
-        from aidevtools.golden import matmul
 
-        M, K, N = 4, 8, 16
-        a = np.random.randn(M, K).astype(np.float32)
-        b = np.random.randn(K, N).astype(np.float32)
-
-        # 所有 dtype 相同，应该走同精度路径
-        c1 = matmul(a, b, dtype="gfp16")
-        c2 = matmul(a, b, dtype_a="gfp16", dtype_b="gfp16", dtype_out="gfp16")
-
-        assert c1.shape == c2.shape
-        assert np.allclose(c1, c2)
-
-
-class TestRegisterMixedPrecision:
-    """注册混合精度 CPU Golden 测试"""
+class TestMixedPrecisionCppMode:
+    """混合精度 cpp mode 测试"""
 
     def setup_method(self):
         skip_if_not_available()
-        from aidevtools.ops.base import clear, set_golden_mode, _golden_cpp_registry
+        from aidevtools.ops.base import clear, set_golden_mode
         clear()
-        _golden_cpp_registry.clear()
         set_golden_mode("python")
 
     def teardown_method(self):
-        from aidevtools.ops.base import set_golden_mode, _golden_cpp_registry
-        _golden_cpp_registry.clear()
+        from aidevtools.ops.base import set_golden_mode
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
         set_golden_mode("python")
+        set_cpu_golden_dtype("gfp16")
 
-    def test_register_mixed_precision(self):
-        """register_all_cpu_golden with mixed precision"""
-        from aidevtools.golden import register_all_cpu_golden
+    def test_mixed_precision_cpp_mode(self):
+        """混合精度 cpp golden mode"""
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
         from aidevtools.ops.base import set_golden_mode, clear, get_records
         from aidevtools.ops.nn import matmul as nn_matmul
 
-        # 注册混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
-        register_all_cpu_golden(
+        # 设置混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
+        set_cpu_golden_dtype(
             dtype="gfp16",
             dtype_matmul_a="gfp8",
             dtype_matmul_b="gfp4",

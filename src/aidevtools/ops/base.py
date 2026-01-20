@@ -2,12 +2,12 @@
 
 设计说明：
 - 每个算子包含3种计算形式：
-  1. golden_cpp: C++ Golden 实现（通过注册）
+  1. cpu_golden: C++ Golden 实现（子类方法，has_cpp_golden=True 的算子）
   2. golden_python: Python Golden 实现（子类实现）
   3. reference: 高精度参考实现（numpy fp32/fp64，用于 fuzzy 比对）
 
 - 调用算子时，根据全局配置 golden_mode 选择执行哪种 golden：
-  - golden_mode="cpp": 使用 golden_cpp
+  - golden_mode="cpp": 使用 cpu_golden 方法（如果存在）
   - golden_mode="python": 使用 golden_python
 
 - reference 始终执行，用于 fuzzy 比对
@@ -146,6 +146,12 @@ class Op:
         """
         raise NotImplementedError(f"{self.name} 未实现 reference 方法")
 
+    def cpu_golden(self, *args, **kwargs) -> np.ndarray:
+        """
+        C++ Golden 实现，有 has_cpp_golden=True 的子类可实现
+        """
+        raise NotImplementedError(f"{self.name} 未实现 cpu_golden 方法")
+
     def _get_golden(self, *args, **kwargs) -> np.ndarray:
         """
         获取 Golden 输出（根据配置选择 cpp 或 python）
@@ -153,13 +159,17 @@ class Op:
         mode = get_golden_mode()
 
         if mode == "cpp":
-            if not has_golden_cpp(self.name):
-                raise RuntimeError(
-                    f"算子 '{self.name}' 没有注册 C++ Golden 实现，"
-                    f"请使用 @register_golden_cpp('{self.name}') 注册，"
-                    f"或设置 set_golden_mode('python') 使用 Python 实现"
-                )
-            return _golden_cpp_registry[self.name](*args, **kwargs)
+            # 优先使用类方法 cpu_golden
+            if hasattr(self.__class__, 'cpu_golden') and self.__class__.cpu_golden is not Op.cpu_golden:
+                return self.cpu_golden(*args, **kwargs)
+            # 兼容旧的注册方式
+            if has_golden_cpp(self.name):
+                return _golden_cpp_registry[self.name](*args, **kwargs)
+            raise RuntimeError(
+                f"算子 '{self.name}' 没有 C++ Golden 实现，"
+                f"请在算子类中实现 cpu_golden 方法，"
+                f"或设置 set_golden_mode('python') 使用 Python 实现"
+            )
         else:
             return self.golden_python(*args, **kwargs)
 
