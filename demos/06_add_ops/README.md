@@ -7,7 +7,7 @@
 | 文件 | 是否必须 | 说明 |
 |------|---------|------|
 | `src/aidevtools/ops/nn.py` | ✅ 必须 | 添加算子类 |
-| `src/aidevtools/ops/auto.py` | 可选 | 添加简化 API |
+| `src/aidevtools/ops/auto.py` | 🔄 自动 | 基于 `auto_gen` 元数据自动生成，无需修改 |
 | `src/aidevtools/golden/cpp/` | 可选 | 添加 C++ Golden |
 | `tests/ut/test_*.py` | ✅ 必须 | 添加单元测试 |
 | `src/aidevtools/xlsx/op_registry.py` | 可选 | xlsx 额外算子 |
@@ -24,6 +24,10 @@
     optional=["eps"],                # 可选参数
     description="RMS Normalization",
     has_cpp_golden=False,            # 是否有 C++ Golden (Step 3)
+    auto_gen={                       # 简化 API 参数生成策略
+        "x": "input",                # 主输入 (shape 或 array)
+        "gamma": "ones:-1",          # 全1数组，shape 取输入最后一维
+    },
 )
 class RMSNorm(Op):
     """RMS Normalization: y = x / rms(x) * gamma"""
@@ -59,43 +63,38 @@ rmsnorm = RMSNorm()
 | `optional` | `List[str]` | 可选参数名列表 |
 | `description` | `str` | 算子描述 |
 | `has_cpp_golden` | `bool` | 是否有 C++ Golden 实现 |
+| `auto_gen` | `Dict[str, str]` | 简化 API 参数生成策略 |
+
+### `auto_gen` 策略说明
+
+| 策略 | 说明 | 示例 |
+|------|------|------|
+| `"input"` | 主输入，可以是 shape 或 array | 第一个参数 |
+| `"random"` | 随机初始化，shape 与输入相同 | 默认策略 |
+| `"ones:-1"` | 全1数组，-1 表示取输入最后一维 | gamma |
+| `"zeros:-1"` | 全0数组 | beta, bias |
+| `"xavier"` | Xavier 初始化 (用于 weight) | linear weight |
 
 ---
 
-## Step 2: 添加简化 API (`ops/auto.py`) [可选]
+## Step 2: 简化 API (自动生成，无需修改)
 
-如果需要支持 `ops.rmsnorm(shape, ...)` 自动生成数据的用法:
+配置了 `auto_gen` 后，`ops.rmsnorm(shape, ...)` 会**自动可用**，无需修改 `auto.py`。
 
 ```python
-# src/aidevtools/ops/auto.py
+# 使用示例 - 无需任何额外代码
+from aidevtools import ops
 
-def rmsnorm(
-    x: np.ndarray,
-    normalized_shape: int,
-    eps: float = 1e-5,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """
-    RMSNorm 层
-
-    Args:
-        x: 输入数据
-        normalized_shape: 归一化维度大小
-        eps: epsilon
-        dtype: 数据类型
-
-    Returns:
-        输出数据
-    """
-    # gamma 初始化为 1
-    gamma = np.ones(normalized_shape, dtype=np.float32)
-
-    # 量化
-    x = _quantize_input(x, dtype)
-    gamma = _quantize_input(gamma, dtype)
-
-    return _nn.rmsnorm(x, gamma, eps)
+ops.seed(42)
+y = ops.rmsnorm((2, 8, 64))  # 自动生成 gamma=1
 ```
+
+**工作原理：**
+- `auto.py` 通过 `__getattr__` 动态获取任何已注册的算子
+- 根据 `auto_gen` 配置自动生成参数 (gamma=ones)
+- 如果没有配置 `auto_gen`，默认策略：第一个输入为 `"input"`，其他为 `"random"`
+
+**只有复杂算子需要手动添加**（如 `linear`, `attention`），因为它们需要额外参数（`out_features`, `mask` 等）。
 
 ---
 
@@ -265,8 +264,9 @@ EXTRA_OPS = [
 添加新算子时，检查以下项目:
 
 - [ ] `ops/nn.py` - 添加算子类，包含 `golden_python` 和 `reference` 方法
+- [ ] `ops/nn.py` - 配置 `@register_op` 的 `auto_gen` 参数
 - [ ] `ops/nn.py` - 文件末尾添加实例 (如 `rmsnorm = RMSNorm()`)
-- [ ] `ops/auto.py` - 添加简化 API (可选)
+- [ ] `ops/auto.py` - 🔄 **自动生成**，普通算子无需修改
 - [ ] `golden/cpp/` - 添加 C++ 实现并重新编译 (可选)
 - [ ] `ops/nn.py` - 添加 `cpu_golden` 方法 (如果有 C++ Golden)
 - [ ] `tests/ut/` - 添加单元测试
