@@ -33,7 +33,9 @@ from pathlib import Path
 from typing import Optional, Literal, List, Dict, Tuple
 
 # CPU Golden 可执行文件路径 (在 golden 目录)
-_CPU_GOLDEN_PATH = Path(__file__).parent.parent / "golden" / "cpu_golden"
+_GOLDEN_DIR = Path(__file__).parent.parent / "golden"
+_CPU_GOLDEN_PATH = _GOLDEN_DIR / "cpu_golden"
+_CPP_DIR = _GOLDEN_DIR / "cpp"
 
 GFloatType = Literal["gfp4", "gfp8", "gfp16"]
 
@@ -108,10 +110,43 @@ def is_cpu_golden_available() -> bool:
 
 def _check_cpu_golden():
     """检查 cpu_golden 是否存在"""
+    import os
+    import stat
+
     if not _CPU_GOLDEN_PATH.exists():
+        # 检查目录是否存在
+        if not _GOLDEN_DIR.exists():
+            detail = f"目录不存在: {_GOLDEN_DIR}"
+        elif not _CPP_DIR.exists():
+            detail = f"源码目录不存在: {_CPP_DIR}"
+        else:
+            # 列出目录内容帮助诊断
+            files = list(_GOLDEN_DIR.glob("*"))
+            detail = f"目录存在但缺少可执行文件\n  目录内容: {[f.name for f in files]}"
+
         raise FileNotFoundError(
-            f"cpu_golden not found: {_CPU_GOLDEN_PATH}\n"
-            f"Please build it first: cd {_CPU_GOLDEN_PATH.parent}/cpp && ./build.sh"
+            f"CPU Golden 可执行文件未找到\n"
+            f"{'=' * 50}\n"
+            f"原因: {detail}\n"
+            f"期望路径: {_CPU_GOLDEN_PATH}\n"
+            f"{'=' * 50}\n"
+            f"解决方法:\n"
+            f"  cd {_CPP_DIR}\n"
+            f"  ./build.sh\n"
+        )
+
+    # 检查是否可执行
+    if not os.access(_CPU_GOLDEN_PATH, os.X_OK):
+        file_stat = os.stat(_CPU_GOLDEN_PATH)
+        mode = stat.filemode(file_stat.st_mode)
+        raise PermissionError(
+            f"CPU Golden 文件存在但没有执行权限\n"
+            f"{'=' * 50}\n"
+            f"文件: {_CPU_GOLDEN_PATH}\n"
+            f"权限: {mode}\n"
+            f"{'=' * 50}\n"
+            f"解决方法:\n"
+            f"  chmod +x {_CPU_GOLDEN_PATH}\n"
         )
 
 
