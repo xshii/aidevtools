@@ -9,6 +9,11 @@
         inputs=["x", "weight"],
         optional=["bias"],
         description="线性变换 y = x @ weight + bias",
+        auto_gen={
+            "x": "input",           # 主输入，可以是 shape 或 array
+            "weight": "xavier:-1,out_features",  # Xavier 初始化，shape=[x.shape[-1], out_features]
+            "bias": "zeros:out_features",        # 零初始化
+        },
     )
     class Linear(Op):
         name = "linear"
@@ -18,6 +23,14 @@
 
         def reference(self, x, weight, bias=None):
             ...
+
+auto_gen 策略说明:
+    - "input": 主输入，可以是 tuple(shape) 或 ndarray
+    - "random": 随机初始化
+    - "ones:dim": 全1数组，dim 指定从输入推断 shape 的维度 (-1 表示最后一维)
+    - "zeros:dim": 全0数组
+    - "xavier:in_dim,out_dim": Xavier 初始化，需要指定输入输出维度
+    - "same:param": 与另一个参数相同 shape
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Type, Callable
@@ -38,6 +51,8 @@ class OpMeta:
     optional: List[str] = field(default_factory=list)
     description: str = ""
     has_cpp_golden: bool = False
+    # auto API 参数生成配置
+    auto_gen: Dict[str, str] = field(default_factory=dict)
     # 算子类引用 (运行时填充)
     op_class: Optional[Type] = None
     # 算子实例 (运行时填充)
@@ -56,6 +71,7 @@ def register_op(
     optional: List[str] = None,
     description: str = "",
     has_cpp_golden: bool = False,
+    auto_gen: Dict[str, str] = None,
 ):
     """
     算子注册装饰器
@@ -65,18 +81,24 @@ def register_op(
         optional: 可选输入参数名列表
         description: 算子描述
         has_cpp_golden: 是否有 C++ golden 实现
+        auto_gen: auto API 参数生成配置
 
     Returns:
         类装饰器
 
     Example:
         @register_op(
-            inputs=["x", "weight"],
-            optional=["bias"],
-            description="线性变换",
+            inputs=["x", "gamma", "beta"],
+            optional=["eps"],
+            description="Layer Normalization",
+            auto_gen={
+                "x": "input",
+                "gamma": "ones:-1",
+                "beta": "zeros:-1",
+            },
         )
-        class Linear(Op):
-            name = "linear"
+        class LayerNorm(Op):
+            name = "layernorm"
             ...
     """
     def decorator(cls: Type) -> Type:
@@ -86,13 +108,23 @@ def register_op(
 
         op_name = cls.name
 
+        # 默认 auto_gen: 第一个输入为 input，其他为 random
+        default_auto_gen = {}
+        input_list = inputs or ["x"]
+        for i, inp in enumerate(input_list):
+            if i == 0:
+                default_auto_gen[inp] = "input"
+            else:
+                default_auto_gen[inp] = "random"
+
         # 创建元信息
         meta = OpMeta(
             name=op_name,
-            inputs=inputs or ["x"],
+            inputs=input_list,
             optional=optional or [],
             description=description or f"{op_name} 算子",
             has_cpp_golden=has_cpp_golden,
+            auto_gen=auto_gen or default_auto_gen,
             op_class=cls,
         )
 

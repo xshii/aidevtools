@@ -22,6 +22,11 @@ from aidevtools.ops.cpu_golden import (
     inputs=["x", "weight"],
     optional=["bias"],
     description="线性变换 y = x @ weight + bias",
+    auto_gen={
+        "x": "input",
+        "weight": "xavier",
+        "bias": "zeros",
+    },
 )
 class Linear(Op):
     """线性层: y = x @ W + b"""
@@ -158,6 +163,11 @@ class Softmax(Op):
     optional=["eps"],
     description="Layer Normalization",
     has_cpp_golden=True,
+    auto_gen={
+        "x": "input",
+        "gamma": "ones:-1",
+        "beta": "zeros:-1",
+    },
 )
 class LayerNorm(Op):
     """Layer Normalization"""
@@ -218,6 +228,11 @@ class LayerNorm(Op):
     inputs=["x", "gamma", "beta"],
     optional=["mean", "var", "eps"],
     description="Batch Normalization",
+    auto_gen={
+        "x": "input",
+        "gamma": "ones:-1",
+        "beta": "zeros:-1",
+    },
 )
 class BatchNorm(Op):
     """Batch Normalization"""

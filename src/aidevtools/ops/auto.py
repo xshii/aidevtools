@@ -1,4 +1,6 @@
-"""简化算子 API - 自动生成数据
+"""简化算子 API - 基于注册表元数据自动生成
+
+通过 @register_op 的 auto_gen 配置自动生成简化 API。
 
 用法:
     from aidevtools import ops
@@ -6,14 +8,22 @@
     ops.seed(42)
     ops.clear()
 
-    y = ops.linear((2, 8, 64), 32)              # 自动生成 input, weight, bias
-    y = ops.layernorm(y, 32, dtype="gfp16")     # 自动生成 gamma, beta
+    y = ops.linear((2, 8, 64), out_features=32)  # 自动生成 weight, bias
+    y = ops.layernorm(y)                          # 自动生成 gamma=1, beta=0
     y = ops.softmax(y)
+    y = ops.relu(y)
 
     ops.dump("./workspace")
+
+auto_gen 策略说明:
+    - "input": 主输入，可以是 tuple(shape) 或 ndarray
+    - "random": 随机初始化，shape 与第一个输入相同
+    - "ones:-1": 全1数组，-1 表示取第一个输入的最后一维
+    - "zeros:-1": 全0数组
+    - "xavier": Xavier 初始化 (用于 weight)
 """
 import numpy as np
-from typing import Tuple, Union
+from typing import Tuple, Union, Callable, Any, Dict
 
 from aidevtools.ops import nn as _nn
 from aidevtools.ops.base import (
@@ -23,6 +33,7 @@ from aidevtools.ops.base import (
     set_golden_mode,
     get_golden_mode,
 )
+from aidevtools.ops.registry import get_op_meta, get_op_instance, list_ops
 
 # 全局随机种子
 _seed: int = 42
@@ -60,7 +71,10 @@ def _get_seed():
     return s
 
 
-# dtype 别名
+# ============================================================
+# dtype 处理
+# ============================================================
+
 _DTYPE_ALIASES = {
     "fp32": "float32",
     "fp16": "float16",
@@ -83,13 +97,142 @@ def _quantize_input(x: np.ndarray, dtype: str) -> np.ndarray:
     dtype = _normalize_dtype(dtype)
     if dtype == "float32":
         return x.astype(np.float32)
-    # 对于量化类型，先量化再反量化，模拟精度损失
     from aidevtools.formats.quantize import quantize, dequantize
     quantized, meta = quantize(x, dtype)
     return dequantize(quantized, dtype, meta)
 
 
-# ==================== 算子 API ====================
+def _maybe_generate(x: Union[Tuple[int, ...], np.ndarray]) -> np.ndarray:
+    """如果是 tuple 则生成随机数据，否则直接返回"""
+    if isinstance(x, tuple):
+        return np.random.randn(*x).astype(np.float32)
+    return np.asarray(x, dtype=np.float32)
+
+
+# ============================================================
+# 参数生成器
+# ============================================================
+
+def _generate_param(
+    strategy: str,
+    input_arr: np.ndarray,
+    out_features: int = None,
+    **kwargs
+) -> np.ndarray:
+    """
+    根据策略生成参数
+
+    Args:
+        strategy: 生成策略 (ones:-1, zeros:-1, xavier, random, etc.)
+        input_arr: 第一个输入数组 (用于推断 shape)
+        out_features: 输出特征数 (用于 linear)
+
+    Returns:
+        生成的参数数组
+    """
+    if strategy == "input":
+        return input_arr
+
+    # 解析策略
+    parts = strategy.split(":")
+    gen_type = parts[0]
+    dim_spec = parts[1] if len(parts) > 1 else "-1"
+
+    # 计算 shape
+    if dim_spec == "-1":
+        shape = (input_arr.shape[-1],)
+    elif dim_spec.isdigit() or (dim_spec.startswith("-") and dim_spec[1:].isdigit()):
+        dim = int(dim_spec)
+        shape = (input_arr.shape[dim],)
+    else:
+        # 可能是 "out_features" 这样的变量名
+        shape = (out_features,) if out_features else (input_arr.shape[-1],)
+
+    # 生成数据
+    if gen_type == "ones":
+        return np.ones(shape, dtype=np.float32)
+    elif gen_type == "zeros":
+        return np.zeros(shape, dtype=np.float32)
+    elif gen_type == "random":
+        return np.random.randn(*shape).astype(np.float32)
+    elif gen_type == "xavier":
+        in_features = input_arr.shape[-1]
+        out_feat = out_features if out_features else in_features
+        std = np.sqrt(2.0 / (in_features + out_feat))
+        return np.random.randn(in_features, out_feat).astype(np.float32) * std
+    else:
+        # 默认随机
+        return np.random.randn(*shape).astype(np.float32)
+
+
+# ============================================================
+# 通用算子调用器
+# ============================================================
+
+def _call_op_auto(
+    op_name: str,
+    first_input: Union[Tuple[int, ...], np.ndarray],
+    dtype: str = DEFAULT_DTYPE,
+    out_features: int = None,
+    **kwargs
+) -> np.ndarray:
+    """
+    通用算子调用器 - 基于 auto_gen 配置自动生成参数
+
+    Args:
+        op_name: 算子名称
+        first_input: 第一个输入 (shape 或 array)
+        dtype: 数据类型
+        out_features: 输出特征数 (用于 linear 等)
+        **kwargs: 其他参数 (覆盖自动生成)
+    """
+    s = _get_seed()
+    np.random.seed(s)
+
+    # 获取元数据
+    meta = get_op_meta(op_name)
+    if meta is None:
+        raise ValueError(f"未知算子: {op_name}")
+
+    op_instance = get_op_instance(op_name)
+
+    # 生成第一个输入
+    input_arr = _maybe_generate(first_input)
+
+    # 根据 auto_gen 生成其他参数
+    args = []
+    for param_name in meta.inputs:
+        if param_name in kwargs:
+            # 用户提供的参数
+            val = kwargs.pop(param_name)
+            if isinstance(val, (tuple, np.ndarray)):
+                val = _maybe_generate(val)
+                val = _quantize_input(val, dtype)
+            args.append(val)
+        else:
+            # 自动生成
+            strategy = meta.auto_gen.get(param_name, "random")
+            if strategy == "input":
+                arr = _quantize_input(input_arr, dtype)
+            else:
+                arr = _generate_param(strategy, input_arr, out_features=out_features)
+                arr = _quantize_input(arr, dtype)
+            args.append(arr)
+
+    # 处理 optional 参数
+    for opt_name in meta.optional:
+        if opt_name in kwargs:
+            val = kwargs.pop(opt_name)
+            if isinstance(val, np.ndarray):
+                val = _quantize_input(val, dtype)
+            kwargs[opt_name] = val
+
+    return op_instance(*args, **kwargs)
+
+
+# ============================================================
+# 特殊算子 (需要额外参数)
+# ============================================================
 
 def linear(
     input_shape: Union[Tuple[int, ...], np.ndarray],
@@ -101,107 +244,28 @@ def linear(
     Linear 层: y = x @ W + b
 
     Args:
-        input_shape: 输入 shape (自动生成) 或 输入数据 (ndarray)
+        input_shape: 输入 shape 或数据
         out_features: 输出特征数
         bias: 是否使用 bias
-        dtype: 数据类型 (默认 bfp8)
-
-    Returns:
-        输出数据
+        dtype: 数据类型
     """
     s = _get_seed()
     np.random.seed(s)
 
-    # 生成或使用输入
-    if isinstance(input_shape, np.ndarray):
-        x = input_shape
-    else:
-        x = np.random.randn(*input_shape).astype(np.float32)
-
+    x = _maybe_generate(input_shape)
     in_features = x.shape[-1]
 
-    # Xavier 初始化权重
+    # Xavier 初始化
     std = np.sqrt(2.0 / (in_features + out_features))
     w = np.random.randn(in_features, out_features).astype(np.float32) * std
-
-    # Bias
     b = np.zeros(out_features, dtype=np.float32) if bias else None
 
-    # 量化输入
     x = _quantize_input(x, dtype)
     w = _quantize_input(w, dtype)
     if b is not None:
         b = _quantize_input(b, dtype)
 
     return _nn.linear(x, w, b)
-
-
-def layernorm(
-    x: np.ndarray,
-    normalized_shape: int,
-    eps: float = 1e-5,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """
-    LayerNorm 层
-
-    Args:
-        x: 输入数据
-        normalized_shape: 归一化维度大小
-        eps: epsilon
-        dtype: 数据类型 (默认 bfp8)
-
-    Returns:
-        输出数据
-    """
-    # gamma=1, beta=0
-    gamma = np.ones(normalized_shape, dtype=np.float32)
-    beta = np.zeros(normalized_shape, dtype=np.float32)
-
-    # 量化
-    x = _quantize_input(x, dtype)
-    gamma = _quantize_input(gamma, dtype)
-    beta = _quantize_input(beta, dtype)
-
-    return _nn.layernorm(x, gamma, beta, eps)
-
-
-def softmax(
-    x: np.ndarray,
-    axis: int = -1,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """
-    Softmax 层
-
-    Args:
-        x: 输入数据
-        axis: softmax 轴
-        dtype: 数据类型 (默认 bfp8)
-
-    Returns:
-        输出数据
-    """
-    x = _quantize_input(x, dtype)
-    return _nn.softmax(x, axis)
-
-
-def relu(
-    x: np.ndarray,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """ReLU 层"""
-    x = _quantize_input(x, dtype)
-    return _nn.relu(x)
-
-
-def gelu(
-    x: np.ndarray,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """GELU 层"""
-    x = _quantize_input(x, dtype)
-    return _nn.gelu(x)
 
 
 def matmul(
@@ -211,39 +275,17 @@ def matmul(
     dtype_a: str = None,
     dtype_b: str = None,
 ) -> np.ndarray:
-    """
-    矩阵乘法: y = a @ b (支持混合精度)
-
-    Args:
-        a: 输入 a (shape 或 ndarray)
-        b: 输入 b (shape 或 ndarray)
-        dtype: 数据类型 (默认 bfp8)，当 dtype_a/dtype_b 未指定时使用
-        dtype_a: A 矩阵的数据类型 (混合精度)
-        dtype_b: B 矩阵的数据类型 (混合精度)
-
-    Returns:
-        输出数据
-
-    Example:
-        # 同精度
-        y = matmul((2, 8, 64), (64, 32), dtype="bfp8")
-
-        # 混合精度: A 用 bfp8, B 用 bfp4
-        y = matmul((2, 8, 64), (64, 32), dtype_a="bfp8", dtype_b="bfp4")
-    """
+    """矩阵乘法 (支持混合精度)"""
     s = _get_seed()
     np.random.seed(s)
 
-    # 确定各自的 dtype
     if dtype_a is None:
         dtype_a = dtype
     if dtype_b is None:
         dtype_b = dtype
 
-    if isinstance(a, tuple):
-        a = np.random.randn(*a).astype(np.float32)
-    if isinstance(b, tuple):
-        b = np.random.randn(*b).astype(np.float32)
+    a = _maybe_generate(a)
+    b = _maybe_generate(b)
 
     a = _quantize_input(a, dtype_a)
     b = _quantize_input(b, dtype_b)
@@ -258,35 +300,19 @@ def attention(
     mask: np.ndarray = None,
     dtype: str = DEFAULT_DTYPE,
 ) -> np.ndarray:
-    """
-    Scaled Dot-Product Attention
-
-    Args:
-        q: Query (shape 或 ndarray)
-        k: Key (shape 或 ndarray)，None 则与 q 相同
-        v: Value (shape 或 ndarray)，None 则与 q 相同
-        mask: 注意力 mask
-        dtype: 数据类型 (默认 bfp8)
-
-    Returns:
-        输出数据
-    """
+    """Scaled Dot-Product Attention"""
     s = _get_seed()
     np.random.seed(s)
 
-    if isinstance(q, tuple):
-        q = np.random.randn(*q).astype(np.float32)
-
-    # k, v 默认与 q 相同 shape
+    q = _maybe_generate(q)
     if k is None:
         k = np.random.randn(*q.shape).astype(np.float32)
-    elif isinstance(k, tuple):
-        k = np.random.randn(*k).astype(np.float32)
-
+    else:
+        k = _maybe_generate(k)
     if v is None:
         v = np.random.randn(*q.shape).astype(np.float32)
-    elif isinstance(v, tuple):
-        v = np.random.randn(*v).astype(np.float32)
+    else:
+        v = _maybe_generate(v)
 
     q = _quantize_input(q, dtype)
     k = _quantize_input(k, dtype)
@@ -295,48 +321,20 @@ def attention(
     return _nn.attention(q, k, v, mask)
 
 
-def add(
-    a: Union[Tuple[int, ...], np.ndarray],
-    b: Union[Tuple[int, ...], np.ndarray] = None,
+def embedding(
+    input_ids: np.ndarray,
+    vocab_size: int,
+    embed_dim: int,
     dtype: str = DEFAULT_DTYPE,
 ) -> np.ndarray:
-    """加法"""
+    """Embedding 层"""
     s = _get_seed()
     np.random.seed(s)
 
-    if isinstance(a, tuple):
-        a = np.random.randn(*a).astype(np.float32)
-    if b is None:
-        b = np.random.randn(*a.shape).astype(np.float32)
-    elif isinstance(b, tuple):
-        b = np.random.randn(*b).astype(np.float32)
+    embed_table = np.random.randn(vocab_size, embed_dim).astype(np.float32) * 0.02
+    embed_table = _quantize_input(embed_table, dtype)
 
-    a = _quantize_input(a, dtype)
-    b = _quantize_input(b, dtype)
-
-    return _nn.add(a, b)
-
-
-def mul(
-    a: Union[Tuple[int, ...], np.ndarray],
-    b: Union[Tuple[int, ...], np.ndarray] = None,
-    dtype: str = DEFAULT_DTYPE,
-) -> np.ndarray:
-    """乘法"""
-    s = _get_seed()
-    np.random.seed(s)
-
-    if isinstance(a, tuple):
-        a = np.random.randn(*a).astype(np.float32)
-    if b is None:
-        b = np.random.randn(*a.shape).astype(np.float32)
-    elif isinstance(b, tuple):
-        b = np.random.randn(*b).astype(np.float32)
-
-    a = _quantize_input(a, dtype)
-    b = _quantize_input(b, dtype)
-
-    return _nn.mul(a, b)
+    return _nn.embedding(input_ids, embed_table)
 
 
 def transpose(
@@ -344,23 +342,61 @@ def transpose(
     axes: tuple = None,
     dtype: str = DEFAULT_DTYPE,
 ) -> np.ndarray:
-    """
-    转置
-
-    Args:
-        x: 输入 (shape 或 ndarray)
-        axes: 轴顺序，如 (0, 1, 3, 2)。None 则交换最后两个维度
-        dtype: 数据类型 (默认 bfp8)
-
-    Returns:
-        输出数据
-    """
+    """转置"""
     s = _get_seed()
     np.random.seed(s)
 
-    if isinstance(x, tuple):
-        x = np.random.randn(*x).astype(np.float32)
-
+    x = _maybe_generate(x)
     x = _quantize_input(x, dtype)
 
     return _nn.transpose(x, axes)
+
+
+# ============================================================
+# 自动生成的算子 API (基于 auto_gen)
+# ============================================================
+
+def _make_auto_op(op_name: str) -> Callable:
+    """基于 auto_gen 配置生成算子包装函数"""
+    meta = get_op_meta(op_name)
+
+    def wrapper(
+        x: Union[Tuple[int, ...], np.ndarray],
+        dtype: str = DEFAULT_DTYPE,
+        **kwargs
+    ) -> np.ndarray:
+        return _call_op_auto(op_name, x, dtype=dtype, **kwargs)
+
+    wrapper.__name__ = op_name
+    wrapper.__doc__ = meta.description if meta else f"{op_name} 算子"
+    return wrapper
+
+
+# 自动注册简单算子 (基于 auto_gen)
+_SIMPLE_OPS = [
+    "relu", "gelu", "sigmoid", "tanh",  # 单输入激活
+    "softmax",  # 带 axis 参数
+    "layernorm", "batchnorm",  # 归一化 (gamma/beta 自动生成)
+    "add", "mul", "div",  # 二元运算
+]
+
+for _op_name in _SIMPLE_OPS:
+    if get_op_meta(_op_name) is not None:
+        globals()[_op_name] = _make_auto_op(_op_name)
+
+
+# ============================================================
+# 动态算子访问 (兜底)
+# ============================================================
+
+def __getattr__(name: str) -> Callable:
+    """
+    动态获取算子
+
+    如果算子已注册，自动生成基于 auto_gen 的包装函数。
+    """
+    meta = get_op_meta(name)
+    if meta is None:
+        raise AttributeError(f"模块 'ops' 没有属性 '{name}'")
+
+    return _make_auto_op(name)
