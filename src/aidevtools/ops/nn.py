@@ -120,6 +120,25 @@ class Tanh(Op):
 
 @register_op(
     inputs=["x"],
+    description="SiLU/Swish 激活 y = x * sigmoid(x) (LLaMA FFN)",
+)
+class SiLU(Op):
+    """SiLU (Swish): y = x * sigmoid(x)
+
+    用于 LLaMA, Mistral 等现代 LLM 的 FFN。
+    """
+    name = "silu"
+
+    def golden_python(self, x: np.ndarray) -> np.ndarray:
+        return (x * (1 / (1 + np.exp(-x)))).astype(np.float32)
+
+    def reference(self, x: np.ndarray) -> np.ndarray:
+        x64 = x.astype(np.float64)
+        return (x64 * (1 / (1 + np.exp(-x64)))).astype(np.float32)
+
+
+@register_op(
+    inputs=["x"],
     optional=["axis"],
     description="Softmax 激活 (防溢出)",
     has_cpp_golden=True,
@@ -230,6 +249,36 @@ class LayerNorm(Op):
         var = np.var(x64, axis=-1, keepdims=True)
         x_norm = (x64 - mean) / np.sqrt(var + eps)
         return (gamma.astype(np.float64) * x_norm + beta.astype(np.float64)).astype(np.float32)
+
+
+@register_op(
+    inputs=["x", "gamma"],
+    optional=["eps"],
+    description="RMS Normalization (LLaMA/Mistral)",
+    auto_gen={
+        "x": "input",
+        "gamma": "ones:-1",
+    },
+)
+class RMSNorm(Op):
+    """RMS Normalization: y = x / rms(x) * gamma
+
+    用于 LLaMA, Mistral, Qwen 等现代 LLM。
+    比 LayerNorm 更高效（无需计算 mean）。
+    """
+    name = "rmsnorm"
+
+    def golden_python(self, x: np.ndarray, gamma: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+        """Python Golden 实现 (fp32)"""
+        rms = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + eps)
+        return (x / rms * gamma).astype(np.float32)
+
+    def reference(self, x: np.ndarray, gamma: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+        """高精度参考实现 (fp64)"""
+        x64 = x.astype(np.float64)
+        gamma64 = gamma.astype(np.float64)
+        rms = np.sqrt(np.mean(x64 ** 2, axis=-1, keepdims=True) + eps)
+        return (x64 / rms * gamma64).astype(np.float32)
 
 
 @register_op(
@@ -527,8 +576,10 @@ relu = ReLU()
 gelu = GELU()
 sigmoid = Sigmoid()
 tanh = Tanh()
+silu = SiLU()
 softmax = Softmax()
 layernorm = LayerNorm()
+rmsnorm = RMSNorm()
 batchnorm = BatchNorm()
 embedding = Embedding()
 matmul = MatMul()
