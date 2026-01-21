@@ -73,6 +73,11 @@ activate_venv() {
     fi
 }
 
+# 获取 Python 可执行文件路径
+get_python_executable() {
+    python3 -c "import sys; print(sys.executable)"
+}
+
 # 检查 pybind11
 check_pybind11() {
     activate_venv
@@ -109,11 +114,12 @@ build_gfloat_golden() {
     local cpp_dir="$SRC_DIR/formats/custom/gfloat/cpp"
     local build_dir="$cpp_dir/build"
     local output_dir="$SRC_DIR/formats/custom/gfloat"
+    local python_exe=$(get_python_executable)
 
     mkdir -p "$build_dir"
     cd "$build_dir"
 
-    cmake .. -DCMAKE_BUILD_TYPE=Release
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$python_exe"
     make -j$(get_nproc)
 
     info "gfloat_golden 编译完成: $output_dir/gfloat_golden*.so"
@@ -128,11 +134,12 @@ build_bfp_golden() {
     local cpp_dir="$SRC_DIR/formats/custom/bfp/cpp"
     local build_dir="$cpp_dir/build"
     local output_dir="$SRC_DIR/formats/custom/bfp"
+    local python_exe=$(get_python_executable)
 
     mkdir -p "$build_dir"
     cd "$build_dir"
 
-    cmake .. -DCMAKE_BUILD_TYPE=Release
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$python_exe"
     make -j$(get_nproc)
 
     info "bfp_golden 编译完成: $output_dir/bfp_golden*.so"
