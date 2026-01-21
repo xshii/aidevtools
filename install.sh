@@ -39,6 +39,17 @@ case "${1:-base}" in
         ;;
 esac
 
+# 编译 C++ Golden (如果有 cmake)
+if command -v cmake &> /dev/null; then
+    echo ""
+    echo "编译 C++ Golden..."
+    ./build_golden.sh all
+else
+    echo ""
+    echo "提示: 未检测到 cmake，跳过 C++ Golden 编译"
+    echo "      如需 C++ 加速，请安装 cmake 后运行: ./build_golden.sh"
+fi
+
 echo ""
 echo "安装完成！"
 echo "激活环境: source $VENV_DIR/bin/activate"
