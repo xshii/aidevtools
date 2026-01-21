@@ -1,8 +1,12 @@
 /**
- * GFloat CPU Golden Ops
+ * GFloat I/O - 文件读写与格式转换
  *
- * 基于 gfloat4/8/16 格式的 CPU 算子实现
- * 用于生成 golden 数据，通过 subprocess 调用
+ * 这个文件包含:
+ *   1. GFloat 格式类型定义
+ *   2. 二进制文件读写
+ *   3. GFloat 格式与 fp32 之间的转换
+ *
+ * 这是通用的 I/O 层，不包含任何算子实现。
  */
 #pragma once
 
@@ -13,17 +17,25 @@
 #include <fstream>
 #include <stdexcept>
 
-namespace gfloat_ops {
+namespace gfloat_io {
 
 // ==================== GFloat 格式类型 ====================
+
 enum class GFloatType {
     GFLOAT4,   // 4-bit: 取 fp32 高 4 位
     GFLOAT8,   // 8-bit: 取 fp32 高 8 位
     GFLOAT16   // 16-bit: 取 fp32 高 16 位
 };
 
-// 根据字符串获取格式类型
+/**
+ * 根据字符串解析格式类型
+ * 支持: "gfloat4", "gfp4", "4", "gfloat8", "gfp8", "8", "gfloat16", "gfp16", "16"
+ */
 GFloatType parse_gfloat_type(const std::string& type_str);
+
+/**
+ * 格式类型转字符串
+ */
 std::string gfloat_type_to_string(GFloatType type);
 
 // ==================== 模板化文件 I/O ====================
@@ -121,10 +133,10 @@ inline size_t gfloat4_packed_size(size_t element_count) {
     return (element_count + 1) / 2;  // 向上取整
 }
 
-// ==================== 通用接口 ====================
+// ==================== 通用高级接口 ====================
 
 /**
- * fp32 数组转换为 gfloat 并保存
+ * fp32 数组转换为 gfloat 并保存到文件
  */
 bool save_as_gfloat(const float* input, size_t size, const std::string& path, GFloatType type);
 
@@ -134,40 +146,8 @@ bool save_as_gfloat(const float* input, size_t size, const std::string& path, GF
 std::vector<float> load_gfloat_as_fp32(const std::string& path, GFloatType type);
 
 /**
- * 加载 gfloat 文件并指定元素数量 (用于 gfloat4)
+ * 从文件加载 gfloat 并转换为 fp32 (指定元素数量，用于 gfloat4)
  */
 std::vector<float> load_gfloat_as_fp32(const std::string& path, GFloatType type, size_t element_count);
 
-// ==================== 算子实现 (fp32 内部计算) ====================
-
-/**
- * MatMul: C = A @ B
- */
-void matmul_fp32(const float* a, const float* b, float* c,
-                 size_t M, size_t K, size_t N);
-
-/**
- * Softmax: y = softmax(x, axis=-1)
- */
-void softmax_fp32(const float* input, float* output,
-                  size_t batch, size_t seq);
-
-/**
- * LayerNorm: y = (x - mean) / sqrt(var + eps) * gamma + beta
- */
-void layernorm_fp32(const float* input, const float* gamma, const float* beta,
-                    float* output, size_t batch, size_t hidden, float eps = 1e-5f);
-
-/**
- * Transpose 4D: 交换最后两个维度
- * 输入: [d0, d1, d2, d3] -> 输出: [d0, d1, d3, d2]
- */
-void transpose_4d_fp32(const float* input, float* output,
-                       size_t d0, size_t d1, size_t d2, size_t d3);
-
-/**
- * Transpose 2D: [M, N] -> [N, M]
- */
-void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N);
-
-}  // namespace gfloat_ops
+}  // namespace gfloat_io

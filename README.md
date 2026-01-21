@@ -20,10 +20,13 @@ AI 算子开发工具集，用于自研芯片算子的 Golden 生成与精度验
 # 2. 激活环境
 source .venv/bin/activate
 
-# 3. 运行 Demo
-python demos/unified_workflow_demo.py
+# 3. 编译 C++ Golden (可选，启用 C++ 加速)
+./build_golden.sh
 
-# 4. 运行测试
+# 4. 运行 Demo
+python demos/02_mini_transformer/run.py
+
+# 5. 运行测试
 pytest tests/ -v
 ```
 
@@ -127,12 +130,23 @@ Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
 
 ## 内置算子
 
-- **线性变换**: linear, matmul
-- **激活函数**: relu, gelu, softmax
-- **归一化**: layernorm
-- **注意力**: attention
-- **元素运算**: add, mul
-- **嵌入**: embedding
+| 类型 | 算子 | cpp_golden | 说明 |
+|------|------|:----------:|------|
+| **线性变换** | linear | ✓ | y = x @ W + b |
+| | matmul | ✓ | 矩阵乘法 (支持混合精度) |
+| | transpose | ✓ | 转置 (2D/3D/4D) |
+| **激活函数** | relu | - | ReLU |
+| | gelu | - | GELU |
+| | silu | - | SiLU/Swish (LLaMA FFN) |
+| | sigmoid | - | Sigmoid |
+| | tanh | - | Tanh |
+| | softmax | ✓ | Softmax |
+| **归一化** | layernorm | ✓ | Layer Normalization |
+| | rmsnorm | - | RMS Normalization (LLaMA/Mistral) |
+| | batchnorm | - | Batch Normalization |
+| **注意力** | attention | - | Scaled Dot-Product Attention |
+| **元素运算** | add, mul, div | - | 逐元素运算 |
+| **嵌入** | embedding | - | Token 嵌入 |
 
 ## 目录结构
 
@@ -163,6 +177,13 @@ aidevtools/
 # 安装开发依赖
 ./install.sh dev
 
+# 编译 C++ Golden
+./build_golden.sh          # 编译所有
+./build_golden.sh cpu      # 仅编译 cpu_golden CLI
+./build_golden.sh gfloat   # 仅编译 gfloat Python 扩展
+./build_golden.sh bfp      # 仅编译 bfp Python 扩展
+./build_golden.sh clean    # 清理编译产物
+
 # 运行测试
 pytest tests/ -v
 
@@ -173,12 +194,21 @@ pytest tests/ --cov=aidevtools --cov-report=term-missing
 ./ci.sh
 ```
 
+### C++ Golden 组件
+
+| 组件 | 类型 | 说明 |
+|------|------|------|
+| cpu_golden | CLI | GFloat 格式算子命令行工具 |
+| gfloat_golden | Python 扩展 | GFloat 格式量化/反量化 |
+| bfp_golden | Python 扩展 | BFP 块浮点格式量化/反量化 |
+
 ## 环境要求
 
 - Python >= 3.8
 - numpy
-- openpyxl (xlsx 工作流)
+- openpyxl (xlsx 工作流，可选)
 - pybind11 (C++ 扩展，可选)
+- cmake >= 3.14 (编译 C++ Golden，可选)
 
 ## License
 
