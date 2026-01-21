@@ -445,17 +445,24 @@ class Transpose(Op):
         return np.transpose(x, axes).astype(np.float32)
 
     def cpu_golden(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
-        """C++ Golden 实现 (仅支持 4D 交换最后两个维度)"""
+        """C++ Golden 实现 (支持 2D/3D/4D，交换最后两个维度)"""
         dtype = get_cpu_golden_dtype()
         x = np.asarray(x, dtype=np.float32)
+        original_ndim = x.ndim
 
-        if x.ndim != 4:
-            raise ValueError(f"cpu_golden transpose requires 4D input, got {x.ndim}D")
+        if x.ndim < 2 or x.ndim > 4:
+            raise ValueError(f"cpu_golden transpose requires 2D-4D input, got {x.ndim}D")
+
+        # 将 2D/3D 扩展到 4D
+        if x.ndim == 2:
+            x = x.reshape(1, 1, x.shape[0], x.shape[1])
+        elif x.ndim == 3:
+            x = x.reshape(1, x.shape[0], x.shape[1], x.shape[2])
 
         d0, d1, d2, d3 = x.shape
 
         # 输出 shape: [d0, d1, d3, d2]
-        return run_cpu_golden(
+        result = run_cpu_golden(
             op_name="transpose",
             cmd_args=["transpose", dtype, "@x.bin", "@output", str(d0), str(d1), str(d2), str(d3)],
             inputs={"x.bin": (x, dtype)},
@@ -464,6 +471,14 @@ class Transpose(Op):
             output_size=d0 * d1 * d2 * d3,
             output_shape=(d0, d1, d3, d2),
         )
+
+        # 恢复原始维度
+        if original_ndim == 2:
+            result = result.reshape(d3, d2)
+        elif original_ndim == 3:
+            result = result.reshape(d1, d3, d2)
+
+        return result
 
     def reference(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
         if axes is None:
