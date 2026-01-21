@@ -4,20 +4,22 @@
 
 ```
 cpp/
-├── io/                 # I/O 层 (格式转换 + 文件读写)
-│   ├── gfloat_io.h
-│   ├── gfloat_io.cpp
-│   ├── bfp_io.h
-│   └── bfp_io.cpp
-├── ops/                # 算子层
-│   ├── interface.h     # 接口定义 (纯 fp32)
-│   └── impl.cpp        # 实现 (可替换)
-├── main.cpp            # CLI 框架
-├── CMakeLists.txt
-└── README.md
+├── gfloat/           # GFloat 格式全套
+│   ├── io.h          # I/O + 格式转换
+│   ├── io.cpp
+│   └── impl.cpp      # 算子实现 (可替换)
+├── bfp/              # BFP 格式全套
+│   ├── io.h          # I/O + 格式转换
+│   ├── io.cpp
+│   └── impl.cpp      # 算子实现 (可替换)
+├── interface.h       # 通用算子接口 (纯 fp32)
+├── main.cpp          # CLI 框架
+└── CMakeLists.txt
 ```
 
 ## 架构设计
+
+每个格式是独立的模块，包含 I/O 和算子实现：
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -28,62 +30,47 @@ cpp/
          ┌─────────────┴─────────────┐
          ▼                           ▼
 ┌─────────────────┐       ┌─────────────────┐
-│  io/gfloat_io   │       │   io/bfp_io     │
-│  GFloat 格式    │       │   BFP 格式      │
-│  I/O + 转换     │       │  I/O + 转换     │
+│    gfloat/      │       │     bfp/        │
+│  ├── io.h/cpp   │       │  ├── io.h/cpp   │
+│  └── impl.cpp   │       │  └── impl.cpp   │
 └─────────────────┘       └─────────────────┘
          │                           │
          └─────────────┬─────────────┘
                        ▼
               ┌─────────────────┐
-              │ ops/interface.h │
+              │  interface.h    │
               │   算子接口      │
               │  (纯 fp32)      │
               └─────────────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │  ops/impl.cpp   │
-              │   算子实现      │
-              │  (可替换)       │
-              └─────────────────┘
 ```
 
-## 如何替换算子实现
+## 切换数据格式
 
-1. **保留这些文件**：
-   - `main.cpp` (CLI 框架)
-   - `io/gfloat_io.*` 或 `io/bfp_io.*` (格式 I/O)
-   - `ops/interface.h` (接口定义)
+修改 CMakeLists.txt 中的一行：
 
-2. **替换 `ops/impl.cpp`**：
-   - 创建你的实现文件 (如 `ops/my_impl.cpp`)
-   - 实现 `ops/interface.h` 中声明的所有函数
-   - 修改 CMakeLists.txt 使用你的文件
+```cmake
+# 使用 GFloat 格式
+set(FORMAT "gfloat")
 
-3. **修改 CMakeLists.txt**：
-   ```cmake
-   set(SOURCES
-       main.cpp
-       io/gfloat_io.cpp
-       ops/my_impl.cpp      # 你的实现
-   )
-   ```
+# 或使用 BFP 格式
+set(FORMAT "bfp")
+```
 
-## 如何使用 BFP 格式
+## 替换算子实现
 
-BFP 格式需要同时保存/加载两个文件：
-- `mantissa.bin` - 尾数数组
-- `exponent.bin` - 共享指数数组
+只需替换对应格式目录下的 `impl.cpp`：
 
-使用方法：
-1. 修改 `main.cpp` 的 include：`#include "io/bfp_io.h"`
-2. 使用 `bfp_io` namespace 替代 `gfloat_io`
-3. 添加 `io/bfp_io.cpp` 到 CMakeLists.txt
+```bash
+# 替换 GFloat 格式的算子实现
+cp my_gfloat_impl.cpp gfloat/impl.cpp
+
+# 或替换 BFP 格式的算子实现
+cp my_bfp_impl.cpp bfp/impl.cpp
+```
 
 ## 算子接口
 
-所有算子都接收 fp32 数据，格式转换在 I/O 层完成：
+所有算子都接收 fp32 数据 (`interface.h`)：
 
 ```cpp
 namespace cpu_golden::ops {
@@ -109,14 +96,7 @@ namespace cpu_golden::ops {
 
 # 或手动编译
 cd src/aidevtools/golden/cpp
-mkdir -p build && cd build
+rm -rf build && mkdir build && cd build
 cmake ..
 make
-```
-
-## 测试
-
-```bash
-./cpu_golden --help
-./cpu_golden matmul gfp16 a.bin b.bin c.bin 64 128 256
 ```

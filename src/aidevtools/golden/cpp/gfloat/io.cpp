@@ -1,7 +1,7 @@
 /**
  * GFloat I/O 实现
  */
-#include "gfloat_io.h"
+#include "io.h"
 #include <cstring>
 #include <algorithm>
 

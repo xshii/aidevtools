@@ -1,7 +1,7 @@
 /**
  * BFP I/O 实现
  */
-#include "bfp_io.h"
+#include "io.h"
 #include <cstring>
 
 namespace bfp_io {
