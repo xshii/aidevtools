@@ -5,17 +5,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# 查找 Python
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
 # 查找 pybind11
-find_package(pybind11 CONFIG)
-if(NOT pybind11_FOUND)
-    # 如果 cmake 找不到，尝试使用 pip 安装的 pybind11
-    execute_process(
-        COMMAND python3 -m pybind11 --cmakedir
-        OUTPUT_VARIABLE pybind11_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    find_package(pybind11 CONFIG REQUIRED)
-endif()
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -m pybind11 --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+find_package(pybind11 CONFIG REQUIRED)
 
 # 创建 Python 模块
 pybind11_add_module(gfloat_golden
