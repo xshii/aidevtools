@@ -346,7 +346,7 @@ class TestCpuGoldenCLI:
             capture_output=True, text=True
         )
         assert result.returncode == 0
-        assert "GFloat CPU Golden CLI" in result.stderr
+        assert "CPU Golden CLI" in result.stderr
 
     def test_unknown_op(self):
         """未知算子"""
