@@ -47,6 +47,14 @@ class Linear(Op):
             y = y + bias.astype(np.float64)
         return y.astype(np.float32)
 
+    def cpu_golden(self, x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None) -> np.ndarray:
+        """C++ Golden 实现 (复用 MatMul cpu_golden)"""
+        # linear = matmul + bias
+        y = MatMul().cpu_golden(x, weight)
+        if bias is not None:
+            y = y + bias.astype(np.float32)
+        return y
+
 
 @register_op(
     inputs=["x"],
