@@ -25,7 +25,7 @@ from aidevtools.ops.cpu_golden import (
     auto_gen={
         "x": "input",
         "weight": "xavier",
-        "bias": "zeros",
+        "bias": "uniform",  # 类似 PyTorch: uniform(-1/sqrt(in), 1/sqrt(in))
     },
 )
 class Linear(Op):

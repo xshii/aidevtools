@@ -155,6 +155,11 @@ def _generate_param(
         return np.zeros(shape, dtype=np.float32)
     elif gen_type == "random":
         return np.random.randn(*shape).astype(np.float32)
+    elif gen_type == "uniform":
+        # 类似 PyTorch Linear bias 初始化: uniform(-bound, bound)
+        in_features = input_arr.shape[-1]
+        bound = 1.0 / np.sqrt(in_features)
+        return np.random.uniform(-bound, bound, shape).astype(np.float32)
     elif gen_type == "xavier":
         in_features = input_arr.shape[-1]
         out_feat = out_features if out_features else in_features
