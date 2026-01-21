@@ -66,11 +66,19 @@ check_deps() {
     fi
 }
 
+# 激活 venv (如果存在)
+activate_venv() {
+    if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
+        source "$SCRIPT_DIR/.venv/bin/activate"
+    fi
+}
+
 # 检查 pybind11
 check_pybind11() {
+    activate_venv
     if ! python3 -c "import pybind11" 2>/dev/null; then
         warn "pybind11 未安装，正在安装..."
-        pip3 install pybind11 -q || pip install pybind11 -q
+        pip install pybind11 -q
     fi
 }
 
