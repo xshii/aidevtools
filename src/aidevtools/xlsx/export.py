@@ -58,7 +58,9 @@ def export_xlsx(
                         existing_compare_data[row_dict["id"]] = row_dict
                 logger.debug(f"保留 {len(existing_compare_data)} 条已有比对结果")
             existing_wb.close()
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError) as e:
+            # OSError: 文件读取问题
+            # KeyError/ValueError/TypeError: xlsx 格式问题
             logger.warning(f"读取已有结果失败: {e}")
 
     # 创建或加载工作簿

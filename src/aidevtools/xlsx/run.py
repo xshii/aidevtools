@@ -100,7 +100,9 @@ def _run_sim_cmd(
     except subprocess.TimeoutExpired:
         logger.error(f"仿真命令超时 (>300s): {cmd}")
         return None
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
+        # OSError: 命令不存在或权限问题
+        # SubprocessError: 子进程执行问题
         logger.error(f"仿真命令异常: {e}")
         return None
 
@@ -186,7 +188,11 @@ def run_xlsx(
 
             logger.debug(f"执行 {config.op_name}_{config.id}: shape={output.shape}")
 
-        except Exception as e:
+        except (ValueError, TypeError, RuntimeError, KeyError, AttributeError) as e:
+            # ValueError/TypeError: 参数错误
+            # RuntimeError: 算子执行失败
+            # KeyError: 依赖缺失
+            # AttributeError: 算子不存在
             logger.error(f"执行 {config.op_name}_{config.id} 失败: {e}")
             results.append({
                 "id": config.id,

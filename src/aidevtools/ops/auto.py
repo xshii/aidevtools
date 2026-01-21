@@ -43,7 +43,7 @@ _op_counter: int = 0
 DEFAULT_DTYPE = "bfp8"
 
 
-def seed(s: int):
+def seed(s: int) -> None:
     """设置随机种子"""
     global _seed, _op_counter
     _seed = s
@@ -51,19 +51,19 @@ def seed(s: int):
     np.random.seed(s)
 
 
-def clear():
+def clear() -> None:
     """清空记录"""
     global _op_counter
     _op_counter = 0
     _clear()
 
 
-def dump(output_dir: str = "./workspace", format: str = "raw"):
+def dump(output_dir: str = "./workspace", format: str = "raw") -> None:
     """导出所有 bin 文件"""
     _dump(output_dir, format)
 
 
-def _get_seed():
+def _get_seed() -> int:
     """获取当前算子的 seed"""
     global _op_counter
     s = _seed + _op_counter

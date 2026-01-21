@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 import threading
 
+from aidevtools.core.constants import (
+    DEFAULT_ATOL, DEFAULT_RTOL, DEFAULT_MIN_QSNR, DEFAULT_MIN_COSINE,
+    DEFAULT_GFLOAT_TYPE, GFLOAT_TYPES,
+)
+
 
 @dataclass
 class ExactConfig:
@@ -14,16 +19,16 @@ class ExactConfig:
 @dataclass
 class FuzzyConfig:
     """模糊比对配置"""
-    atol: float = 1e-5        # 绝对误差阈值
-    rtol: float = 1e-3        # 相对误差阈值
-    min_qsnr: float = 30.0    # 最小 QSNR (dB)
-    min_cosine: float = 0.999 # 最小余弦相似度
+    atol: float = DEFAULT_ATOL           # 绝对误差阈值
+    rtol: float = DEFAULT_RTOL           # 相对误差阈值
+    min_qsnr: float = DEFAULT_MIN_QSNR   # 最小 QSNR (dB)
+    min_cosine: float = DEFAULT_MIN_COSINE  # 最小余弦相似度
 
 
 @dataclass
 class CpuGoldenConfig:
     """CPU Golden 配置"""
-    dtype: str = "gfp16"           # gfp4 | gfp8 | gfp16
+    dtype: str = DEFAULT_GFLOAT_TYPE       # gfp4 | gfp8 | gfp16
     dtype_matmul_a: Optional[str] = None   # matmul A 矩阵类型 (混合精度)
     dtype_matmul_b: Optional[str] = None   # matmul B 矩阵类型 (混合精度)
     dtype_matmul_out: Optional[str] = None # matmul 输出类型 (混合精度)
@@ -47,9 +52,8 @@ class GlobalConfig:
             raise ValueError(f"golden_mode must be 'python' or 'cpp', got '{self.golden_mode}'")
         if self.precision not in ("pure", "quant"):
             raise ValueError(f"precision must be 'pure' or 'quant', got '{self.precision}'")
-        valid_dtypes = ("gfp4", "gfp8", "gfp16")
-        if self.cpu_golden.dtype not in valid_dtypes:
-            raise ValueError(f"cpu_golden.dtype must be one of {valid_dtypes}")
+        if self.cpu_golden.dtype not in GFLOAT_TYPES:
+            raise ValueError(f"cpu_golden.dtype must be one of {GFLOAT_TYPES}")
 
 
 # 全局配置实例 (线程安全)

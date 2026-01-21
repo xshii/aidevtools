@@ -27,7 +27,7 @@ _records: List[Dict[str, Any]] = []
 _counter: Dict[str, int] = {}
 
 
-def set_golden_mode(mode: str):
+def set_golden_mode(mode: str) -> None:
     """
     设置 Golden 模式
 
@@ -48,7 +48,7 @@ def set_golden_mode(mode: str):
     logger.info(f"设置 golden_mode = {mode}")
 
 
-def set_compute_golden(enabled: bool):
+def set_compute_golden(enabled: bool) -> None:
     """
     设置是否执行 golden 计算
 
@@ -71,7 +71,7 @@ def get_golden_mode() -> str:
     return get_config().golden_mode
 
 
-def register_golden_cpp(name: str):
+def register_golden_cpp(name: str) -> Callable[[Callable], Callable]:
     """
     注册 C++ Golden 实现
 
@@ -82,7 +82,7 @@ def register_golden_cpp(name: str):
         def golden_linear(x, weight, bias=None):
             return cpp_linear(x, weight, bias)
     """
-    def decorator(func: Callable):
+    def decorator(func: Callable) -> Callable:
         _golden_cpp_registry[name] = func
         logger.info(f"注册 C++ Golden 实现: {name}")
         return func
@@ -99,7 +99,7 @@ def get_records() -> List[Dict[str, Any]]:
     return _records
 
 
-def clear():
+def clear() -> None:
     """清空记录"""
     _records.clear()
     _counter.clear()
@@ -214,12 +214,12 @@ class Op:
         return f"<Op {self.name} cpp={has_cpp}>"
 
 
-def _is_array_like(obj):
+def _is_array_like(obj: Any) -> bool:
     """检查是否为数组类型"""
     return isinstance(obj, np.ndarray) or (hasattr(obj, '__array__') and not isinstance(obj, (dict, list)))
 
 
-def dump(output_dir: str = "./workspace", format: str = "raw"):
+def dump(output_dir: str = "./workspace", format: str = "raw") -> None:
     """
     导出所有记录的数据
 
