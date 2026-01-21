@@ -258,7 +258,9 @@ def linear(
     # Xavier 初始化
     std = np.sqrt(2.0 / (in_features + out_features))
     w = np.random.randn(in_features, out_features).astype(np.float32) * std
-    b = np.zeros(out_features, dtype=np.float32) if bias else None
+    # bias: 均匀分布 [-bound, bound]，类似 PyTorch
+    bound = 1.0 / np.sqrt(in_features)
+    b = np.random.uniform(-bound, bound, out_features).astype(np.float32) if bias else None
 
     x = _quantize_input(x, dtype)
     w = _quantize_input(w, dtype)
