@@ -25,7 +25,7 @@ import numpy as np
 from aidevtools import ops
 from aidevtools.ops.base import get_records, set_golden_mode
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
-from aidevtools.formats.quantize import simulate_quantize
+from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
 from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
@@ -42,41 +42,10 @@ def run_model():
     # 使用有 cpp golden 的算子 (支持 batch)
     # MatMul: (2, 8, 64) @ (64, 32) -> (2, 8, 32)
     y = ops.matmul((2, 8, 64), (64, 32), dtype="bfp8")
-    y = ops.layernorm(y, 32, dtype="bfp8")
+    y = ops.layernorm(y, dtype="bfp8")  # gamma/beta 自动生成
     y = ops.softmax(y, dtype="bfp8")
 
     return get_records()
-
-
-def generate_fake_dut(
-    reference: np.ndarray,
-    qtype: str = "bfp8",
-    noise_level: float = 0.001,
-) -> np.ndarray:
-    """
-    生成假的 DUT 数据，模拟真实 bfp 格式处理流程
-
-    模拟流程：
-    1. 从 reference (fp32 精确值) 开始
-    2. 应用 bfp 量化/反量化，模拟 DUT 的 bfp 格式计算
-    3. 添加小噪声，模拟 DUT 的计算误差
-
-    Args:
-        reference: fp32 精确计算结果 (reference)
-        qtype: 量化格式 (bfp4, bfp8, bfp16)
-        noise_level: 噪声水平
-
-    Returns:
-        模拟的 DUT 输出 (fp32)
-    """
-    # Step 1: 对 reference 进行 bfp 量化/反量化，模拟 DUT 的 bfp 格式处理
-    dut_quantized = simulate_quantize(reference.astype(np.float32), qtype)
-
-    # Step 2: 添加小噪声，模拟 DUT 计算误差
-    noise = np.random.randn(*dut_quantized.shape).astype(np.float32) * noise_level
-    dut_result = dut_quantized + noise
-
-    return dut_result
 
 
 def main():

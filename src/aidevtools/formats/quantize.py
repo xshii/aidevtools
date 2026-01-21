@@ -158,6 +158,42 @@ def to_int8_asymmetric(data: np.ndarray, **kwargs) -> tuple:
     raise NotImplementedError("int8_asymmetric 量化待实现")
 
 
+def generate_fake_dut(
+    reference: np.ndarray,
+    qtype: str = "bfp8",
+    noise_level: float = 0.001,
+) -> np.ndarray:
+    """
+    生成模拟 DUT 数据
+
+    用于 demo 和测试，模拟真实硬件的量化处理流程：
+    1. 从 reference (fp32 精确值) 开始
+    2. 应用量化/反量化，模拟 DUT 的格式计算
+    3. 添加小噪声，模拟 DUT 的计算误差
+
+    Args:
+        reference: fp32 精确计算结果
+        qtype: 量化格式 (bfp4, bfp8, bfp16, gfloat4, gfloat8, gfloat16)
+        noise_level: 噪声水平
+
+    Returns:
+        模拟的 DUT 输出 (fp32)
+
+    Example:
+        >>> ref = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        >>> dut = generate_fake_dut(ref, qtype="bfp8", noise_level=0.001)
+    """
+    # Step 1: 对 reference 进行量化/反量化，模拟 DUT 的格式处理
+    dut_quantized = simulate_quantize(reference.astype(np.float32), qtype)
+
+    # Step 2: 添加小噪声，模拟 DUT 计算误差
+    if noise_level > 0:
+        noise = np.random.randn(*dut_quantized.shape).astype(np.float32) * noise_level
+        dut_quantized = dut_quantized + noise
+
+    return dut_quantized
+
+
 # 导入自定义格式以触发注册
 from aidevtools.formats.custom.gfloat import golden as _gfloat_golden
 from aidevtools.formats.custom.bfp import golden as _bfp_golden

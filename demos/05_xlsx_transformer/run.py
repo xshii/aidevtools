@@ -36,13 +36,13 @@ def create_transformer_xlsx(xlsx_path: str):
               → layernorm → matmul(FFN_up) → softmax
               → matmul(FFN_down) → add(residual) → layernorm
 
-    注意: 使用支持 cpp golden 的算子 (matmul, softmax, layernorm, transpose)
+    注意: 使用支持 cpp golden 的算子 (matmul, softmax, layernorm)
     """
     from aidevtools.xlsx import create_template
 
     # 创建模板，指定支持 cpp golden 的算子
     create_template(xlsx_path, ops=[
-        "linear", "matmul", "softmax", "layernorm", "add", "transpose"
+        "matmul", "softmax", "layernorm"
     ])
 
     # 编辑 xlsx 添加 transformer 算子配置
@@ -54,35 +54,27 @@ def create_transformer_xlsx(xlsx_path: str):
     ws_ops.delete_rows(3, ws_ops.max_row)
 
     # Transformer 配置 (简化版，使用支持 cpp golden 的算子)
+    # 注意：xlsx run 目前仅支持线性依赖链，复杂的多输入操作（如 attention）需要用 Python API
     # 格式: id, op_name, shape, dtype, depends, qtype, skip, sim_cmd, note
     transformer_ops = [
-        # Q, K, V projections (用 linear/matmul)
-        (0, "linear", "1,16,64", "float32", "", "bfp8", "FALSE", "", "Input"),
-        (1, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "Q projection"),
-        (2, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "K projection"),
-        (3, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "V projection"),
+        # 输入层
+        (0, "matmul", "1,16,64", "float32", "", "bfp8", "FALSE", "", "Input Projection"),
 
-        # Attention: Q @ K^T (需要 transpose)
-        (4, "transpose", "1,1,16,64", "float32", "2", "bfp8", "FALSE", "", "K transpose"),
-        (5, "matmul", "1,16,64", "float32", "1,4", "bfp8", "FALSE", "", "Q @ K^T"),
-        (6, "softmax", "1,16,64", "float32", "5", "bfp8", "FALSE", "", "Attention weights"),
-        (7, "matmul", "1,16,64", "float32", "6,3", "bfp8", "FALSE", "", "Attention output"),
+        # Self-Attention (简化: 只展示单路径)
+        (1, "matmul", "1,16,64", "float32", "0", "bfp8", "FALSE", "", "Q Projection"),
+        (2, "softmax", "1,16,64", "float32", "1", "bfp8", "FALSE", "", "Attention Weights"),
+        (3, "matmul", "1,16,64", "float32", "2", "bfp8", "FALSE", "", "Attention Output"),
 
-        # Output projection
-        (8, "matmul", "1,16,64", "float32", "7", "bfp8", "FALSE", "", "O projection"),
-
-        # Residual + LayerNorm
-        (9, "add", "1,16,64", "float32", "0,8", "bfp8", "FALSE", "", "Residual 1"),
-        (10, "layernorm", "1,16,64", "float32", "9", "bfp8", "FALSE", "", "LayerNorm 1"),
+        # LayerNorm 1
+        (4, "layernorm", "1,16,64", "float32", "3", "bfp8", "FALSE", "", "LayerNorm 1"),
 
         # FFN
-        (11, "matmul", "1,16,256", "float32", "10", "bfp8", "FALSE", "", "FFN up"),
-        (12, "softmax", "1,16,256", "float32", "11", "bfp8", "FALSE", "", "FFN activation"),
-        (13, "matmul", "1,16,64", "float32", "12", "bfp8", "FALSE", "", "FFN down"),
+        (5, "matmul", "1,16,256", "float32", "4", "bfp8", "FALSE", "", "FFN Up"),
+        (6, "softmax", "1,16,256", "float32", "5", "bfp8", "FALSE", "", "FFN Activation"),
+        (7, "matmul", "1,16,64", "float32", "6", "bfp8", "FALSE", "", "FFN Down"),
 
-        # Residual + LayerNorm
-        (14, "add", "1,16,64", "float32", "10,13", "bfp8", "FALSE", "", "Residual 2"),
-        (15, "layernorm", "1,16,64", "float32", "14", "bfp8", "FALSE", "", "Output LayerNorm"),
+        # LayerNorm 2
+        (8, "layernorm", "1,16,64", "float32", "7", "bfp8", "FALSE", "", "Output LayerNorm"),
     ]
 
     for row_idx, config in enumerate(transformer_ops, 3):
@@ -243,11 +235,10 @@ Golden 配置:
   - cpp golden via subprocess (gfp16)
   - 输入量化: bfp8
 
-模型结构:
-  linear → Q/K/V matmul → transpose → attention matmul → softmax
-        → matmul → add (residual) → layernorm
-        → FFN matmul → softmax → FFN matmul
-        → add (residual) → layernorm
+模型结构 (简化版，线性依赖):
+  matmul (Input) → matmul (Q) → softmax → matmul (Attn)
+        → layernorm → FFN matmul → softmax → FFN matmul
+        → layernorm (Output)
 """)
 
 

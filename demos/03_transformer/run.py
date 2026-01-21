@@ -19,7 +19,7 @@ import numpy as np
 from aidevtools import ops
 from aidevtools.ops.base import get_records, set_golden_mode, clear
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
-from aidevtools.formats.quantize import simulate_quantize
+from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
 from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
@@ -51,8 +51,8 @@ def run_single_layer_transformer():
     # ========== Self-Attention ==========
     print("\n[Self-Attention]")
 
-    # Input projection
-    x = ops.linear((batch, seq, hidden), hidden, dtype=dtype)  # Input
+    # Input projection (用 matmul 代替 linear，因为 linear 没有 cpp golden)
+    x = ops.matmul((batch, seq, hidden), (hidden, hidden), dtype=dtype)  # Input
     print(f"  Input: {x.shape}")
 
     # Q, K, V projections
@@ -76,7 +76,7 @@ def run_single_layer_transformer():
     print(f"  O projection: {o.shape}")
 
     # LayerNorm 1
-    ln1 = ops.layernorm(o, hidden, dtype=dtype)
+    ln1 = ops.layernorm(o, dtype=dtype)  # gamma/beta 自动生成
     print(f"  LayerNorm 1: {ln1.shape}")
 
     # ========== FFN ==========
@@ -95,17 +95,10 @@ def run_single_layer_transformer():
     print(f"  FFN down: {ffn_down.shape}")
 
     # LayerNorm 2
-    output = ops.layernorm(ffn_down, hidden, dtype=dtype)
+    output = ops.layernorm(ffn_down, dtype=dtype)  # gamma/beta 自动生成
     print(f"  Output: {output.shape}")
 
     return get_records()
-
-
-def generate_fake_dut(reference: np.ndarray, qtype: str = "bfp8", noise_level: float = 0.001) -> np.ndarray:
-    """生成假的 DUT 数据，模拟真实 bfp 格式处理流程"""
-    dut_quantized = simulate_quantize(reference.astype(np.float32), qtype)
-    noise = np.random.randn(*dut_quantized.shape).astype(np.float32) * noise_level
-    return dut_quantized + noise
 
 
 def main():

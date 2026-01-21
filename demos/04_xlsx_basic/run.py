@@ -41,13 +41,13 @@ def demo_python_to_excel():
     ops.seed(42)
     clear()
 
-    # 模拟一个简单的 MLP: Linear -> Softmax -> LayerNorm
-    # 使用支持 cpp golden 的算子
-    y = ops.linear((1, 8, 64), 128, dtype="bfp8")     # linear_0
-    y = ops.softmax(y, dtype="bfp8")                   # softmax_0
-    y = ops.layernorm(y, 128, dtype="bfp8")            # layernorm_0
+    # 模拟一个简单的 MLP: MatMul -> Softmax -> LayerNorm
+    # 使用支持 cpp golden 的算子 (linear 没有 cpp golden，改用 matmul)
+    y = ops.matmul((1, 8, 64), (64, 128), dtype="bfp8")  # matmul_0
+    y = ops.softmax(y, dtype="bfp8")                      # softmax_0
+    y = ops.layernorm(y, dtype="bfp8")  # gamma/beta 自动生成
 
-    print(f"    MLP: input(1,8,64) → linear(128) → softmax → layernorm → output{y.shape}")
+    print(f"    MLP: input(1,8,64) → matmul(128) → softmax → layernorm → output{y.shape}")
     print(f"    golden_mode: cpp (via subprocess)")
     print(f"    quantization: gfp16 (cpp) + bfp8 (input)")
 
@@ -107,9 +107,9 @@ def demo_excel_to_python():
     xlsx_path = output_dir / "custom_config.xlsx"
 
     # 限定使用支持 cpp golden 的算子
-    create_template(str(xlsx_path), ops=["linear", "matmul", "softmax", "layernorm"])
+    create_template(str(xlsx_path), ops=["matmul", "softmax", "layernorm"])
     print(f"    模板: {xlsx_path}")
-    print(f"    限定算子: linear, matmul, softmax, layernorm (支持 cpp golden)")
+    print(f"    限定算子: matmul, softmax, layernorm (支持 cpp golden)")
 
     # 2. 模拟用户编辑 xlsx
     print("\n[2] 模拟用户编辑 xlsx...")
@@ -124,7 +124,7 @@ def demo_excel_to_python():
         # 用户配置的算子用例 (使用支持 cpp golden 的算子)
         user_configs = [
             # id, op_name, shape, dtype, depends, qtype, skip, sim_cmd, note
-            (0, "linear", "1,32,64", "float32", "", "bfp8", "FALSE", "", "输入层"),
+            (0, "matmul", "1,32,64", "float32", "", "bfp8", "FALSE", "", "输入层"),
             (1, "softmax", "1,32,128", "float32", "0", "bfp8", "FALSE", "", "Softmax"),
             (2, "layernorm", "1,32,128", "float32", "1", "bfp8", "FALSE", "", "LayerNorm"),
             (3, "matmul", "1,32,128", "float32", "2", "bfp8", "FALSE", "", "输出层"),
@@ -136,7 +136,7 @@ def demo_excel_to_python():
 
         wb.save(xlsx_path)
         print("    已添加 4 个算子配置:")
-        print("      0: linear    (输入层)")
+        print("      0: matmul    (输入层)")
         print("      1: softmax   (依赖 0)")
         print("      2: layernorm (依赖 1)")
         print("      3: matmul    (依赖 2)")
@@ -209,7 +209,7 @@ def main():
 aidev compare xlsx template --output=config.xlsx
 
 # 限定算子的模板
-aidev compare xlsx template --output=config.xlsx --ops=linear,matmul,softmax,layernorm
+aidev compare xlsx template --output=config.xlsx --ops=matmul,softmax,layernorm
 
 # 从 trace 导出到 xlsx
 aidev compare xlsx export --xlsx=config.xlsx
