@@ -14,21 +14,20 @@ AI 算子开发工具集，用于自研芯片算子的 Golden 生成与精度验
 ## 快速上手
 
 ```bash
-# 1. 安装
+# 1. 安装 (自动编译 C++ Golden)
 ./install.sh dev
 
 # 2. 激活环境
 source .venv/bin/activate
 
-# 3. 编译 C++ Golden (可选，启用 C++ 加速)
-./build_golden.sh
-
-# 4. 运行 Demo
+# 3. 运行 Demo
 python demos/02_mini_transformer/run.py
 
-# 5. 运行测试
+# 4. 运行测试
 pytest tests/ -v
 ```
+
+> 注：安装时如检测到 cmake，会自动编译 C++ Golden。如需手动编译，可运行 `./build_golden.sh`。
 
 ## 基础使用
 
@@ -155,6 +154,13 @@ aidevtools/
 ├── src/aidevtools/
 │   ├── core/               # 核心: config, tensor, op, engine
 │   ├── formats/            # 格式: numpy, raw, bfp, gfloat
+│   ├── golden/             # Golden 实现
+│   │   ├── cpu_golden      # 编译后的 CLI 可执行文件
+│   │   └── cpp/            # C++ Golden 源码
+│   │       ├── gfloat/     # GFloat 格式 (io + impl)
+│   │       ├── bfp/        # BFP 格式 (io + impl)
+│   │       ├── interface.h # 算子接口定义
+│   │       └── main.cpp    # CLI 框架
 │   ├── tools/compare/      # 比对: diff, report, export
 │   ├── trace/              # 插桩
 │   └── xlsx/               # Excel 工作流
@@ -198,9 +204,45 @@ pytest tests/ --cov=aidevtools --cov-report=term-missing
 
 | 组件 | 类型 | 说明 |
 |------|------|------|
-| cpu_golden | CLI | GFloat 格式算子命令行工具 |
+| cpu_golden | CLI | 算子命令行工具 (matmul/softmax/layernorm/transpose) |
 | gfloat_golden | Python 扩展 | GFloat 格式量化/反量化 |
 | bfp_golden | Python 扩展 | BFP 块浮点格式量化/反量化 |
+
+### C++ Golden 模块化架构
+
+C++ Golden 采用 IO 与算子实现分离的模块化设计，方便替换自定义实现：
+
+```
+cpp/
+├── gfloat/              # GFloat 格式
+│   ├── io.h / io.cpp    # IO 层：文件读写、格式转换
+│   └── impl.cpp         # 算子实现 (可替换)
+├── bfp/                 # BFP 格式
+│   ├── io.h / io.cpp    # IO 层：文件读写、格式转换
+│   └── impl.cpp         # 算子实现 (可替换)
+├── interface.h          # 纯 fp32 算子接口
+├── main.cpp             # CLI 框架
+└── CMakeLists.txt       # FORMAT 变量选择格式
+```
+
+**替换自定义实现**：只需替换 `impl.cpp`，实现 `interface.h` 中定义的接口：
+
+```cpp
+// interface.h 定义的接口
+namespace cpu_golden::ops {
+    void matmul_fp32(const float* a, const float* b, float* c, size_t M, size_t K, size_t N);
+    void softmax_fp32(const float* input, float* output, size_t batch, size_t seq);
+    void layernorm_fp32(const float* input, const float* gamma, const float* beta,
+                        float* output, size_t batch, size_t hidden, float eps);
+    void transpose_4d_fp32(const float* input, float* output, size_t d0, size_t d1, size_t d2, size_t d3);
+}
+```
+
+**切换数据格式**：修改 `CMakeLists.txt` 中的 `FORMAT` 变量：
+
+```cmake
+set(FORMAT "gfloat")  # 或 "bfp"
+```
 
 ## 环境要求
 
