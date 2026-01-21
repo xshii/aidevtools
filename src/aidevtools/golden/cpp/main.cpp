@@ -23,8 +23,8 @@
 #include <vector>
 #include <cstdlib>
 
-#include "gfloat_io.h"
-#include "ops_interface.h"
+#include "io/gfloat_io.h"
+#include "ops/interface.h"
 
 using namespace gfloat_io;
 using namespace cpu_golden::ops;

@@ -9,7 +9,7 @@
  *   2. 用你自己的 ops_impl.cpp 替换这个文件
  *   3. 确保实现 ops_interface.h 中声明的所有函数
  */
-#include "ops_interface.h"
+#include "interface.h"
 #include <cstring>
 #include <cmath>
 #include <algorithm>
