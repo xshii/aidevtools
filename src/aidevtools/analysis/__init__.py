@@ -75,7 +75,6 @@ from .export import (
 )
 
 from .models import (
-    ModelBuilder,
     transformer_layer,
     llama_layer,
     gpt2_layer,
@@ -137,7 +136,6 @@ __all__ = [
     "export_csv",
     "export_json",
     # Models
-    "ModelBuilder",
     "transformer_layer",
     "llama_layer",
     "gpt2_layer",
