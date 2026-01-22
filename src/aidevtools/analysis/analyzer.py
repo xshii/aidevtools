@@ -12,15 +12,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
 from .profile import OpProfile
-from .chip import ChipSpec, get_chip_spec
+from .chip import ChipSpec, load_chip_spec
 from .latency import LatencyBreakdown, LatencyResult, GanttItem, GanttData
-from .chip import get_chip_spec as _get_chip_spec
-
-
-def get_chip_spec(chip_name: str):
-    """兼容函数"""
-    from .chip import load_chip_spec
-    return load_chip_spec(chip_name)
 from .passes import (
     PassConfig,
     PassResult,
@@ -91,7 +84,7 @@ class PaperAnalyzer:
             pass_config: Pass 配置
             mode: 分析模式
         """
-        self.chip_spec = chip_spec or get_chip_spec(chip)
+        self.chip_spec = chip_spec or load_chip_spec(chip)
         self.pass_config = pass_config or PassConfig.from_preset(PassPreset.STANDARD)
         self.mode = mode
 

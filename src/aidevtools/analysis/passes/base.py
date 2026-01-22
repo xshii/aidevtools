@@ -13,8 +13,12 @@ Pass 执行顺序:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from enum import Enum
+
+if TYPE_CHECKING:
+    from ..latency import LatencyBreakdown
+    from ..chip import ChipSpec
 
 
 class PassPreset(Enum):
@@ -154,10 +158,3 @@ class BasePass(ABC):
     def validate(self, latency_breakdown: 'LatencyBreakdown') -> List[str]:
         """验证输入数据，返回警告列表"""
         return []
-
-
-# 导入类型 (避免循环导入)
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..latency import LatencyBreakdown
-    from ..chip import ChipSpec

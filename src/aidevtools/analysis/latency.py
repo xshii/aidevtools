@@ -1,8 +1,14 @@
 """时延计算结果数据结构"""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
+
 from .profile import OpProfile
+
+if TYPE_CHECKING:
+    from .chip import ChipSpec
+    from .passes.base import PassConfig, PassResult
+    from .analyzer import AnalysisSummary
 
 
 @dataclass
@@ -68,8 +74,8 @@ class LatencyResult:
 
     # 芯片信息
     chip_name: str = ""
-    chip_spec: Any = None           # ChipSpec 对象
-    pass_config: Any = None         # PassConfig 对象
+    chip_spec: Optional['ChipSpec'] = None
+    pass_config: Optional['PassConfig'] = None
 
     # 算子时延 (支持两种命名)
     op_latencies: List[LatencyBreakdown] = field(default_factory=list)
@@ -79,7 +85,7 @@ class LatencyResult:
     total_latency_us: float = 0.0
     total_flops: int = 0
     total_memory_bytes: int = 0
-    summary: Any = None             # AnalysisSummary 对象
+    summary: Optional['AnalysisSummary'] = None
 
     # === 流水效果 ===
     serial_latency_us: float = 0.0     # 串行时延（无优化）
@@ -91,10 +97,10 @@ class LatencyResult:
     overall_bandwidth_util: float = 0.0
 
     # === Pass 结果 ===
-    pass_results: List[Any] = field(default_factory=list)
+    pass_results: List['PassResult'] = field(default_factory=list)
 
     # === Gantt 数据 ===
-    gantt_data: Any = None          # GanttData 对象
+    gantt_data: Optional['GanttData'] = None
 
     def __post_init__(self):
         """初始化后同步数据"""
