@@ -106,11 +106,6 @@ class LatencyResult:
     # === Gantt 数据 ===
     gantt_data: Optional['GanttData'] = None
 
-    @property
-    def op_latencies(self) -> List[LatencyBreakdown]:
-        """向后兼容别名 (deprecated, 请使用 breakdowns)"""
-        return self.breakdowns
-
     def compute_summary(self):
         """计算汇总数据"""
         ops = self.breakdowns
@@ -146,11 +141,6 @@ class GanttItem:
     color: str = ""
 
     @property
-    def resource(self) -> str:
-        """向后兼容别名 (deprecated, 请使用 unit)"""
-        return self.unit.capitalize() if self.unit else ""
-
-    @property
     def duration_us(self) -> float:
         """持续时间 (微秒)"""
         return self.end_us - self.start_us
@@ -168,11 +158,6 @@ class GanttData:
     items: List[GanttItem] = field(default_factory=list)
     total_duration_us: float = 0.0
     chip_name: str = ""
-
-    @property
-    def total_time_us(self) -> float:
-        """向后兼容别名 (deprecated, 请使用 total_duration_us)"""
-        return self.total_duration_us
 
     def add_item(self, item: GanttItem):
         """添加甘特图项"""

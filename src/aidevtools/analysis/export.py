@@ -259,7 +259,7 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, bord
     ws.merge_cells('A1:Z1')
 
     # 时间刻度 (每列代表一定时间)
-    time_scale_us = gantt_data.total_time_us / 50 if gantt_data.total_time_us > 0 else 1  # 50 列
+    time_scale_us = gantt_data.total_duration_us / 50 if gantt_data.total_duration_us > 0 else 1  # 50 列
     ws.cell(row=2, column=1, value=f"Time Scale: {time_scale_us:.2f} us/column")
 
     # 图例
@@ -316,7 +316,7 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, bord
     # 总时间
     row += 1
     ws.cell(row=row, column=1, value="Total Time (us):").font = Font(bold=True)
-    ws.cell(row=row, column=2, value=gantt_data.total_time_us).number_format = '0.00'
+    ws.cell(row=row, column=2, value=gantt_data.total_duration_us).number_format = '0.00'
 
     # 调整列宽
     ws.column_dimensions['A'].width = 20

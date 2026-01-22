@@ -19,18 +19,6 @@ def dtype_bytes(dtype: str) -> float:
 
 
 @dataclass
-class MatMulDtypeConfig:
-    """MatMul 混合精度配置"""
-    dtype_a: str = "fp16"      # 左矩阵
-    dtype_b: str = "fp16"      # 右矩阵
-    dtype_acc: str = "fp32"    # 累加器
-    dtype_out: str = "fp16"    # 输出
-
-    def __repr__(self):
-        return f"{self.dtype_a}×{self.dtype_b}→{self.dtype_out}"
-
-
-@dataclass
 class OpProfile:
     """算子性能 Profile"""
 
@@ -43,7 +31,6 @@ class OpProfile:
 
     # 数据类型
     dtype: str = "fp16"
-    dtype_config: Optional[MatMulDtypeConfig] = None
 
     # 计算
     flops: int = 0                     # 浮点运算次数
@@ -74,13 +61,11 @@ class OpProfile:
 
 
 # ============================================================
-# 各算子的 Profile 函数
+# 各算子的 Profile 函数 (用于测试和手动创建)
 # ============================================================
 
-def profile_matmul(a: np.ndarray, b: np.ndarray,
-                   dtype_config: MatMulDtypeConfig = None) -> OpProfile:
+def profile_matmul(a: np.ndarray, b: np.ndarray, dtype: str = "fp16") -> OpProfile:
     """MatMul Profile: C = A @ B"""
-    # 提取形状
     if a.ndim == 1:
         M, K = 1, a.shape[0]
     else:
@@ -92,33 +77,17 @@ def profile_matmul(a: np.ndarray, b: np.ndarray,
         K2, N = b.shape[-2:]
 
     batch = int(np.prod(a.shape[:-2])) if a.ndim > 2 else 1
-
-    # 数据类型
-    if dtype_config:
-        dtype_a = dtype_config.dtype_a
-        dtype_b = dtype_config.dtype_b
-        dtype_out = dtype_config.dtype_out
-    else:
-        dtype_a = dtype_b = dtype_out = "fp16"
-
-    # FLOPs: 2MKN (乘 + 加)
-    flops = batch * 2 * M * K * N
-
-    # 访存量
-    input_bytes = batch * M * K * dtype_bytes(dtype_a)
-    weight_bytes = K * N * dtype_bytes(dtype_b)
-    output_bytes = batch * M * N * dtype_bytes(dtype_out)
+    db = dtype_bytes(dtype)
 
     return OpProfile(
         op_type="matmul",
         shapes={"batch": batch, "M": M, "K": K, "N": N},
-        dtype=dtype_a,
-        dtype_config=dtype_config,
-        flops=int(flops),
+        dtype=dtype,
+        flops=int(batch * 2 * M * K * N),
         compute_unit="cube",
-        input_bytes=int(input_bytes),
-        weight_bytes=int(weight_bytes),
-        output_bytes=int(output_bytes),
+        input_bytes=int(batch * M * K * db),
+        weight_bytes=int(K * N * db),
+        output_bytes=int(batch * M * N * db),
         memory_pattern="sequential",
     )
 
@@ -301,19 +270,3 @@ def profile_add(a: np.ndarray, b: np.ndarray) -> OpProfile:
     )
 
 
-# Profile 函数注册表
-PROFILE_FUNCS = {
-    "matmul": profile_matmul,
-    "linear": profile_matmul,
-    "layernorm": profile_layernorm,
-    "softmax": profile_softmax,
-    "transpose": profile_transpose,
-    "attention": profile_attention,
-    "gelu": profile_gelu,
-    "add": profile_add,
-}
-
-
-def get_profile_func(op_type: str):
-    """获取 profile 函数"""
-    return PROFILE_FUNCS.get(op_type)

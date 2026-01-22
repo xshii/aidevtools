@@ -16,7 +16,6 @@ Usage:
 
 from .profile import (
     OpProfile,
-    MatMulDtypeConfig,
     profile_matmul,
     profile_layernorm,
     profile_softmax,
@@ -24,8 +23,6 @@ from .profile import (
     profile_attention,
     profile_gelu,
     profile_add,
-    PROFILE_FUNCS,
-    get_profile_func,
     dtype_bytes,
 )
 
@@ -89,7 +86,6 @@ from .models import (
 __all__ = [
     # Profile
     "OpProfile",
-    "MatMulDtypeConfig",
     "profile_matmul",
     "profile_layernorm",
     "profile_softmax",
@@ -97,8 +93,6 @@ __all__ = [
     "profile_attention",
     "profile_gelu",
     "profile_add",
-    "PROFILE_FUNCS",
-    "get_profile_func",
     "dtype_bytes",
     # Chip
     "ChipSpec",

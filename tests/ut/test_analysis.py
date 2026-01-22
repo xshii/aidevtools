@@ -292,7 +292,7 @@ class TestPaperAnalyzer:
 
         assert result.gantt_data is not None
         assert len(result.gantt_data.items) >= 1
-        assert result.gantt_data.total_time_us > 0
+        assert result.gantt_data.total_duration_us > 0
 
 
 def _has_openpyxl():

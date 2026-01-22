@@ -48,5 +48,7 @@ from aidevtools.ops.base import (
     get_profiles,
     set_profile_enabled,
     get_profile_enabled,
+    set_profile_only,
+    get_profile_only,
 )
 from aidevtools.ops import nn  # 触发算子实例化

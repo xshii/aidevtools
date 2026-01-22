@@ -29,6 +29,7 @@ _counter: Dict[str, int] = {}
 # Profile 列表 (用于 Paper Analysis)
 _profiles: List[Any] = []  # List[OpProfile]
 _profile_enabled: bool = True  # 是否自动生成 profile
+_profile_only: bool = False  # profile-only 模式：跳过 golden/reference，只生成 profile
 
 
 def set_golden_mode(mode: str) -> None:
@@ -119,6 +120,46 @@ def set_profile_enabled(enabled: bool) -> None:
 def get_profile_enabled() -> bool:
     """获取是否自动生成 profile"""
     return _profile_enabled
+
+
+def set_profile_only(enabled: bool) -> None:
+    """
+    设置 profile-only 模式
+
+    在 profile-only 模式下，调用算子只生成 profile，不执行 golden/reference 计算。
+    适用于 Paper Analysis 场景，只需要收集算子信息而不需要实际计算结果。
+
+    Args:
+        enabled: True=启用 profile-only 模式, False=正常执行模式
+
+    Example:
+        from aidevtools import ops
+        from aidevtools.ops.nn import linear, relu
+
+        # 启用 profile-only 模式
+        ops.set_profile_only(True)
+        ops.clear()
+
+        # 定义模型（不执行实际计算）
+        x = np.zeros((4, 512, 768), dtype=np.float16)
+        w = np.zeros((768, 768), dtype=np.float16)
+        linear(x, w)
+        relu(x)
+
+        # 获取 profiles 用于分析
+        profiles = ops.get_profiles()
+    """
+    global _profile_only
+    _profile_only = enabled
+    if enabled:
+        # profile-only 模式自动启用 profile 生成
+        set_profile_enabled(True)
+    logger.info(f"设置 profile_only = {enabled}")
+
+
+def get_profile_only() -> bool:
+    """获取是否处于 profile-only 模式"""
+    return _profile_only
 
 
 def get_profiles() -> List[Any]:
@@ -311,14 +352,26 @@ class Op:
         调用算子
 
         执行流程：
-        1. 如果 compute_golden=True，执行 golden (cpp 或 python) -> 保存为 golden
-        2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
-        3. 返回 golden 或 reference 的结果
+        - profile-only 模式: 只生成 profile，不执行计算
+        - 正常模式:
+          1. 如果 compute_golden=True，执行 golden (cpp 或 python) -> 保存为 golden
+          2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
+          3. 返回 golden 或 reference 的结果
         """
         # 计数
         idx = _counter.get(self.name, 0)
         _counter[self.name] = idx + 1
         full_name = f"{self.name}_{idx}"
+
+        # profile-only 模式：只生成 profile，跳过计算
+        if _profile_only:
+            if _profile_enabled:
+                profile = _create_profile(self.name, full_name, args, kwargs)
+                if profile is not None:
+                    _profiles.append(profile)
+                    logger.debug(f"{full_name}: profile 生成完成 (profile-only)")
+            # 返回第一个输入（保持数据流）
+            return args[0] if args else None
 
         # 执行 golden（如果启用）
         golden_output = None
