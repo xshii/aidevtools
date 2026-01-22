@@ -32,17 +32,17 @@ from .bandwidth import (
 )
 
 
-# 所有 Pass 按执行顺序 (order 属性决定)
+# 所有 Pass 按执行顺序排列
 ALL_PASSES = [
-    RooflinePass,           # order=1
-    MinTrafficPass,         # order=1.5 (最低流量优化)
-    MemoryEfficiencyPass,   # order=2
-    BandwidthConstraintPass, # order=2.5 (全局带宽约束)
-    ForwardPrefetchPass,    # order=3
-    BackwardPrefetchPass,   # order=4
-    CubeVectorParallelPass, # order=5
-    OverheadPass,           # order=6
-    TrafficConstraintPass,  # order=7 (流量约束检查)
+    RooflinePass,           # 100
+    MinTrafficPass,         # 150
+    MemoryEfficiencyPass,   # 200
+    BandwidthConstraintPass, # 250
+    ForwardPrefetchPass,    # 300
+    BackwardPrefetchPass,   # 400
+    CubeVectorParallelPass, # 500
+    OverheadPass,           # 600
+    TrafficConstraintPass,  # 700
 ]
 
 

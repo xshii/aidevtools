@@ -34,7 +34,8 @@ Example - 最低流量模式:
 """
 
 import math
-from .base import BasePass, PassConfig, PassResult, PassContext
+from .base import BasePass, PassResult, PassContext
+from ..constants import GBPS_TO_BPS, S_TO_US, MB_TO_BYTES, BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY
 
 
 class BandwidthConstraintPass(BasePass):
@@ -84,9 +85,9 @@ class BandwidthConstraintPass(BasePass):
 
         # 更新瓶颈
         if adjusted_memory_time > latency_breakdown.compute_time_us:
-            latency_breakdown.bottleneck = "memory"
+            latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
-            latency_breakdown.bottleneck = "compute"
+            latency_breakdown.bottleneck = BOTTLENECK_COMPUTE
 
         latency_delta = new_roofline_time - latency_before
 
@@ -257,7 +258,7 @@ class MinTrafficPass(BasePass):
         # 重新计算访存时间
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
         original_memory_time = latency_breakdown.memory_time_us
-        optimized_memory_time = optimized_traffic / (hbm_bandwidth * 1e9) * 1e6
+        optimized_memory_time = optimized_traffic / (hbm_bandwidth * GBPS_TO_BPS) * S_TO_US
 
         # 更新 roofline 时延
         new_roofline_time = max(latency_breakdown.compute_time_us, optimized_memory_time)
@@ -270,9 +271,9 @@ class MinTrafficPass(BasePass):
 
         # 更新瓶颈
         if optimized_memory_time > latency_breakdown.compute_time_us:
-            latency_breakdown.bottleneck = "memory"
+            latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
-            latency_breakdown.bottleneck = "compute"
+            latency_breakdown.bottleneck = BOTTLENECK_COMPUTE
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -285,9 +286,9 @@ class MinTrafficPass(BasePass):
             "cache_line_bytes": cache_line_bytes,
             "cache_overhead_ratio": cache_overhead_ratio,
             "original_traffic_bytes": original_traffic,
-            "original_traffic_mb": original_traffic / (1024 * 1024),
+            "original_traffic_mb": original_traffic / MB_TO_BYTES,
             "optimized_traffic_bytes": optimized_traffic,
-            "optimized_traffic_mb": optimized_traffic / (1024 * 1024),
+            "optimized_traffic_mb": optimized_traffic / MB_TO_BYTES,
             "traffic_saved_bytes": traffic_saved,
             "traffic_saved_ratio": traffic_saved_ratio,
             "original_memory_time_us": original_memory_time,

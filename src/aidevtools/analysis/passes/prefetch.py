@@ -22,7 +22,8 @@ Example - Backward Prefetch:
     total_saved = min(8, 3.33+3.33) * 0.8 = 5.33us
 """
 
-from .base import BasePass, PassConfig, PassResult, PassContext
+from .base import BasePass, PassResult, PassContext
+from ..constants import UNIT_CUBE, UNIT_VECTOR, GBPS_TO_BPS, S_TO_US, MB_TO_BYTES
 
 
 class ForwardPrefetchPass(BasePass):
@@ -40,7 +41,7 @@ class ForwardPrefetchPass(BasePass):
         latency_before = latency_breakdown.roofline_time_us
 
         # 只有 Cube 算子才能执行前向预取
-        if profile.compute_unit != "cube":
+        if profile.compute_unit != UNIT_CUBE:
             return self._skip(result, latency_before, "非 Cube 算子，无法执行前向预取")
 
         # 计算当前算子的空闲 DMA 时间 (compute_time - memory_time)
@@ -65,7 +66,7 @@ class ForwardPrefetchPass(BasePass):
 
         # 计算预取下一个算子权重所需时间
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        next_weight_load_time = next_weight_bytes / (hbm_bandwidth * 1e9) * 1e6
+        next_weight_load_time = next_weight_bytes / (hbm_bandwidth * GBPS_TO_BPS) * S_TO_US
 
         # 可预取时间 = min(空闲时间, 权重加载时间) * 效率
         prefetch_efficiency = self.config.prefetch_efficiency
@@ -114,7 +115,7 @@ class BackwardPrefetchPass(BasePass):
         latency_before = latency_breakdown.roofline_time_us
 
         # 只有 Vector 算子才能执行后向预取
-        if profile.compute_unit != "vector":
+        if profile.compute_unit != UNIT_VECTOR:
             return self._skip(result, latency_before, "非 Vector 算子，无法执行后向预取")
 
         # Vector 算子的完整执行时间都可用于预取
@@ -124,7 +125,7 @@ class BackwardPrefetchPass(BasePass):
         future_cube_ops = []
         if context and context.future_profiles:
             for p in context.future_profiles[:self.config.backward_prefetch_depth]:
-                if p.compute_unit == "cube":
+                if p.compute_unit == UNIT_CUBE:
                     future_cube_ops.append({"name": p.name, "weight_bytes": p.weight_bytes})
 
         if available_time <= 0 or not future_cube_ops:
@@ -150,7 +151,7 @@ class BackwardPrefetchPass(BasePass):
             if remaining_time <= 0:
                 break
 
-            weight_load_time = op["weight_bytes"] / (hbm_bandwidth * 1e9) * 1e6
+            weight_load_time = op["weight_bytes"] / (hbm_bandwidth * GBPS_TO_BPS) * S_TO_US
             prefetch_time = min(remaining_time, weight_load_time) * prefetch_efficiency
 
             prefetch_details.append({
@@ -184,7 +185,7 @@ class BackwardPrefetchPass(BasePass):
         if total_saved > 0:
             result.suggestions.append(
                 f"Vector 算子执行期间可预取 {len(prefetch_details)} 个后续 Cube 算子的权重 "
-                f"({total_prefetched/1024/1024:.2f}MB)，总计节省 {total_saved:.2f}us"
+                f"({total_prefetched/MB_TO_BYTES:.2f}MB)，总计节省 {total_saved:.2f}us"
             )
 
         return result

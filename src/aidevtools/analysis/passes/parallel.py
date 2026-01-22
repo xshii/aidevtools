@@ -17,7 +17,8 @@ Example:
     3. 无数据依赖阻塞
 """
 
-from .base import BasePass, PassConfig, PassResult, PassContext
+from .base import BasePass, PassResult, PassContext
+from ..constants import UNIT_CUBE, TFLOPS_TO_FLOPS, GBPS_TO_BPS, S_TO_US
 
 
 class CubeVectorParallelPass(BasePass):
@@ -97,17 +98,14 @@ class CubeVectorParallelPass(BasePass):
 
     def _estimate_op_time(self, profile, chip_spec) -> float:
         """估算算子执行时间 (基于 Roofline 模型)"""
-        # 计算时间
-        if profile.compute_unit == "cube":
+        if profile.compute_unit == UNIT_CUBE:
             tflops = chip_spec.cube.fp16_tflops
         else:
-            tflops = chip_spec.vector.fp16_gflops / 1000.0  # 转 TFLOPS
+            tflops = chip_spec.vector.fp16_gflops / 1000.0
 
-        compute_time = profile.flops / (tflops * 1e12) * 1e6 if tflops > 0 else 0
+        compute_time = profile.flops / (tflops * TFLOPS_TO_FLOPS) * S_TO_US if tflops > 0 else 0
 
-        # 访存时间
-        total_bytes = profile.input_bytes + profile.weight_bytes + profile.output_bytes
         bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        memory_time = total_bytes / (bandwidth * 1e9) * 1e6 if bandwidth > 0 else 0
+        memory_time = profile.total_bytes / (bandwidth * GBPS_TO_BPS) * S_TO_US if bandwidth > 0 else 0
 
         return max(compute_time, memory_time)

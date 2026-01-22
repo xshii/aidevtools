@@ -22,6 +22,7 @@ from enum import Enum
 if TYPE_CHECKING:
     from ..latency import LatencyBreakdown
     from ..chip import ChipSpec
+    from ..profile import OpProfile
 
 
 class PassPreset(Enum):
@@ -150,13 +151,10 @@ class PassResult:
 
 @dataclass
 class PassContext:
-    """Pass 运行时上下文
-
-    提供 Pass 所需的邻近算子信息。
-    """
-    next_profile: Optional[Any] = None      # 下一个算子
-    prev_profile: Optional[Any] = None      # 上一个算子
-    future_profiles: List[Any] = field(default_factory=list)  # 后续算子列表
+    """Pass 运行时上下文，提供邻近算子信息"""
+    next_profile: Optional['OpProfile'] = None
+    prev_profile: Optional['OpProfile'] = None
+    future_profiles: List['OpProfile'] = field(default_factory=list)
 
 
 class BasePass(ABC):
@@ -171,8 +169,8 @@ class BasePass(ABC):
 
     name: str = "base"
     description: str = "Base pass"
-    order: int = 0  # 执行顺序
-    config_key: str = None  # 配置字段名 (如 "roofline" -> config.roofline_enabled)
+    order: int = 0
+    config_key: Optional[str] = None  # 如 "roofline" -> config.roofline_enabled
 
     def __init__(self, config: PassConfig = None):
         self.config = config or PassConfig()

@@ -17,9 +17,12 @@ Example:
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, List
 
-from .base import BasePass, PassConfig, PassResult, PassContext
+from .base import BasePass, PassResult, PassContext
+from ..constants import (
+    TFLOPS_TO_FLOPS, GBPS_TO_BPS, S_TO_US,
+    UNIT_CUBE, BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY,
+)
 
 
 @dataclass
@@ -47,7 +50,7 @@ class RooflinePass(BasePass):
         profile = latency_breakdown.profile
 
         # 获取计算单元规格
-        if profile.compute_unit == "cube":
+        if profile.compute_unit == UNIT_CUBE:
             peak_tflops = self._get_cube_tflops(chip_spec, profile.dtype)
         else:
             peak_gflops = self._get_vector_gflops(chip_spec, profile.dtype)
@@ -56,22 +59,22 @@ class RooflinePass(BasePass):
         # 计算时间 (us)
         compute_time_us = 0.0
         if peak_tflops > 0 and profile.flops > 0:
-            compute_time_us = profile.flops / (peak_tflops * 1e12) * 1e6
+            compute_time_us = profile.flops / (peak_tflops * TFLOPS_TO_FLOPS) * S_TO_US
 
-        # 访存时间 (us) - 使用 HBM 带宽
+        # 访存时间 (us)
         total_bytes = profile.total_bytes
         hbm_bandwidth_gbps = chip_spec.memory.hbm.bandwidth_gbps
 
         memory_time_us = 0.0
         if hbm_bandwidth_gbps > 0 and total_bytes > 0:
-            memory_time_us = total_bytes / (hbm_bandwidth_gbps * 1e9) * 1e6
+            memory_time_us = total_bytes / (hbm_bandwidth_gbps * GBPS_TO_BPS) * S_TO_US
 
         # Roofline: max(compute, memory)
         roofline_time_us = max(compute_time_us, memory_time_us)
 
         # 计算算术强度和拐点
         arithmetic_intensity = profile.flops / total_bytes if total_bytes > 0 else 0
-        ridge_point = (peak_tflops * 1e12) / (hbm_bandwidth_gbps * 1e9) if hbm_bandwidth_gbps > 0 else 0
+        ridge_point = (peak_tflops * TFLOPS_TO_FLOPS) / (hbm_bandwidth_gbps * GBPS_TO_BPS) if hbm_bandwidth_gbps > 0 else 0
 
         # 判断瓶颈
         is_compute_bound = arithmetic_intensity >= ridge_point
@@ -81,11 +84,11 @@ class RooflinePass(BasePass):
         latency_breakdown.compute_time_us = compute_time_us
         latency_breakdown.memory_time_us = memory_time_us
         latency_breakdown.roofline_time_us = roofline_time_us
-        latency_breakdown.bottleneck = "compute" if is_compute_bound else "memory"
+        latency_breakdown.bottleneck = BOTTLENECK_COMPUTE if is_compute_bound else BOTTLENECK_MEMORY
 
         # 计算最小带宽需求
         if compute_time_us > 0:
-            min_bandwidth_gbps = total_bytes / (compute_time_us * 1e-6) / 1e9
+            min_bandwidth_gbps = total_bytes / (compute_time_us / S_TO_US) / GBPS_TO_BPS
             latency_breakdown.min_bandwidth_gbps = min_bandwidth_gbps
 
         # 填充结果

@@ -17,14 +17,18 @@ Example:
     说明: 跨步访问导致实际带宽利用率下降，时延增加
 """
 
-from .base import BasePass, PassConfig, PassResult, PassContext
+from .base import BasePass, PassResult, PassContext
+from ..constants import (
+    PATTERN_SEQUENTIAL, PATTERN_STRIDED, PATTERN_RANDOM,
+    BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY,
+)
 
 
 # 访存模式效率
 MEMORY_PATTERN_EFFICIENCY = {
-    "sequential": 0.85,
-    "strided": 0.50,
-    "random": 0.25,
+    PATTERN_SEQUENTIAL: 0.85,
+    PATTERN_STRIDED: 0.50,
+    PATTERN_RANDOM: 0.25,
 }
 
 
@@ -66,9 +70,9 @@ class MemoryEfficiencyPass(BasePass):
 
         # 更新瓶颈判断
         if adjusted_memory_time > latency_breakdown.compute_time_us:
-            latency_breakdown.bottleneck = "memory"
+            latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
-            latency_breakdown.bottleneck = "compute"
+            latency_breakdown.bottleneck = BOTTLENECK_COMPUTE
 
         # 计算变化
         latency_delta = new_roofline_time - latency_before
@@ -97,11 +101,11 @@ class MemoryEfficiencyPass(BasePass):
                 f"访存时间增加 {latency_delta:.2f}us"
             )
 
-        if pattern == "strided":
+        if pattern == PATTERN_STRIDED:
             result.suggestions.append(
                 "跨步访问模式效率较低，考虑数据重排或使用连续内存布局"
             )
-        elif pattern == "random":
+        elif pattern == PATTERN_RANDOM:
             result.suggestions.append(
                 "随机访问模式效率最低，强烈建议优化数据访问模式"
             )
