@@ -44,6 +44,11 @@ class LatencyBreakdown:
     # === 带宽分析 ===
     min_bandwidth_gbps: float = 0.0    # 最低带宽需求
     bandwidth_headroom: float = 0.0    # 带宽余量
+    effective_bandwidth_gbps: float = 0.0  # 有效带宽 (考虑并发竞争)
+
+    # === 流量分析 ===
+    original_traffic_bytes: int = 0    # 原始流量
+    optimized_traffic_bytes: int = 0   # 优化后流量 (L2复用/Tiling后)
 
     # === 额外信息 ===
     details: Dict[str, Any] = field(default_factory=dict)

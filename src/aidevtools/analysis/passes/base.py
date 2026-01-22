@@ -4,11 +4,14 @@
 
 Pass 执行顺序:
 1. RooflinePass - 基础 Roofline 时延计算
+1.5. MinTrafficPass - 最低流量优化 (L2复用/Tiling)
 2. MemoryEfficiencyPass - 访存效率修正
+2.5. BandwidthConstraintPass - 全局带宽约束
 3. ForwardPrefetchPass - 前向预取优化
 4. BackwardPrefetchPass - 后向预取优化
 5. CubeVectorParallelPass - Cube/Vector 并行优化
 6. OverheadPass - 开销计算
+7. TrafficConstraintPass - 流量约束检查
 """
 
 from abc import ABC, abstractmethod
@@ -62,6 +65,22 @@ class PassConfig:
     kernel_launch_us: float = 5.0  # kernel 启动开销
     sync_overhead_us: float = 2.0  # 同步开销
 
+    # === 全局带宽约束 ===
+    bandwidth_constraint_enabled: bool = True
+    concurrent_streams: int = 1  # 并发流数量
+    bandwidth_contention_model: str = "linear"  # "linear" | "sqrt" | "none"
+
+    # === 流量约束模式 ===
+    traffic_constraint_enabled: bool = False
+    max_traffic_bytes: int = 0  # 最大允许流量 (0=无限制)
+    traffic_budget_mode: str = "none"  # "none" | "strict" | "soft"
+
+    # === 最低流量模式 ===
+    min_traffic_mode_enabled: bool = False
+    cache_line_bytes: int = 64  # Cache line 大小
+    l2_reuse_factor: float = 1.0  # L2 缓存复用因子 (1.0=无复用)
+    tiling_efficiency: float = 1.0  # Tiling 效率 (1.0=无 tiling)
+
     # === 扩展参数 ===
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -95,6 +114,10 @@ class PassConfig:
             config.overhead_enabled = True
             config.prefetch_efficiency = 0.9
             config.backward_prefetch_depth = 3
+            # 激进模式启用最低流量优化
+            config.min_traffic_mode_enabled = True
+            config.l2_reuse_factor = 0.8
+            config.tiling_efficiency = 0.9
 
         return config
 

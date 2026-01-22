@@ -19,11 +19,14 @@ from .passes import (
     PassResult,
     PassPreset,
     RooflinePass,
+    MinTrafficPass,
     MemoryEfficiencyPass,
+    BandwidthConstraintPass,
     ForwardPrefetchPass,
     BackwardPrefetchPass,
     CubeVectorParallelPass,
     OverheadPass,
+    TrafficConstraintPass,
 )
 
 
@@ -59,6 +62,12 @@ class AnalysisSummary:
     # Cube/Vector 占比
     cube_time_us: float = 0.0
     vector_time_us: float = 0.0
+
+    # 流量分析 (新增)
+    total_original_traffic_bytes: int = 0   # 原始总流量
+    total_optimized_traffic_bytes: int = 0  # 优化后总流量
+    traffic_saved_ratio: float = 0.0        # 流量节省比例
+    effective_bandwidth_gbps: float = 0.0   # 平均有效带宽
 
 
 class PaperAnalyzer:
@@ -132,9 +141,19 @@ class PaperAnalyzer:
             result = roofline_pass.run(breakdown, self.chip_spec)
             op_pass_results.append(result)
 
+            # 1.5. Min Traffic Pass (最低流量优化)
+            min_traffic_pass = MinTrafficPass(self.pass_config)
+            result = min_traffic_pass.run(breakdown, self.chip_spec)
+            op_pass_results.append(result)
+
             # 2. Memory Efficiency Pass
             mem_pass = MemoryEfficiencyPass(self.pass_config)
             result = mem_pass.run(breakdown, self.chip_spec)
+            op_pass_results.append(result)
+
+            # 2.5. Bandwidth Constraint Pass (全局带宽约束)
+            bw_pass = BandwidthConstraintPass(self.pass_config)
+            result = bw_pass.run(breakdown, self.chip_spec)
             op_pass_results.append(result)
 
             # 3. Forward Prefetch Pass
@@ -201,6 +220,11 @@ class PaperAnalyzer:
             result = overhead_pass.run(breakdown, self.chip_spec)
             op_pass_results.append(result)
 
+            # 7. Traffic Constraint Pass (流量约束检查)
+            traffic_pass = TrafficConstraintPass(self.pass_config)
+            result = traffic_pass.run(breakdown, self.chip_spec)
+            op_pass_results.append(result)
+
             self._breakdowns.append(breakdown)
             self._pass_results.append(op_pass_results)
 
@@ -222,6 +246,9 @@ class PaperAnalyzer:
     def _generate_summary(self) -> AnalysisSummary:
         """生成分析摘要"""
         summary = AnalysisSummary()
+
+        total_effective_bw = 0.0
+        bw_count = 0
 
         for bd in self._breakdowns:
             summary.total_latency_us += bd.total_time_us
@@ -245,10 +272,34 @@ class PaperAnalyzer:
             else:
                 summary.vector_time_us += bd.roofline_time_us
 
+            # 流量统计
+            original = (bd.profile.input_bytes + bd.profile.weight_bytes +
+                        bd.profile.output_bytes + bd.profile.workspace_bytes)
+            summary.total_original_traffic_bytes += original
+            if bd.optimized_traffic_bytes > 0:
+                summary.total_optimized_traffic_bytes += bd.optimized_traffic_bytes
+            else:
+                summary.total_optimized_traffic_bytes += original
+
+            # 有效带宽统计
+            if bd.effective_bandwidth_gbps > 0:
+                total_effective_bw += bd.effective_bandwidth_gbps
+                bw_count += 1
+
         # 计算实际吞吐量
         if summary.total_latency_us > 0:
             summary.achieved_tflops = summary.total_flops / (summary.total_latency_us * 1e-6) / 1e12
             summary.achieved_bandwidth_gbps = summary.total_bytes / (summary.total_latency_us * 1e-6) / 1e9
+
+        # 流量节省比例
+        if summary.total_original_traffic_bytes > 0:
+            summary.traffic_saved_ratio = (
+                1 - summary.total_optimized_traffic_bytes / summary.total_original_traffic_bytes
+            )
+
+        # 平均有效带宽
+        if bw_count > 0:
+            summary.effective_bandwidth_gbps = total_effective_bw / bw_count
 
         return summary
 
@@ -333,6 +384,13 @@ class PaperAnalyzer:
         print(f"\n--- Throughput ---")
         print(f"Achieved TFLOPS: {s.achieved_tflops:.2f}")
         print(f"Achieved Bandwidth: {s.achieved_bandwidth_gbps:.2f} GB/s")
+        if s.effective_bandwidth_gbps > 0:
+            print(f"Effective Bandwidth (contention): {s.effective_bandwidth_gbps:.2f} GB/s")
+        print(f"\n--- Traffic Analysis ---")
+        print(f"Original Traffic: {s.total_original_traffic_bytes/(1024*1024):.2f} MB")
+        print(f"Optimized Traffic: {s.total_optimized_traffic_bytes/(1024*1024):.2f} MB")
+        if s.traffic_saved_ratio > 0:
+            print(f"Traffic Saved: {s.traffic_saved_ratio*100:.1f}%")
         print(f"\n--- Unit Utilization ---")
         print(f"Cube Time: {s.cube_time_us:.2f} us ({s.cube_time_us/s.total_latency_us*100:.1f}%)")
         print(f"Vector Time: {s.vector_time_us:.2f} us ({s.vector_time_us/s.total_latency_us*100:.1f}%)")

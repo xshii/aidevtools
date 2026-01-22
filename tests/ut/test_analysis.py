@@ -457,3 +457,195 @@ class TestIntegration:
             if bd.profile.op_type == "matmul":
                 # 大矩阵 matmul 通常是计算瓶颈
                 assert bd.profile.compute_unit == "cube"
+
+
+class TestBandwidthPasses:
+    """带宽约束 Pass 测试"""
+
+    def test_bandwidth_constraint_pass_single_stream(self):
+        """测试单流无约束"""
+        from aidevtools.analysis.passes import BandwidthConstraintPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.bandwidth_constraint_enabled = True
+        config.concurrent_streams = 1  # 单流
+
+        profile = OpProfile(
+            name="test_matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            flops=int(1e12),
+            input_bytes=int(1e9),
+            weight_bytes=int(1e9),
+            output_bytes=int(1e9),
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.memory_time_us = 100.0
+        breakdown.roofline_time_us = 100.0
+
+        bw_pass = BandwidthConstraintPass(config)
+        result = bw_pass.run(breakdown, chip)
+
+        # 单流无约束，时延不变
+        assert breakdown.memory_time_us == 100.0
+        assert result.details.get("reason") == "单流执行，无带宽竞争"
+
+    def test_bandwidth_constraint_pass_multi_stream(self):
+        """测试多流带宽竞争"""
+        from aidevtools.analysis.passes import BandwidthConstraintPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.bandwidth_constraint_enabled = True
+        config.concurrent_streams = 4  # 4 流并发
+        config.bandwidth_contention_model = "linear"
+
+        profile = OpProfile(
+            name="test_matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            flops=int(1e12),
+            input_bytes=int(1e9),
+            weight_bytes=int(1e9),
+            output_bytes=int(1e9),
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.memory_time_us = 100.0
+        breakdown.roofline_time_us = 100.0
+        breakdown.compute_time_us = 50.0
+
+        bw_pass = BandwidthConstraintPass(config)
+        result = bw_pass.run(breakdown, chip)
+
+        # 4 流 linear 模型，带宽 /4，时延 x4
+        assert breakdown.memory_time_us == 400.0
+        assert result.details["contention_factor"] == 4.0
+        assert len(result.warnings) > 0
+
+    def test_min_traffic_pass(self):
+        """测试最低流量优化"""
+        from aidevtools.analysis.passes import MinTrafficPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.min_traffic_mode_enabled = True
+        config.l2_reuse_factor = 0.5   # 权重复用 50%
+        config.tiling_efficiency = 0.8  # Tiling 减少 20%
+
+        profile = OpProfile(
+            name="test_matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            flops=int(1e12),
+            input_bytes=int(1e6),
+            weight_bytes=int(2e6),
+            output_bytes=int(1e6),
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.memory_time_us = 100.0
+        breakdown.roofline_time_us = 100.0
+        breakdown.compute_time_us = 50.0
+
+        min_pass = MinTrafficPass(config)
+        result = min_pass.run(breakdown, chip)
+
+        # 流量应该减少
+        assert result.details["traffic_saved_ratio"] > 0
+        assert result.details["optimized_traffic_bytes"] < result.details["original_traffic_bytes"]
+
+    def test_traffic_constraint_pass(self):
+        """测试流量约束检查"""
+        from aidevtools.analysis.passes import TrafficConstraintPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.traffic_constraint_enabled = True
+        config.max_traffic_bytes = int(1e6)  # 1MB 限制
+        config.traffic_budget_mode = "strict"
+
+        profile = OpProfile(
+            name="test_matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            flops=int(1e12),
+            input_bytes=int(1e6),
+            weight_bytes=int(2e6),  # 超过限制
+            output_bytes=int(1e6),
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.total_time_us = 100.0
+
+        traffic_pass = TrafficConstraintPass(config)
+        result = traffic_pass.run(breakdown, chip)
+
+        # 应该检测到超限
+        assert result.details["over_budget"] is True
+        assert len(result.warnings) > 0
+        assert "超限" in result.warnings[0]
+
+    def test_analyzer_with_bandwidth_constraint(self):
+        """测试分析器集成带宽约束"""
+        from aidevtools.analysis import PaperAnalyzer, PassConfig
+        from aidevtools.analysis.profile import profile_matmul
+
+        config = PassConfig()
+        config.bandwidth_constraint_enabled = True
+        config.concurrent_streams = 2  # 2 流并发
+        config.bandwidth_contention_model = "sqrt"
+
+        analyzer = PaperAnalyzer(chip="npu_910", pass_config=config)
+
+        a = np.zeros((4, 512, 768), dtype=np.float16)
+        b = np.zeros((768, 768), dtype=np.float16)
+        profile = profile_matmul(a, b)
+        profile.name = "test_matmul"
+
+        analyzer.add_profile(profile)
+        result = analyzer.analyze()
+
+        # 验证结果包含带宽约束效果
+        assert len(result.breakdowns) == 1
+        assert result.summary is not None
+
+    def test_analyzer_with_min_traffic(self):
+        """测试分析器集成最低流量模式"""
+        from aidevtools.analysis import PaperAnalyzer, PassConfig, PassPreset
+
+        # 使用激进模式（自动启用最低流量优化）
+        config = PassConfig.from_preset(PassPreset.AGGRESSIVE)
+
+        analyzer = PaperAnalyzer(chip="npu_910", pass_config=config)
+
+        a = np.zeros((4, 512, 768), dtype=np.float16)
+        b = np.zeros((768, 768), dtype=np.float16)
+        from aidevtools.analysis.profile import profile_matmul
+        profile = profile_matmul(a, b)
+        profile.name = "test_matmul"
+
+        analyzer.add_profile(profile)
+        result = analyzer.analyze()
+
+        # 验证流量统计
+        assert result.summary.total_original_traffic_bytes > 0
+        assert result.summary.total_optimized_traffic_bytes > 0
