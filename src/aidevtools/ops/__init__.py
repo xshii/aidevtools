@@ -52,4 +52,14 @@ from aidevtools.ops.base import (
     get_profile_only,
     profile_only,  # 上下文管理器
 )
+from aidevtools.ops.auto import (
+    seed,
+    clear as auto_clear,
+    dump as auto_dump,
+    linear,
+    matmul,
+    attention,
+    embedding,
+    transpose,
+)
 from aidevtools.ops import nn  # 触发算子实例化
