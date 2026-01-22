@@ -42,10 +42,8 @@ class BandwidthConstraintPass(BasePass):
 
     name = "bandwidth_constraint"
     description = "全局带宽约束，考虑多流并发带宽竞争"
-    order = 2.5  # 在 MemoryEfficiency 之后，Prefetch 之前
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.bandwidth_constraint_enabled
+    order = 250
+    config_key = "bandwidth_constraint"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
@@ -77,8 +75,7 @@ class BandwidthConstraintPass(BasePass):
 
         # 重新计算访存时间
         profile = latency_breakdown.profile
-        total_bytes = (profile.input_bytes + profile.weight_bytes +
-                       profile.output_bytes + profile.workspace_bytes)
+        total_bytes = profile.total_bytes
 
         adjusted_memory_time = original_memory_time * contention_factor
 
@@ -97,11 +94,8 @@ class BandwidthConstraintPass(BasePass):
         latency_breakdown.memory_time_us = adjusted_memory_time
         latency_breakdown.roofline_time_us = new_roofline_time
 
-        # 记录有效带宽到 breakdown (用于后续分析)
-        if not hasattr(latency_breakdown, 'effective_bandwidth_gbps'):
-            latency_breakdown.effective_bandwidth_gbps = effective_bandwidth
-        else:
-            latency_breakdown.effective_bandwidth_gbps = effective_bandwidth
+        # 记录有效带宽到 breakdown
+        latency_breakdown.effective_bandwidth_gbps = effective_bandwidth
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -150,20 +144,15 @@ class TrafficConstraintPass(BasePass):
 
     name = "traffic_constraint"
     description = "流量约束模式，限制总数据搬运量"
-    order = 7  # 在 Overhead 之后
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.traffic_constraint_enabled
+    order = 700
+    config_key = "traffic_constraint"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
         """执行流量约束检查"""
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.total_time_us or latency_breakdown.roofline_time_us
-
-        # 计算总流量
-        total_traffic = (profile.input_bytes + profile.weight_bytes +
-                         profile.output_bytes + profile.workspace_bytes)
+        total_traffic = profile.total_bytes
 
         # 获取约束
         max_traffic = self.config.max_traffic_bytes
@@ -218,10 +207,8 @@ class MinTrafficPass(BasePass):
 
     name = "min_traffic"
     description = "最低流量模式，通过 cache 复用和 tiling 减少流量"
-    order = 1.5  # 在 Roofline 之后，MemoryEfficiency 之前
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.min_traffic_mode_enabled
+    order = 150
+    config_key = "min_traffic_mode"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
@@ -233,10 +220,7 @@ class MinTrafficPass(BasePass):
         l2_reuse_factor = self.config.l2_reuse_factor
         tiling_efficiency = self.config.tiling_efficiency
         cache_line_bytes = self.config.cache_line_bytes
-
-        # 计算原始流量
-        original_traffic = (profile.input_bytes + profile.weight_bytes +
-                            profile.output_bytes + profile.workspace_bytes)
+        original_traffic = profile.total_bytes
 
         # 应用 L2 缓存复用 (主要影响权重)
         # 权重通常可以在 L2 中缓存并复用

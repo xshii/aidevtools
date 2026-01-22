@@ -25,10 +25,8 @@ class CubeVectorParallelPass(BasePass):
 
     name = "cube_vector_parallel"
     description = "Cube 和 Vector 单元并行执行优化"
-    order = 5
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.cube_vector_parallel_enabled
+    order = 500
+    config_key = "cube_vector_parallel"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:

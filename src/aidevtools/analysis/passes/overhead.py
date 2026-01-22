@@ -27,10 +27,8 @@ class OverheadPass(BasePass):
 
     name = "overhead"
     description = "计算 kernel 启动、同步等开销"
-    order = 6
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.overhead_enabled
+    order = 600
+    config_key = "overhead"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:

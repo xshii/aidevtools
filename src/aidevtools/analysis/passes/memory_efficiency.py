@@ -33,10 +33,8 @@ class MemoryEfficiencyPass(BasePass):
 
     name = "memory_efficiency"
     description = "根据访存模式修正访存时延"
-    order = 2
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.memory_efficiency_enabled
+    order = 200
+    config_key = "memory_efficiency"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:

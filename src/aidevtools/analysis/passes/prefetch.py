@@ -30,10 +30,8 @@ class ForwardPrefetchPass(BasePass):
 
     name = "forward_prefetch"
     description = "Cube 计算时预取下一算子权重"
-    order = 3
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.forward_prefetch_enabled
+    order = 300
+    config_key = "forward_prefetch"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
@@ -106,10 +104,8 @@ class BackwardPrefetchPass(BasePass):
 
     name = "backward_prefetch"
     description = "Vector 计算时预取后续 Cube 算子权重"
-    order = 4
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.backward_prefetch_enabled
+    order = 400
+    config_key = "backward_prefetch"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:

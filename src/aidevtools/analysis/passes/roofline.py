@@ -38,10 +38,8 @@ class RooflinePass(BasePass):
 
     name = "roofline"
     description = "基础 Roofline 模型时延计算"
-    order = 1
-
-    def is_enabled(self) -> bool:
-        return self.config.enabled and self.config.roofline_enabled
+    order = 100
+    config_key = "roofline"
 
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
@@ -61,8 +59,7 @@ class RooflinePass(BasePass):
             compute_time_us = profile.flops / (peak_tflops * 1e12) * 1e6
 
         # 访存时间 (us) - 使用 HBM 带宽
-        total_bytes = (profile.input_bytes + profile.weight_bytes +
-                       profile.output_bytes + profile.workspace_bytes)
+        total_bytes = profile.total_bytes
         hbm_bandwidth_gbps = chip_spec.memory.hbm.bandwidth_gbps
 
         memory_time_us = 0.0
@@ -123,32 +120,25 @@ class RooflinePass(BasePass):
 
         return result
 
+    # dtype 到属性名的映射
+    _DTYPE_MAP = {
+        "fp16": "fp16", "float16": "fp16", "half": "fp16",
+        "bf16": "bf16", "bfloat16": "bf16",
+        "fp32": "fp32", "float32": "fp32", "float": "fp32",
+        "int8": "int8", "int8_t": "int8",
+    }
+
     def _get_cube_tflops(self, chip_spec, dtype: str) -> float:
         """获取 Cube 单元峰值算力"""
-        cube = chip_spec.cube
-        dtype_lower = dtype.lower()
-
-        if dtype_lower in ("fp16", "float16", "half"):
-            return cube.fp16_tflops
-        elif dtype_lower in ("bf16", "bfloat16"):
-            return cube.bf16_tflops
-        elif dtype_lower in ("fp32", "float32", "float"):
-            return cube.fp32_tflops
-        elif dtype_lower in ("int8", "int8_t"):
-            return cube.int8_tops
-        else:
-            return cube.fp16_tflops
+        key = self._DTYPE_MAP.get(dtype.lower(), "fp16")
+        attr = f"{key}_tflops" if key != "int8" else "int8_tops"
+        return getattr(chip_spec.cube, attr, chip_spec.cube.fp16_tflops)
 
     def _get_vector_gflops(self, chip_spec, dtype: str) -> float:
         """获取 Vector 单元峰值算力"""
-        vector = chip_spec.vector
-        dtype_lower = dtype.lower()
-
-        if dtype_lower in ("fp16", "float16", "half"):
-            return vector.fp16_gflops
-        elif dtype_lower in ("bf16", "bfloat16"):
-            return vector.bf16_gflops
-        elif dtype_lower in ("fp32", "float32", "float"):
-            return vector.fp32_gflops
-        else:
-            return vector.fp16_gflops
+        key = self._DTYPE_MAP.get(dtype.lower(), "fp16")
+        # Vector 只有 fp16/fp32，bf16 fallback 到 fp16
+        if key == "bf16":
+            key = "fp16"
+        attr = f"{key}_gflops"
+        return getattr(chip_spec.vector, attr, chip_spec.vector.fp16_gflops)

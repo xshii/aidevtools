@@ -22,11 +22,6 @@ class LatencyBreakdown:
     memory_time_us: float = 0.0        # 访存时延
     roofline_time_us: float = 0.0      # Roofline 时延 = max(compute, memory)
 
-    # === 访存细分 ===
-    input_load_us: float = 0.0         # 输入加载
-    weight_load_us: float = 0.0        # 权重加载
-    output_store_us: float = 0.0       # 输出存储
-
     # === 流水优化 ===
     prefetch_saved_us: float = 0.0     # 前向预取节省
     backward_prefetch_saved_us: float = 0.0  # 后向预取节省

@@ -2,16 +2,16 @@
 
 每个 Pass 负责一类时延优化分析，可独立开关和配置。
 
-Pass 执行顺序:
-1. RooflinePass - 基础 Roofline 时延计算
-1.5. MinTrafficPass - 最低流量优化 (L2复用/Tiling)
-2. MemoryEfficiencyPass - 访存效率修正
-2.5. BandwidthConstraintPass - 全局带宽约束
-3. ForwardPrefetchPass - 前向预取优化
-4. BackwardPrefetchPass - 后向预取优化
-5. CubeVectorParallelPass - Cube/Vector 并行优化
-6. OverheadPass - 开销计算
-7. TrafficConstraintPass - 流量约束检查
+Pass 执行顺序 (order):
+100. RooflinePass - 基础 Roofline 时延计算
+150. MinTrafficPass - 最低流量优化 (L2复用/Tiling)
+200. MemoryEfficiencyPass - 访存效率修正
+250. BandwidthConstraintPass - 全局带宽约束
+300. ForwardPrefetchPass - 前向预取优化
+400. BackwardPrefetchPass - 后向预取优化
+500. CubeVectorParallelPass - Cube/Vector 并行优化
+600. OverheadPass - 开销计算
+700. TrafficConstraintPass - 流量约束检查
 """
 
 from abc import ABC, abstractmethod
@@ -163,24 +163,27 @@ class BasePass(ABC):
     """Pass 基类
 
     子类需要实现:
-    - is_enabled(): 检查 Pass 是否启用
     - _do_run(): 实际执行逻辑
 
     可选覆盖:
-    - validate(): 验证输入数据
+    - is_enabled(): 检查 Pass 是否启用 (默认使用 config_key)
     """
 
     name: str = "base"
     description: str = "Base pass"
     order: int = 0  # 执行顺序
+    config_key: str = None  # 配置字段名 (如 "roofline" -> config.roofline_enabled)
 
     def __init__(self, config: PassConfig = None):
         self.config = config or PassConfig()
 
-    @abstractmethod
     def is_enabled(self) -> bool:
-        """检查 Pass 是否启用"""
-        pass
+        """检查 Pass 是否启用 (基于 config_key)"""
+        if not self.config.enabled:
+            return False
+        if self.config_key is None:
+            return True
+        return getattr(self.config, f"{self.config_key}_enabled", True)
 
     def run(self, latency_breakdown: 'LatencyBreakdown',
             chip_spec: 'ChipSpec',
@@ -201,12 +204,6 @@ class BasePass(ABC):
         if not self.is_enabled():
             return result
 
-        # 验证输入
-        warnings = self.validate(latency_breakdown)
-        if warnings:
-            result.warnings.extend(warnings)
-
-        # 执行实际逻辑
         return self._do_run(latency_breakdown, chip_spec, result, context)
 
     @abstractmethod
@@ -227,10 +224,6 @@ class BasePass(ABC):
             PassResult
         """
         pass
-
-    def validate(self, latency_breakdown: 'LatencyBreakdown') -> List[str]:
-        """验证输入数据，返回警告列表"""
-        return []
 
     def _skip(self, result: PassResult, latency_us: float, reason: str) -> PassResult:
         """跳过 Pass 时填充结果"""
