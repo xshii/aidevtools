@@ -2,8 +2,12 @@
 """
 Transformer 模型时延分析 Demo
 
-演示如何使用 Paper Analysis 模块分析一个 3D 1MB 级别矩阵的 Transformer 模型
-在 NPU 910 上的时延表现。
+演示如何使用 ops 模块定义模型，自动生成 OpProfile 进行 Paper Analysis。
+
+使用方式:
+1. 调用 ops 算子 (linear, layernorm, attention 等)
+2. 调用 ops.get_profiles() 获取自动生成的 profiles
+3. 使用 PaperAnalyzer 分析时延
 
 Usage:
     python transformer_analysis_demo.py
@@ -13,21 +17,14 @@ import numpy as np
 import sys
 from pathlib import Path
 
-# 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from aidevtools import ops
+from aidevtools.ops.nn import linear, layernorm, gelu, softmax, add, attention
 from aidevtools.analysis import (
     PaperAnalyzer,
-    OpProfile,
-    MatMulDtypeConfig,
     PassConfig,
     PassPreset,
-    profile_matmul,
-    profile_layernorm,
-    profile_softmax,
-    profile_attention,
-    profile_gelu,
-    profile_add,
     export_xlsx,
     export_csv,
     export_json,
@@ -36,122 +33,87 @@ from aidevtools.analysis import (
 )
 
 
-def create_transformer_profiles(
-    batch_size: int = 4,
-    seq_len: int = 512,
-    hidden_size: int = 768,
+def transformer_layer_ops(
+    batch: int = 4,
+    seq: int = 512,
+    hidden: int = 768,
     num_heads: int = 12,
     ffn_hidden: int = 3072,
-    dtype: str = "fp16",
-) -> list:
+):
     """
-    创建 Transformer 单层的算子 Profiles
+    使用 ops 定义 Transformer Layer
 
-    模型参数 (约 1MB 级别每个矩阵):
-    - batch_size: 4
-    - seq_len: 512
-    - hidden_size: 768
-    - num_heads: 12
-    - ffn_hidden: 3072
-
-    单个矩阵大小示例:
-    - Q/K/V 投影权重: 768 x 768 x 2 bytes = 1.125 MB
-    - FFN1 权重: 768 x 3072 x 2 bytes = 4.5 MB
-    - FFN2 权重: 3072 x 768 x 2 bytes = 4.5 MB
+    调用完成后，可通过 ops.get_profiles() 获取自动生成的 profiles
     """
-    profiles = []
-    head_dim = hidden_size // num_heads
-    bytes_per_elem = 2 if dtype == "fp16" else 4
+    head_dim = hidden // num_heads
+
+    # 创建输入张量
+    x = np.random.randn(batch, seq, hidden).astype(np.float32)
+    gamma = np.ones((hidden,), dtype=np.float32)
+    beta = np.zeros((hidden,), dtype=np.float32)
 
     # ============================================================
-    # 1. Self-Attention
+    # Self-Attention Block
     # ============================================================
 
-    # 1.1 LayerNorm (pre-attention)
-    x = np.zeros((batch_size, seq_len, hidden_size), dtype=np.float16)
-    gamma = np.zeros((hidden_size,), dtype=np.float16)
-    beta = np.zeros((hidden_size,), dtype=np.float16)
-    ln_profile = profile_layernorm(x, gamma, beta)
-    ln_profile.name = "attn_ln"
-    profiles.append(ln_profile)
+    # LayerNorm
+    x_norm = layernorm(x, gamma, beta)
 
-    # 1.2 Q 投影: [B, S, H] @ [H, H] -> [B, S, H]
-    input_q = np.zeros((batch_size, seq_len, hidden_size), dtype=np.float16)
-    weight_q = np.zeros((hidden_size, hidden_size), dtype=np.float16)
-    q_profile = profile_matmul(input_q, weight_q)
-    q_profile.name = "q_proj"
-    profiles.append(q_profile)
+    # Q/K/V 投影
+    w_q = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    w_k = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    w_v = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
 
-    # 1.3 K 投影
-    k_profile = profile_matmul(input_q, weight_q)
-    k_profile.name = "k_proj"
-    profiles.append(k_profile)
+    q = linear(x_norm, w_q)
+    k = linear(x_norm, w_k)
+    v = linear(x_norm, w_v)
 
-    # 1.4 V 投影
-    v_profile = profile_matmul(input_q, weight_q)
-    v_profile.name = "v_proj"
-    profiles.append(v_profile)
+    # Reshape for multi-head attention
+    q = q.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
+    k = k.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
+    v = v.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
 
-    # 1.5 Attention: Q @ K^T @ V
-    # 重塑为多头: [B, S, H] -> [B, num_heads, S, head_dim]
-    q = np.zeros((batch_size, num_heads, seq_len, head_dim), dtype=np.float16)
-    k = np.zeros((batch_size, num_heads, seq_len, head_dim), dtype=np.float16)
-    v = np.zeros((batch_size, num_heads, seq_len, head_dim), dtype=np.float16)
-    attn_profile = profile_attention(q, k, v)
-    attn_profile.name = "self_attn"
-    profiles.append(attn_profile)
+    # Attention
+    attn_out = attention(q, k, v)
 
-    # 1.6 Output 投影: [B, S, H] @ [H, H] -> [B, S, H]
-    out_proj = profile_matmul(input_q, weight_q)
-    out_proj.name = "out_proj"
-    profiles.append(out_proj)
+    # Reshape back
+    attn_out = attn_out.transpose(0, 2, 1, 3).reshape(batch, seq, hidden)
 
-    # 1.7 残差连接 Add
-    a = np.zeros((batch_size, seq_len, hidden_size), dtype=np.float16)
-    add_profile = profile_add(a, a)
-    add_profile.name = "attn_residual"
-    profiles.append(add_profile)
+    # Output projection
+    w_o = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    attn_out = linear(attn_out, w_o)
+
+    # Residual
+    x = add(x, attn_out)
 
     # ============================================================
-    # 2. FFN (Feed-Forward Network)
+    # FFN Block
     # ============================================================
 
-    # 2.1 LayerNorm (pre-FFN)
-    ln2_profile = profile_layernorm(x, gamma, beta)
-    ln2_profile.name = "ffn_ln"
-    profiles.append(ln2_profile)
+    # LayerNorm
+    x_norm = layernorm(x, gamma, beta)
 
-    # 2.2 FFN1: [B, S, H] @ [H, FFN] -> [B, S, FFN]
-    ffn_input = np.zeros((batch_size, seq_len, hidden_size), dtype=np.float16)
-    ffn1_weight = np.zeros((hidden_size, ffn_hidden), dtype=np.float16)
-    ffn1_profile = profile_matmul(ffn_input, ffn1_weight)
-    ffn1_profile.name = "ffn1"
-    profiles.append(ffn1_profile)
+    # FFN1: hidden -> ffn_hidden
+    w_ffn1 = np.random.randn(hidden, ffn_hidden).astype(np.float32) * 0.02
+    h = linear(x_norm, w_ffn1)
 
-    # 2.3 GELU 激活
-    ffn_hidden_tensor = np.zeros((batch_size, seq_len, ffn_hidden), dtype=np.float16)
-    gelu_profile = profile_gelu(ffn_hidden_tensor)
-    gelu_profile.name = "ffn_gelu"
-    profiles.append(gelu_profile)
+    # GELU
+    h = gelu(h)
 
-    # 2.4 FFN2: [B, S, FFN] @ [FFN, H] -> [B, S, H]
-    ffn2_weight = np.zeros((ffn_hidden, hidden_size), dtype=np.float16)
-    ffn2_profile = profile_matmul(ffn_hidden_tensor, ffn2_weight)
-    ffn2_profile.name = "ffn2"
-    profiles.append(ffn2_profile)
+    # FFN2: ffn_hidden -> hidden
+    w_ffn2 = np.random.randn(ffn_hidden, hidden).astype(np.float32) * 0.02
+    h = linear(h, w_ffn2)
 
-    # 2.5 残差连接 Add
-    add2_profile = profile_add(a, a)
-    add2_profile.name = "ffn_residual"
-    profiles.append(add2_profile)
+    # Residual
+    x = add(x, h)
 
-    return profiles
+    return x
 
 
 def print_profiles_info(profiles: list):
     """打印 profile 信息"""
     print("\n" + "=" * 80)
-    print("Transformer Layer Operator Profiles")
+    print("Transformer Layer Operator Profiles (Auto-generated from ops)")
     print("=" * 80)
 
     total_flops = 0
@@ -173,7 +135,7 @@ def print_profiles_info(profiles: list):
 def main():
     print("\n" + "=" * 80)
     print("Transformer Model Paper Analysis Demo")
-    print("Analyzing on NPU 910 (Ascend 910)")
+    print("Using ops module with auto profile generation")
     print("=" * 80)
 
     # 显示可用芯片
@@ -185,51 +147,55 @@ def main():
     print(f"  Cube FP16: {chip.cube.fp16_tflops} TFLOPS")
     print(f"  Vector FP16: {chip.vector.fp16_gflops} GFLOPS")
     print(f"  HBM Bandwidth: {chip.memory.hbm.bandwidth_gbps} GB/s")
-    print(f"  HBM Capacity: {chip.memory.hbm.capacity_bytes / 1024**3:.0f} GB")
 
-    # 创建模型配置 (约 1MB 级别矩阵)
+    # 模型配置
     model_config = {
-        "batch_size": 4,
-        "seq_len": 512,
-        "hidden_size": 768,
+        "batch": 4,
+        "seq": 512,
+        "hidden": 768,
         "num_heads": 12,
         "ffn_hidden": 3072,
-        "dtype": "fp16",
     }
 
     print(f"\nModel Configuration:")
     for k, v in model_config.items():
         print(f"  {k}: {v}")
 
-    # 创建算子 profiles
-    profiles = create_transformer_profiles(**model_config)
+    # ============================================================
+    # 使用 ops 定义模型 (自动生成 profiles)
+    # ============================================================
+
+    print("\nDefining transformer layer using ops...")
+    ops.clear()  # 清空之前的记录和 profiles
+
+    # 调用 ops 定义模型
+    output = transformer_layer_ops(**model_config)
+    print(f"Output shape: {output.shape}")
+
+    # 获取自动生成的 profiles
+    profiles = ops.get_profiles()
+    print(f"\nAuto-generated {len(profiles)} profiles from ops calls")
+
+    # 打印 profile 信息
     print_profiles_info(profiles)
 
     # ============================================================
-    # 分析
+    # Paper Analysis
     # ============================================================
+
+    print("\nRunning Paper Analysis...")
 
     # 使用标准优化配置
     pass_config = PassConfig.from_preset(PassPreset.STANDARD)
-    print(f"\nPass Configuration: {pass_config.preset.value}")
-    print(f"  Roofline: {pass_config.roofline_enabled}")
-    print(f"  Memory Efficiency: {pass_config.memory_efficiency_enabled}")
-    print(f"  Forward Prefetch: {pass_config.forward_prefetch_enabled}")
-    print(f"  Backward Prefetch: {pass_config.backward_prefetch_enabled}")
-    print(f"  Cube/Vector Parallel: {pass_config.cube_vector_parallel_enabled}")
-    print(f"  Overhead: {pass_config.overhead_enabled}")
+    print(f"Pass Configuration: {pass_config.preset.value}")
 
     # 创建分析器
-    analyzer = PaperAnalyzer(
-        chip="npu_910",
-        pass_config=pass_config,
-    )
+    analyzer = PaperAnalyzer(chip="npu_910", pass_config=pass_config)
 
-    # 添加 profiles
+    # 添加 profiles (来自 ops.get_profiles())
     analyzer.add_profiles(profiles)
 
     # 执行分析
-    print("\nRunning analysis...")
     result = analyzer.analyze()
 
     # 打印摘要
@@ -261,19 +227,13 @@ def main():
     output_dir = Path(__file__).parent / "output"
     output_dir.mkdir(exist_ok=True)
 
-    # 导出 xlsx
     xlsx_path = output_dir / "transformer_analysis_npu910.xlsx"
-    print(f"\nExporting to Excel: {xlsx_path}")
-    export_xlsx(result, str(xlsx_path))
-
-    # 导出 CSV
     csv_path = output_dir / "transformer_analysis_npu910.csv"
-    print(f"Exporting to CSV: {csv_path}")
-    export_csv(result, str(csv_path))
-
-    # 导出 JSON
     json_path = output_dir / "transformer_analysis_npu910.json"
-    print(f"Exporting to JSON: {json_path}")
+
+    print(f"\nExporting results to {output_dir}/")
+    export_xlsx(result, str(xlsx_path))
+    export_csv(result, str(csv_path))
     export_json(result, str(json_path))
 
     print("\nDemo completed successfully!")

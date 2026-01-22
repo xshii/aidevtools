@@ -32,6 +32,10 @@ from aidevtools.ops.base import (
     get_records,
     set_golden_mode,
     get_golden_mode,
+    # Profile API (用于 Paper Analysis)
+    get_profiles,
+    set_profile_enabled,
+    get_profile_enabled,
 )
 from aidevtools.ops.registry import get_op_meta, get_op_instance, list_ops
 

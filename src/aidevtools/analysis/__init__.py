@@ -74,6 +74,18 @@ from .export import (
     export_json,
 )
 
+from .models import (
+    ModelBuilder,
+    transformer_layer,
+    llama_layer,
+    gpt2_layer,
+    bert_layer,
+    vit_layer,
+    from_preset,
+    list_presets,
+    MODEL_CONFIGS,
+)
+
 
 __all__ = [
     # Profile
@@ -124,4 +136,14 @@ __all__ = [
     "export_xlsx",
     "export_csv",
     "export_json",
+    # Models
+    "ModelBuilder",
+    "transformer_layer",
+    "llama_layer",
+    "gpt2_layer",
+    "bert_layer",
+    "vit_layer",
+    "from_preset",
+    "list_presets",
+    "MODEL_CONFIGS",
 ]

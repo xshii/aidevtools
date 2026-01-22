@@ -12,14 +12,21 @@
     def my_linear(x, weight, bias=None):
         return my_cpp_lib.linear(x, weight, bias)
 
-    # 3. 调用算子（自动执行 golden + reference）
-    clear()  # 清空之前的记录
+    # 3. 调用算子（自动执行 golden + reference + profile）
+    clear()  # 清空之前的记录和 profiles
     y = linear(x, w, b)
     y = relu(y)
     y = softmax(y)
 
     # 4. 导出数据
     dump("./workspace")
+
+    # 5. 获取 profiles 用于 Paper Analysis
+    from aidevtools.analysis import PaperAnalyzer
+    profiles = get_profiles()
+    analyzer = PaperAnalyzer(chip="npu_910")
+    analyzer.add_profiles(profiles)
+    result = analyzer.analyze()
 
 算子包含3种计算形式:
     - golden_cpp: C++ Golden 实现（通过 @register_golden_cpp 注册）
@@ -37,5 +44,9 @@ from aidevtools.ops.base import (
     get_golden_mode,
     set_compute_golden,
     get_compute_golden,
+    # Profile API (用于 Paper Analysis)
+    get_profiles,
+    set_profile_enabled,
+    get_profile_enabled,
 )
 from aidevtools.ops import nn  # 触发算子实例化

@@ -18,6 +18,20 @@ from aidevtools.ops.cpu_golden import (
 )
 
 
+def _linear_flops(s):
+    """计算 Linear FLOPs: 2 * batch * M * K * N"""
+    x_shape = s.get("x_shape", (1, 1))
+    weight_shape = s.get("weight_shape", (1, 1))
+    # x: [..., M, K], weight: [K, N]
+    if len(x_shape) >= 2 and len(weight_shape) >= 2:
+        batch = int(np.prod(x_shape[:-2])) if len(x_shape) > 2 else 1
+        M = x_shape[-2] if len(x_shape) >= 2 else 1
+        K = x_shape[-1]
+        N = weight_shape[-1]
+        return batch * 2 * M * K * N
+    return 0
+
+
 @register_op(
     inputs=["x", "weight"],
     optional=["bias"],
@@ -27,6 +41,10 @@ from aidevtools.ops.cpu_golden import (
         "weight": "xavier",
         "bias": "uniform",  # 类似 PyTorch: uniform(-1/sqrt(in), 1/sqrt(in))
     },
+    # Profile 配置
+    compute_unit="cube",
+    flops_fn=_linear_flops,
+    weight_params=["weight", "bias"],
 )
 class Linear(Op):
     """线性层: y = x @ W + b"""
@@ -59,6 +77,8 @@ class Linear(Op):
 @register_op(
     inputs=["x"],
     description="ReLU 激活 y = max(0, x)",
+    compute_unit="vector",
+    flops_fn=lambda s: s.get("x_size", 0),  # 1 op/element
 )
 class ReLU(Op):
     """ReLU: y = max(0, x)"""
@@ -74,6 +94,8 @@ class ReLU(Op):
 @register_op(
     inputs=["x"],
     description="GELU 激活 (近似)",
+    compute_unit="vector",
+    flops_fn=lambda s: 10 * s.get("x_size", 0),  # ~10 ops/element (tanh expensive)
 )
 class GELU(Op):
     """GELU 近似"""
@@ -90,6 +112,8 @@ class GELU(Op):
 @register_op(
     inputs=["x"],
     description="Sigmoid 激活 y = 1 / (1 + exp(-x))",
+    compute_unit="vector",
+    flops_fn=lambda s: 4 * s.get("x_size", 0),  # exp + div + add + neg
 )
 class Sigmoid(Op):
     """Sigmoid: y = 1 / (1 + exp(-x))"""
@@ -106,6 +130,8 @@ class Sigmoid(Op):
 @register_op(
     inputs=["x"],
     description="Tanh 激活",
+    compute_unit="vector",
+    flops_fn=lambda s: 6 * s.get("x_size", 0),  # tanh is expensive
 )
 class Tanh(Op):
     """Tanh"""
@@ -121,6 +147,8 @@ class Tanh(Op):
 @register_op(
     inputs=["x"],
     description="SiLU/Swish 激活 y = x * sigmoid(x) (LLaMA FFN)",
+    compute_unit="vector",
+    flops_fn=lambda s: 5 * s.get("x_size", 0),  # sigmoid + mul
 )
 class SiLU(Op):
     """SiLU (Swish): y = x * sigmoid(x)
@@ -142,6 +170,8 @@ class SiLU(Op):
     optional=["axis"],
     description="Softmax 激活 (防溢出)",
     has_cpp_golden=True,
+    compute_unit="vector",
+    flops_fn=lambda s: 5 * s.get("x_size", 0),  # max + sub + exp + sum + div
 )
 class Softmax(Op):
     """安全 Softmax（防溢出）"""
@@ -195,6 +225,9 @@ class Softmax(Op):
         "gamma": "ones:-1",
         "beta": "zeros:-1",
     },
+    compute_unit="vector",
+    flops_fn=lambda s: 8 * s.get("x_size", 0),  # mean + var + norm + scale + shift
+    weight_params=["gamma", "beta"],
 )
 class LayerNorm(Op):
     """Layer Normalization"""
@@ -259,6 +292,9 @@ class LayerNorm(Op):
         "x": "input",
         "gamma": "ones:-1",
     },
+    compute_unit="vector",
+    flops_fn=lambda s: 6 * s.get("x_size", 0),  # square + mean + sqrt + div + mul
+    weight_params=["gamma"],
 )
 class RMSNorm(Op):
     """RMS Normalization: y = x / rms(x) * gamma
@@ -290,6 +326,9 @@ class RMSNorm(Op):
         "gamma": "ones:-1",
         "beta": "zeros:-1",
     },
+    compute_unit="vector",
+    flops_fn=lambda s: 8 * s.get("x_size", 0),
+    weight_params=["gamma", "beta"],
 )
 class BatchNorm(Op):
     """Batch Normalization"""
@@ -322,6 +361,10 @@ class BatchNorm(Op):
 @register_op(
     inputs=["input_ids", "embed_table"],
     description="Embedding 查表",
+    compute_unit="vector",
+    memory_pattern="random",  # embedding is random access
+    flops_fn=lambda s: 0,  # pure memory operation
+    weight_params=["embed_table"],
 )
 class Embedding(Op):
     """Embedding 查表"""
@@ -335,10 +378,26 @@ class Embedding(Op):
         return embed_table[input_ids].astype(np.float32)
 
 
+def _matmul_flops(s):
+    """计算 MatMul FLOPs: 2 * M * K * N"""
+    a_shape = s.get("a_shape", (1, 1))
+    b_shape = s.get("b_shape", (1, 1))
+    # batch * 2 * M * K * N
+    if len(a_shape) >= 2:
+        batch = int(np.prod(a_shape[:-2])) if len(a_shape) > 2 else 1
+        M, K = a_shape[-2:]
+        N = b_shape[-1] if len(b_shape) >= 1 else 1
+        return batch * 2 * M * K * N
+    return 0
+
+
 @register_op(
     inputs=["a", "b"],
     description="矩阵乘法 c = a @ b",
     has_cpp_golden=True,
+    compute_unit="cube",
+    flops_fn=_matmul_flops,
+    weight_params=["b"],
 )
 class MatMul(Op):
     """矩阵乘法"""
@@ -429,6 +488,8 @@ class MatMul(Op):
 @register_op(
     inputs=["a", "b"],
     description="逐元素加法",
+    compute_unit="vector",
+    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Add(Op):
     """加法"""
@@ -444,6 +505,8 @@ class Add(Op):
 @register_op(
     inputs=["a", "b"],
     description="逐元素乘法",
+    compute_unit="vector",
+    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Mul(Op):
     """乘法"""
@@ -459,6 +522,8 @@ class Mul(Op):
 @register_op(
     inputs=["a", "b"],
     description="逐元素除法",
+    compute_unit="vector",
+    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Div(Op):
     """除法"""
@@ -476,6 +541,9 @@ class Div(Op):
     optional=["axes"],
     description="转置 (交换最后两个维度或指定轴)",
     has_cpp_golden=True,
+    compute_unit="vector",
+    memory_pattern="strided",  # transpose is strided access
+    flops_fn=lambda s: 0,  # pure memory operation
 )
 class Transpose(Op):
     """Transpose: 支持任意维度转置"""
@@ -535,10 +603,34 @@ class Transpose(Op):
         return np.transpose(x.astype(np.float64), axes).astype(np.float32)
 
 
+def _attention_flops(s):
+    """计算 Attention FLOPs: QK + softmax + SV"""
+    q_shape = s.get("q_shape", (1, 1, 1, 1))
+    k_shape = s.get("k_shape", (1, 1, 1, 1))
+    if len(q_shape) == 4:
+        batch, heads, seq_q, head_dim = q_shape
+        seq_kv = k_shape[-2]
+    elif len(q_shape) == 3:
+        batch, seq_q, head_dim = q_shape
+        heads = 1
+        seq_kv = k_shape[-2]
+    else:
+        return 0
+    # QK: 2 * batch * heads * seq_q * head_dim * seq_kv
+    qk_flops = batch * heads * 2 * seq_q * head_dim * seq_kv
+    # Softmax: 5 * batch * heads * seq_q * seq_kv
+    soft_flops = batch * heads * 5 * seq_q * seq_kv
+    # SV: 2 * batch * heads * seq_q * seq_kv * head_dim
+    sv_flops = batch * heads * 2 * seq_q * seq_kv * head_dim
+    return qk_flops + soft_flops + sv_flops
+
+
 @register_op(
     inputs=["q", "k", "v"],
     optional=["mask", "scale"],
     description="Scaled Dot-Product Attention",
+    compute_unit="cube",  # dominated by matmul
+    flops_fn=_attention_flops,
 )
 class Attention(Op):
     """Scaled Dot-Product Attention"""

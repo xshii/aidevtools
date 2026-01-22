@@ -26,6 +26,10 @@ _golden_cpp_registry: Dict[str, Callable] = {}
 _records: List[Dict[str, Any]] = []
 _counter: Dict[str, int] = {}
 
+# Profile 列表 (用于 Paper Analysis)
+_profiles: List[Any] = []  # List[OpProfile]
+_profile_enabled: bool = True  # 是否自动生成 profile
+
 
 def set_golden_mode(mode: str) -> None:
     """
@@ -100,9 +104,140 @@ def get_records() -> List[Dict[str, Any]]:
 
 
 def clear() -> None:
-    """清空记录"""
+    """清空记录和 profiles"""
     _records.clear()
     _counter.clear()
+    _profiles.clear()
+
+
+def set_profile_enabled(enabled: bool) -> None:
+    """设置是否自动生成 profile (用于 Paper Analysis)"""
+    global _profile_enabled
+    _profile_enabled = enabled
+
+
+def get_profile_enabled() -> bool:
+    """获取是否自动生成 profile"""
+    return _profile_enabled
+
+
+def get_profiles() -> List[Any]:
+    """
+    获取收集的 OpProfile 列表 (用于 Paper Analysis)
+
+    Returns:
+        List[OpProfile]
+
+    Example:
+        from aidevtools import ops
+        from aidevtools.analysis import PaperAnalyzer
+
+        ops.clear()
+        ops.linear(x, w)
+        ops.relu(y)
+        ops.softmax(z)
+
+        # 获取 profiles 用于分析
+        profiles = ops.get_profiles()
+        analyzer = PaperAnalyzer(chip="npu_910")
+        analyzer.add_profiles(profiles)
+        result = analyzer.analyze()
+    """
+    return _profiles.copy()
+
+
+def _create_profile(op_name: str, full_name: str, args: tuple, kwargs: dict) -> Optional[Any]:
+    """
+    根据算子元信息自动创建 OpProfile
+
+    Args:
+        op_name: 算子名称 (如 "linear")
+        full_name: 完整名称 (如 "linear_0")
+        args: 调用参数
+        kwargs: 调用关键字参数
+
+    Returns:
+        OpProfile 或 None
+    """
+    from aidevtools.ops.registry import get_op_meta
+
+    meta = get_op_meta(op_name)
+    if meta is None:
+        return None
+
+    # 懒加载 OpProfile (避免循环导入)
+    try:
+        from aidevtools.analysis.profile import OpProfile, dtype_bytes
+    except ImportError:
+        return None
+
+    # 收集输入形状和字节数
+    input_bytes = 0
+    weight_bytes = 0
+    output_bytes = 0
+    shapes = {}
+    dtype = "fp16"
+
+    # 解析参数
+    param_names = meta.inputs + meta.optional
+    param_values = {}
+
+    for i, arg in enumerate(args):
+        if i < len(param_names):
+            param_values[param_names[i]] = arg
+
+    param_values.update(kwargs)
+
+    # 计算字节数
+    for name, value in param_values.items():
+        if not _is_array_like(value):
+            continue
+
+        arr = np.asarray(value)
+        nbytes = arr.nbytes
+        shapes[f"{name}_shape"] = arr.shape
+        shapes[f"{name}_size"] = arr.size
+
+        # 推断 dtype
+        if arr.dtype == np.float16:
+            dtype = "fp16"
+        elif arr.dtype == np.float32:
+            dtype = "fp32"
+
+        # 区分 input/weight
+        if name in meta.weight_params:
+            weight_bytes += nbytes
+        else:
+            input_bytes += nbytes
+
+    # 计算输出字节数 (从第一个输入推断)
+    first_input = args[0] if args else None
+    if first_input is not None and _is_array_like(first_input):
+        output_bytes = np.asarray(first_input).nbytes
+
+    # 计算 FLOPs
+    flops = 0
+    if meta.flops_fn is not None:
+        try:
+            flops = meta.flops_fn(shapes)
+        except Exception:
+            flops = 0
+
+    # 创建 profile
+    profile = OpProfile(
+        name=full_name,
+        op_type=op_name,
+        shapes=shapes,
+        dtype=dtype,
+        flops=int(flops),
+        compute_unit=meta.compute_unit,
+        input_bytes=int(input_bytes),
+        weight_bytes=int(weight_bytes),
+        output_bytes=int(output_bytes),
+        memory_pattern=meta.memory_pattern,
+    )
+
+    return profile
 
 
 class Op:
@@ -205,6 +340,13 @@ class Op:
             "reference": ref_output,      # 高精度参考（用于 fuzzy 比对）
         }
         _records.append(record)
+
+        # 自动生成 profile (用于 Paper Analysis)
+        if _profile_enabled:
+            profile = _create_profile(self.name, full_name, args, kwargs)
+            if profile is not None:
+                _profiles.append(profile)
+                logger.debug(f"{full_name}: profile 生成完成")
 
         # 返回结果：优先 golden，否则 reference
         return golden_output if golden_output is not None else ref_output
