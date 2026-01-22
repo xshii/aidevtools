@@ -55,3 +55,4 @@ failed_cases/
 src/aidevtools/formats/custom/*/cpp/build/
 src/aidevtools/formats/custom/*/*.so
 
+demos/output/
