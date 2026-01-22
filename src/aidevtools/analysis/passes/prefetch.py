@@ -23,7 +23,7 @@ Example - Backward Prefetch:
 """
 
 from typing import List, Optional
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 class ForwardPrefetchPass(BasePass):
@@ -36,6 +36,11 @@ class ForwardPrefetchPass(BasePass):
     def __init__(self, config: PassConfig = None,
                  next_op_weight_bytes: int = 0,
                  next_op_name: str = ""):
+        """
+        Args:
+            next_op_weight_bytes: 下一算子权重字节数 (deprecated, 使用 PassContext)
+            next_op_name: 下一算子名称 (deprecated, 使用 PassContext)
+        """
         super().__init__(config)
         self.next_op_weight_bytes = next_op_weight_bytes
         self.next_op_name = next_op_name
@@ -43,13 +48,9 @@ class ForwardPrefetchPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.forward_prefetch_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行前向预取优化"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.roofline_time_us
 
@@ -124,9 +125,8 @@ class BackwardPrefetchPass(BasePass):
                  future_cube_ops: List[dict] = None):
         """
         Args:
-            future_cube_ops: 后续 Cube 算子列表，每项包含:
-                - name: 算子名
-                - weight_bytes: 权重字节数
+            future_cube_ops: 后续 Cube 算子列表 (deprecated, 使用 PassContext)
+                每项包含: name (算子名), weight_bytes (权重字节数)
         """
         super().__init__(config)
         self.future_cube_ops = future_cube_ops or []
@@ -134,13 +134,9 @@ class BackwardPrefetchPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.backward_prefetch_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行后向预取优化"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.roofline_time_us
 

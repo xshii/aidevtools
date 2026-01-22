@@ -16,6 +16,7 @@ from .base import (
     PassConfig,
     PassResult,
     PassPreset,
+    PassContext,
     BasePass,
 )
 
@@ -50,6 +51,7 @@ __all__ = [
     "PassConfig",
     "PassResult",
     "PassPreset",
+    "PassContext",
     "BasePass",
     # Passes
     "RooflinePass",

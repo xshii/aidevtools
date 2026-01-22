@@ -18,7 +18,7 @@ Example:
 """
 
 from typing import Optional
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 class CubeVectorParallelPass(BasePass):
@@ -34,9 +34,9 @@ class CubeVectorParallelPass(BasePass):
                  adjacent_op_name: str = ""):
         """
         Args:
-            adjacent_op_unit: 相邻算子的计算单元 ("cube" | "vector")
-            adjacent_op_time_us: 相邻算子的执行时间
-            adjacent_op_name: 相邻算子名称
+            adjacent_op_unit: 相邻算子的计算单元 (deprecated, 使用 PassContext)
+            adjacent_op_time_us: 相邻算子的执行时间 (deprecated, 使用 PassContext)
+            adjacent_op_name: 相邻算子名称 (deprecated, 使用 PassContext)
         """
         super().__init__(config)
         self.adjacent_op_unit = adjacent_op_unit
@@ -46,13 +46,9 @@ class CubeVectorParallelPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.cube_vector_parallel_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行 Cube/Vector 并行优化"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.roofline_time_us
 

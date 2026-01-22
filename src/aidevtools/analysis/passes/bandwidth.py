@@ -34,7 +34,7 @@ Example - 最低流量模式:
 """
 
 import math
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 class BandwidthConstraintPass(BasePass):
@@ -47,13 +47,9 @@ class BandwidthConstraintPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.bandwidth_constraint_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行带宽约束分析"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         latency_before = latency_breakdown.roofline_time_us
         original_memory_time = latency_breakdown.memory_time_us
 
@@ -159,13 +155,9 @@ class TrafficConstraintPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.traffic_constraint_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行流量约束检查"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.total_time_us or latency_breakdown.roofline_time_us
 
@@ -231,13 +223,9 @@ class MinTrafficPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.min_traffic_mode_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行最低流量优化"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.roofline_time_us
 

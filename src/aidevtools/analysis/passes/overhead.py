@@ -19,7 +19,7 @@ Example:
     警告: 如果 overhead/final > 10%，建议算子融合减少 kernel 数
 """
 
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 class OverheadPass(BasePass):
@@ -32,13 +32,9 @@ class OverheadPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.overhead_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """计算开销"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         latency_before = latency_breakdown.roofline_time_us
 
         # 获取开销参数

@@ -73,12 +73,23 @@ class AnalysisSummary:
 class PaperAnalyzer:
     """模型时延分析器
 
-    Usage:
-        analyzer = PaperAnalyzer(chip="npu_910")
-        analyzer.add_profile(profile1)
-        analyzer.add_profile(profile2)
-        result = analyzer.analyze()
-        analyzer.export_xlsx("report.xlsx")
+    基本用法:
+        >>> analyzer = PaperAnalyzer(chip="npu_910")
+        >>> analyzer.add_profile(profile)
+        >>> result = analyzer.analyze()
+        >>> print(result.summary.total_latency_us)
+
+    使用工厂方法:
+        >>> analyzer = PaperAnalyzer.from_chip_name("npu_910")
+        >>> analyzer = PaperAnalyzer.from_chip_spec(my_chip_spec)
+
+    高级配置:
+        >>> config = PassConfig.from_preset(PassPreset.AGGRESSIVE)
+        >>> analyzer = PaperAnalyzer(chip="npu_910", pass_config=config)
+
+    导出结果:
+        >>> from aidevtools.analysis import export_xlsx
+        >>> export_xlsx(result, "report.xlsx")
     """
 
     def __init__(self,
@@ -87,11 +98,16 @@ class PaperAnalyzer:
                  pass_config: PassConfig = None,
                  mode: AnalysisMode = AnalysisMode.MODEL):
         """
+        初始化分析器。
+
         Args:
-            chip: 芯片名称 (npu_310, npu_910, gpu_a100)
-            chip_spec: 芯片规格 (如果提供则忽略 chip 参数)
-            pass_config: Pass 配置
+            chip: 芯片名称，支持 "npu_310", "npu_910", "gpu_a100"
+            chip_spec: 自定义芯片规格 (如果提供，chip 参数被忽略)
+            pass_config: Pass 配置 (默认使用 STANDARD 预设)
             mode: 分析模式
+
+        Raises:
+            ValueError: 当 chip 名称无效且未提供 chip_spec 时
         """
         self.chip_spec = chip_spec or load_chip_spec(chip)
         self.pass_config = pass_config or PassConfig.from_preset(PassPreset.STANDARD)
@@ -105,6 +121,47 @@ class PaperAnalyzer:
         self._pass_results: List[List[PassResult]] = []
         self._summary: Optional[AnalysisSummary] = None
         self._gantt_data: Optional[GanttData] = None
+
+    @classmethod
+    def from_chip_name(cls, chip_name: str,
+                       pass_config: PassConfig = None,
+                       mode: AnalysisMode = AnalysisMode.MODEL) -> 'PaperAnalyzer':
+        """
+        使用芯片名称创建分析器。
+
+        Args:
+            chip_name: 芯片名称 ("npu_310", "npu_910", "gpu_a100")
+            pass_config: Pass 配置
+            mode: 分析模式
+
+        Returns:
+            PaperAnalyzer 实例
+
+        Example:
+            >>> analyzer = PaperAnalyzer.from_chip_name("npu_910")
+        """
+        return cls(chip=chip_name, pass_config=pass_config, mode=mode)
+
+    @classmethod
+    def from_chip_spec(cls, chip_spec: ChipSpec,
+                       pass_config: PassConfig = None,
+                       mode: AnalysisMode = AnalysisMode.MODEL) -> 'PaperAnalyzer':
+        """
+        使用自定义芯片规格创建分析器。
+
+        Args:
+            chip_spec: 芯片规格对象
+            pass_config: Pass 配置
+            mode: 分析模式
+
+        Returns:
+            PaperAnalyzer 实例
+
+        Example:
+            >>> chip = ChipSpec(name="Custom NPU", ...)
+            >>> analyzer = PaperAnalyzer.from_chip_spec(chip)
+        """
+        return cls(chip_spec=chip_spec, pass_config=pass_config, mode=mode)
 
     def add_profile(self, profile: OpProfile):
         """添加算子 profile"""
@@ -334,7 +391,7 @@ class PaperAnalyzer:
 
         return GanttData(
             items=items,
-            total_time_us=current_time,
+            total_duration_us=current_time,
             chip_name=self.chip_spec.name,
         )
 

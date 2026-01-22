@@ -17,7 +17,7 @@ Example:
     说明: 跨步访问导致实际带宽利用率下降，时延增加
 """
 
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 # 访存模式效率
@@ -38,13 +38,9 @@ class MemoryEfficiencyPass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.memory_efficiency_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行访存效率修正"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.roofline_time_us
 

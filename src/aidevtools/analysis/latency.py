@@ -82,9 +82,8 @@ class LatencyResult:
     chip_spec: Optional['ChipSpec'] = None
     pass_config: Optional['PassConfig'] = None
 
-    # 算子时延 (支持两种命名)
-    op_latencies: List[LatencyBreakdown] = field(default_factory=list)
-    breakdowns: List[LatencyBreakdown] = field(default_factory=list)  # alias
+    # 算子时延 (主字段)
+    breakdowns: List[LatencyBreakdown] = field(default_factory=list)
 
     # === 汇总 ===
     total_latency_us: float = 0.0
@@ -107,17 +106,14 @@ class LatencyResult:
     # === Gantt 数据 ===
     gantt_data: Optional['GanttData'] = None
 
-    def __post_init__(self):
-        """初始化后同步数据"""
-        # 同步 breakdowns 和 op_latencies
-        if self.breakdowns and not self.op_latencies:
-            self.op_latencies = self.breakdowns
-        elif self.op_latencies and not self.breakdowns:
-            self.breakdowns = self.op_latencies
+    @property
+    def op_latencies(self) -> List[LatencyBreakdown]:
+        """向后兼容别名 (deprecated, 请使用 breakdowns)"""
+        return self.breakdowns
 
     def compute_summary(self):
         """计算汇总数据"""
-        ops = self.op_latencies or self.breakdowns
+        ops = self.breakdowns
         self.total_flops = sum(op.profile.flops for op in ops)
         self.total_memory_bytes = sum(op.profile.total_bytes for op in ops)
         self.total_latency_us = sum(op.total_time_us for op in ops)
@@ -130,26 +126,55 @@ class LatencyResult:
 
 @dataclass
 class GanttItem:
-    """甘特图项"""
+    """甘特图项
+
+    Attributes:
+        op_name: 算子名称
+        unit: 执行单元 ("cube" | "vector" | "dma")
+        start_us: 开始时间 (微秒)
+        end_us: 结束时间 (微秒)
+        category: 类别 ("execution" | "prefetch" | "parallel")
+        label: 显示标签
+        color: 颜色代码 (十六进制)
+    """
     op_name: str
     unit: str = ""             # "cube" | "vector" | "dma"
-    resource: str = ""         # legacy: "DMA" | "Cube" | "Vector"
     start_us: float = 0.0
     end_us: float = 0.0
     category: str = ""         # "execution" | "prefetch" | "parallel"
     label: str = ""
     color: str = ""
 
+    @property
+    def resource(self) -> str:
+        """向后兼容别名 (deprecated, 请使用 unit)"""
+        return self.unit.capitalize() if self.unit else ""
+
+    @property
+    def duration_us(self) -> float:
+        """持续时间 (微秒)"""
+        return self.end_us - self.start_us
+
 
 @dataclass
 class GanttData:
-    """甘特图数据"""
+    """甘特图数据
+
+    Attributes:
+        items: 甘特图项列表
+        total_duration_us: 总持续时间 (微秒)
+        chip_name: 芯片名称
+    """
     items: List[GanttItem] = field(default_factory=list)
     total_duration_us: float = 0.0
-    total_time_us: float = 0.0  # alias
     chip_name: str = ""
 
+    @property
+    def total_time_us(self) -> float:
+        """向后兼容别名 (deprecated, 请使用 total_duration_us)"""
+        return self.total_duration_us
+
     def add_item(self, item: GanttItem):
+        """添加甘特图项"""
         self.items.append(item)
         self.total_duration_us = max(self.total_duration_us, item.end_us)
-        self.total_time_us = self.total_duration_us

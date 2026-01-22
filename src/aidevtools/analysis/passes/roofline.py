@@ -19,7 +19,7 @@ Example:
 from dataclasses import dataclass
 from typing import Dict, Any, List
 
-from .base import BasePass, PassConfig, PassResult
+from .base import BasePass, PassConfig, PassResult, PassContext
 
 
 @dataclass
@@ -43,13 +43,9 @@ class RooflinePass(BasePass):
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.roofline_enabled
 
-    def run(self, latency_breakdown, chip_spec) -> PassResult:
+    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
+                context: PassContext = None) -> PassResult:
         """执行 Roofline 计算"""
-        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
-
-        if not self.is_enabled():
-            return result
-
         profile = latency_breakdown.profile
 
         # 获取计算单元规格

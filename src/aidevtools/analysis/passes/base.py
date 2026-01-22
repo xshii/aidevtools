@@ -148,8 +148,52 @@ class PassResult:
         return self.latency_saved_us / self.latency_before_us
 
 
+@dataclass
+class PassContext:
+    """Pass 运行时上下文
+
+    提供 Pass 所需的邻近算子信息，避免 Pass 初始化时传入过多参数。
+
+    Attributes:
+        current_index: 当前算子在列表中的索引
+        all_profiles: 所有算子的 profile 列表
+        next_profile: 下一个算子的 profile (如果存在)
+        prev_profile: 上一个算子的 profile (如果存在)
+    """
+    current_index: int = 0
+    all_profiles: List[Any] = field(default_factory=list)
+
+    @property
+    def next_profile(self) -> Optional[Any]:
+        """获取下一个算子的 profile"""
+        if self.current_index + 1 < len(self.all_profiles):
+            return self.all_profiles[self.current_index + 1]
+        return None
+
+    @property
+    def prev_profile(self) -> Optional[Any]:
+        """获取上一个算子的 profile"""
+        if self.current_index > 0:
+            return self.all_profiles[self.current_index - 1]
+        return None
+
+    def get_future_profiles(self, count: int) -> List[Any]:
+        """获取未来 N 个算子的 profile"""
+        start = self.current_index + 1
+        end = min(start + count, len(self.all_profiles))
+        return self.all_profiles[start:end]
+
+
 class BasePass(ABC):
-    """Pass 基类"""
+    """Pass 基类
+
+    子类需要实现:
+    - is_enabled(): 检查 Pass 是否启用
+    - _do_run(): 实际执行逻辑
+
+    可选覆盖:
+    - validate(): 验证输入数据
+    """
 
     name: str = "base"
     description: str = "Base pass"
@@ -163,15 +207,46 @@ class BasePass(ABC):
         """检查 Pass 是否启用"""
         pass
 
-    @abstractmethod
     def run(self, latency_breakdown: 'LatencyBreakdown',
-            chip_spec: 'ChipSpec') -> PassResult:
+            chip_spec: 'ChipSpec',
+            context: PassContext = None) -> PassResult:
         """
-        执行 Pass
+        执行 Pass (模板方法)
 
         Args:
             latency_breakdown: 当前时延分解
             chip_spec: 芯片规格
+            context: Pass 上下文 (可选)
+
+        Returns:
+            PassResult
+        """
+        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
+
+        if not self.is_enabled():
+            return result
+
+        # 验证输入
+        warnings = self.validate(latency_breakdown)
+        if warnings:
+            result.warnings.extend(warnings)
+
+        # 执行实际逻辑
+        return self._do_run(latency_breakdown, chip_spec, result, context)
+
+    @abstractmethod
+    def _do_run(self, latency_breakdown: 'LatencyBreakdown',
+                chip_spec: 'ChipSpec',
+                result: PassResult,
+                context: PassContext = None) -> PassResult:
+        """
+        实际执行逻辑 (子类实现)
+
+        Args:
+            latency_breakdown: 当前时延分解
+            chip_spec: 芯片规格
+            result: 预创建的结果对象
+            context: Pass 上下文
 
         Returns:
             PassResult
@@ -181,3 +256,7 @@ class BasePass(ABC):
     def validate(self, latency_breakdown: 'LatencyBreakdown') -> List[str]:
         """验证输入数据，返回警告列表"""
         return []
+
+    def _create_result(self, enabled: bool = True) -> PassResult:
+        """创建结果对象 (便捷方法)"""
+        return PassResult(pass_name=self.name, enabled=enabled)
