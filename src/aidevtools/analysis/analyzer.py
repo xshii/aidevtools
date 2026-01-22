@@ -9,7 +9,6 @@
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
-from enum import Enum
 
 from .profile import OpProfile
 from .chip import ChipSpec, load_chip_spec
@@ -28,13 +27,6 @@ from .passes import (
     OverheadPass,
     TrafficConstraintPass,
 )
-
-
-class AnalysisMode(Enum):
-    """分析模式"""
-    SINGLE_OP = "single_op"      # 单算子分析
-    MODEL = "model"              # 整模型分析
-    LAYER = "layer"              # 按层分析
 
 
 @dataclass
@@ -95,8 +87,7 @@ class PaperAnalyzer:
     def __init__(self,
                  chip: str = "npu_910",
                  chip_spec: ChipSpec = None,
-                 pass_config: PassConfig = None,
-                 mode: AnalysisMode = AnalysisMode.MODEL):
+                 pass_config: PassConfig = None):
         """
         初始化分析器。
 
@@ -104,14 +95,12 @@ class PaperAnalyzer:
             chip: 芯片名称，支持 "npu_310", "npu_910", "gpu_a100"
             chip_spec: 自定义芯片规格 (如果提供，chip 参数被忽略)
             pass_config: Pass 配置 (默认使用 STANDARD 预设)
-            mode: 分析模式
 
         Raises:
             ValueError: 当 chip 名称无效且未提供 chip_spec 时
         """
         self.chip_spec = chip_spec or load_chip_spec(chip)
         self.pass_config = pass_config or PassConfig.from_preset(PassPreset.STANDARD)
-        self.mode = mode
 
         # 算子 profile 列表
         self._profiles: List[OpProfile] = []
@@ -124,15 +113,13 @@ class PaperAnalyzer:
 
     @classmethod
     def from_chip_name(cls, chip_name: str,
-                       pass_config: PassConfig = None,
-                       mode: AnalysisMode = AnalysisMode.MODEL) -> 'PaperAnalyzer':
+                       pass_config: PassConfig = None) -> 'PaperAnalyzer':
         """
         使用芯片名称创建分析器。
 
         Args:
             chip_name: 芯片名称 ("npu_310", "npu_910", "gpu_a100")
             pass_config: Pass 配置
-            mode: 分析模式
 
         Returns:
             PaperAnalyzer 实例
@@ -140,19 +127,17 @@ class PaperAnalyzer:
         Example:
             >>> analyzer = PaperAnalyzer.from_chip_name("npu_910")
         """
-        return cls(chip=chip_name, pass_config=pass_config, mode=mode)
+        return cls(chip=chip_name, pass_config=pass_config)
 
     @classmethod
     def from_chip_spec(cls, chip_spec: ChipSpec,
-                       pass_config: PassConfig = None,
-                       mode: AnalysisMode = AnalysisMode.MODEL) -> 'PaperAnalyzer':
+                       pass_config: PassConfig = None) -> 'PaperAnalyzer':
         """
         使用自定义芯片规格创建分析器。
 
         Args:
             chip_spec: 芯片规格对象
             pass_config: Pass 配置
-            mode: 分析模式
 
         Returns:
             PaperAnalyzer 实例
@@ -161,7 +146,7 @@ class PaperAnalyzer:
             >>> chip = ChipSpec(name="Custom NPU", ...)
             >>> analyzer = PaperAnalyzer.from_chip_spec(chip)
         """
-        return cls(chip_spec=chip_spec, pass_config=pass_config, mode=mode)
+        return cls(chip_spec=chip_spec, pass_config=pass_config)
 
     def add_profile(self, profile: OpProfile):
         """添加算子 profile"""

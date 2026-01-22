@@ -48,7 +48,6 @@ from .latency import (
 from .analyzer import (
     PaperAnalyzer,
     AnalysisSummary,
-    AnalysisMode,
 )
 
 from .passes import (
@@ -112,7 +111,6 @@ __all__ = [
     # Analyzer
     "PaperAnalyzer",
     "AnalysisSummary",
-    "AnalysisMode",
     # Passes
     "PassConfig",
     "PassResult",

@@ -162,6 +162,51 @@ def get_profile_only() -> bool:
     return _profile_only
 
 
+class profile_only:
+    """
+    profile-only 模式的上下文管理器
+
+    在此上下文中，调用算子只生成 profile，不执行 golden/reference 计算。
+    适用于 Paper Analysis 场景。
+
+    Example:
+        from aidevtools import ops
+        from aidevtools.ops.nn import linear, relu
+        from aidevtools.analysis import PaperAnalyzer
+
+        with ops.profile_only():
+            x = np.zeros((4, 512, 768), dtype=np.float16)
+            w = np.zeros((768, 768), dtype=np.float16)
+            linear(x, w)
+            relu(x)
+            profiles = ops.get_profiles()
+
+        # 分析
+        analyzer = PaperAnalyzer(chip="npu_910")
+        analyzer.add_profiles(profiles)
+        result = analyzer.analyze()
+    """
+
+    def __init__(self, auto_clear: bool = True):
+        """
+        Args:
+            auto_clear: 是否在进入上下文时自动清空 profiles (默认 True)
+        """
+        self._auto_clear = auto_clear
+        self._previous_state = False
+
+    def __enter__(self):
+        self._previous_state = get_profile_only()
+        if self._auto_clear:
+            clear()
+        set_profile_only(True)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        set_profile_only(self._previous_state)
+        return False
+
+
 def get_profiles() -> List[Any]:
     """
     获取收集的 OpProfile 列表 (用于 Paper Analysis)
