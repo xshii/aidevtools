@@ -6,6 +6,20 @@
 
 后向预取 (Backward Prefetch):
   当前算子 Vector 计算时，DMA 可以预取后续 Cube 算子的权重
+
+Example - Forward Prefetch:
+    当前: MatMul (Cube), compute=10us, memory=6us => idle=4us
+    下一个: Linear weight=2MB, load_time=1.67us
+    prefetch_efficiency = 0.8
+    prefetchable = min(4, 1.67) * 0.8 = 1.34us
+    => 下一个算子权重加载时间节省 1.34us
+
+Example - Backward Prefetch:
+    当前: LayerNorm (Vector), roofline_time=8us
+    后续 Cube 算子: [FFN1 weight=4MB, FFN2 weight=4MB]
+    在 Vector 执行的 8us 内可预取 FFN1/FFN2 的权重
+    prefetch_depth=2, efficiency=0.8
+    total_saved = min(8, 3.33+3.33) * 0.8 = 5.33us
 """
 
 from typing import List, Optional

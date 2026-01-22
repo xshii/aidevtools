@@ -4,6 +4,17 @@
 - sequential: 85% 效率 (连续访问)
 - strided: 50% 效率 (跨步访问, 如 transpose)
 - random: 25% 效率 (随机访问)
+
+Example:
+    Transpose [4, 12, 512, 64] axes=(0,2,1,3) on NPU 910:
+    - memory_pattern = "strided"
+    - pattern_efficiency = 0.50
+    - hbm_efficiency["strided"] = 0.55
+    - combined_efficiency = 0.50 * 0.55 = 0.275
+    - original_memory_time = 5.0us
+    - adjusted_memory_time = 5.0 / 0.275 = 18.18us
+
+    说明: 跨步访问导致实际带宽利用率下降，时延增加
 """
 
 from .base import BasePass, PassConfig, PassResult

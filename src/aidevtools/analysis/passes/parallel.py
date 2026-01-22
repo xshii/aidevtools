@@ -3,6 +3,18 @@
 当 Cube 和 Vector 可以并行执行时:
 - 连续的 Cube 算子和 Vector 算子可以重叠
 - 总时延 = max(cube_time, vector_time) 而非 cube_time + vector_time
+
+Example:
+    算子序列: MatMul(Cube, 10us) -> LayerNorm(Vector, 3us) -> ...
+
+    串行执行: 10 + 3 = 13us
+    并行执行: max(10, 3) = 10us (LayerNorm 与 MatMul 重叠)
+    节省: 13 - 10 = 3us
+
+    前提条件:
+    1. 芯片支持 cube_vector_parallel (如 NPU 910)
+    2. 两个相邻算子使用不同计算单元 (Cube vs Vector)
+    3. 无数据依赖阻塞
 """
 
 from typing import Optional

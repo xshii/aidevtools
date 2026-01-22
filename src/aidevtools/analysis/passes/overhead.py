@@ -4,6 +4,19 @@
 - Kernel 启动开销
 - 同步开销
 - 内存分配开销
+
+Example:
+    MatMul 算子 on NPU 910:
+    - roofline_time = 10us
+    - kernel_launch_us = 3us (NPU 910 配置)
+    - sync_overhead_us = 1us
+    - total_overhead = 3 + 1 = 4us
+
+    最终时延计算:
+    final = roofline + overhead - prefetch_saved - parallel_saved
+    final = 10 + 4 - 1.5 - 0 = 12.5us
+
+    警告: 如果 overhead/final > 10%，建议算子融合减少 kernel 数
 """
 
 from .base import BasePass, PassConfig, PassResult

@@ -3,6 +3,17 @@
 Roofline 模型: latency = max(compute_time, memory_time)
 - compute_time = FLOPs / (peak_tflops * 1e12) * 1e6 (us)
 - memory_time = bytes / (bandwidth_gbps * 1e9) * 1e6 (us)
+
+Example:
+    MatMul [4, 512, 768] @ [768, 768] on NPU 910:
+    - FLOPs = 2 * 4 * 512 * 768 * 768 = 2.42G
+    - Bytes = input(3MB) + weight(1.1MB) + output(3MB) = 7.1MB
+    - Arithmetic Intensity = 2.42G / 7.1MB = 341 FLOPs/Byte
+    - Ridge Point = 256 TFLOPS / 1200 GB/s = 213 FLOPs/Byte
+    - AI > Ridge => Compute Bound
+    - compute_time = 2.42G / 256T = 9.45us
+    - memory_time = 7.1MB / 1200GB/s = 5.92us
+    - roofline_time = max(9.45, 5.92) = 9.45us
 """
 
 from dataclasses import dataclass
