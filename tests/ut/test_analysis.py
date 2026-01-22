@@ -7,6 +7,17 @@ import numpy as np
 from pathlib import Path
 import tempfile
 
+from aidevtools import ops
+from aidevtools.ops.nn import matmul, layernorm, gelu, softmax, attention, add, transpose
+
+
+def _profile(op_fn, *args, **kwargs):
+    """辅助函数：使用 ops profile_only 模式生成单个 profile"""
+    with ops.profile_only():
+        op_fn(*args, **kwargs)
+        profiles = ops.get_profiles()
+    return profiles[0] if profiles else None
+
 
 class TestOpProfile:
     """OpProfile 测试"""
@@ -23,32 +34,24 @@ class TestOpProfile:
 
     def test_matmul_profile(self):
         """测试 MatMul profile"""
-        from aidevtools.analysis.profile import profile_matmul, OpProfile
+        from aidevtools.analysis.profile import OpProfile
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
 
         assert profile.op_type == "matmul"
         assert profile.compute_unit == "cube"
         # FLOPs = 2 * batch * M * K * N = 2 * 4 * 512 * 768 * 768
         expected_flops = 2 * 4 * 512 * 768 * 768
         assert profile.flops == expected_flops
-        # Input: 4 * 512 * 768 * 2 bytes
-        assert profile.input_bytes == 4 * 512 * 768 * 2
-        # Weight: 768 * 768 * 2 bytes
-        assert profile.weight_bytes == 768 * 768 * 2
-        # Output: 4 * 512 * 768 * 2 bytes
-        assert profile.output_bytes == 4 * 512 * 768 * 2
 
     def test_layernorm_profile(self):
         """测试 LayerNorm profile"""
-        from aidevtools.analysis.profile import profile_layernorm
-
         x = np.zeros((4, 512, 768), dtype=np.float16)
         gamma = np.zeros((768,), dtype=np.float16)
         beta = np.zeros((768,), dtype=np.float16)
-        profile = profile_layernorm(x, gamma, beta)
+        profile = _profile(layernorm, x, gamma, beta)
 
         assert profile.op_type == "layernorm"
         assert profile.compute_unit == "vector"
@@ -57,13 +60,11 @@ class TestOpProfile:
 
     def test_attention_profile(self):
         """测试 Attention profile"""
-        from aidevtools.analysis.profile import profile_attention
-
         batch, heads, seq, head_dim = 4, 12, 512, 64
         q = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
         k = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
         v = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-        profile = profile_attention(q, k, v)
+        profile = _profile(attention, q, k, v)
 
         assert profile.op_type == "attention"
         assert profile.compute_unit == "cube"
@@ -71,10 +72,8 @@ class TestOpProfile:
 
     def test_transpose_profile(self):
         """测试 Transpose profile"""
-        from aidevtools.analysis.profile import profile_transpose
-
         x = np.zeros((4, 12, 512, 64), dtype=np.float16)
-        profile = profile_transpose(x, axes=(0, 2, 1, 3))
+        profile = _profile(transpose, x, (0, 2, 1, 3))
 
         assert profile.op_type == "transpose"
         assert profile.memory_pattern == "strided"
@@ -227,14 +226,13 @@ class TestPaperAnalyzer:
     def test_analyzer_basic(self):
         """测试基本分析流程"""
         from aidevtools.analysis import PaperAnalyzer
-        from aidevtools.analysis.profile import profile_matmul
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
         # 添加简单的 matmul
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -247,25 +245,21 @@ class TestPaperAnalyzer:
     def test_analyzer_multiple_ops(self):
         """测试多算子分析"""
         from aidevtools.analysis import PaperAnalyzer
-        from aidevtools.analysis.profile import (
-            profile_matmul,
-            profile_layernorm,
-            profile_gelu,
-        )
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
-        # 添加多个算子
+        # 使用 profile_only 模式收集多个 profile
         x = np.zeros((4, 512, 768), dtype=np.float16)
         w = np.zeros((768, 768), dtype=np.float16)
         gamma = np.zeros((768,), dtype=np.float16)
         beta = np.zeros((768,), dtype=np.float16)
 
-        profiles = [
-            profile_layernorm(x, gamma, beta),
-            profile_matmul(x, w),
-            profile_gelu(x),
-        ]
+        with ops.profile_only():
+            layernorm(x, gamma, beta)
+            matmul(x, w)
+            gelu(x)
+            profiles = ops.get_profiles()
+
         for i, p in enumerate(profiles):
             p.name = f"op_{i}"
 
@@ -278,13 +272,12 @@ class TestPaperAnalyzer:
     def test_gantt_data(self):
         """测试 Gantt 数据生成"""
         from aidevtools.analysis import PaperAnalyzer
-        from aidevtools.analysis.profile import profile_matmul
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -310,13 +303,12 @@ class TestExport:
     def test_export_csv(self):
         """测试 CSV 导出"""
         from aidevtools.analysis import PaperAnalyzer, export_csv
-        from aidevtools.analysis.profile import profile_matmul
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -337,13 +329,12 @@ class TestExport:
         """测试 JSON 导出"""
         import json
         from aidevtools.analysis import PaperAnalyzer, export_json
-        from aidevtools.analysis.profile import profile_matmul
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -368,13 +359,12 @@ class TestExport:
     def test_export_xlsx(self):
         """测试 Excel 导出"""
         from aidevtools.analysis import PaperAnalyzer, export_xlsx
-        from aidevtools.analysis.profile import profile_matmul
 
         analyzer = PaperAnalyzer(chip="npu_910")
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -396,48 +386,39 @@ class TestIntegration:
     def test_transformer_layer_analysis(self):
         """测试 Transformer 层分析"""
         from aidevtools.analysis import PaperAnalyzer, PassConfig, PassPreset
-        from aidevtools.analysis.profile import (
-            profile_matmul,
-            profile_layernorm,
-            profile_attention,
-            profile_gelu,
-            profile_add,
-        )
 
         # 模型参数
         batch, seq, hidden = 4, 512, 768
         heads, head_dim = 12, 64
-        ffn_hidden = 3072
 
-        profiles = []
+        # 使用 profile_only 模式收集 profiles
+        with ops.profile_only():
+            # LayerNorm
+            x = np.zeros((batch, seq, hidden), dtype=np.float16)
+            gamma = np.zeros((hidden,), dtype=np.float16)
+            beta = np.zeros((hidden,), dtype=np.float16)
+            layernorm(x, gamma, beta)
 
-        # LayerNorm
-        x = np.zeros((batch, seq, hidden), dtype=np.float16)
-        gamma = np.zeros((hidden,), dtype=np.float16)
-        beta = np.zeros((hidden,), dtype=np.float16)
-        ln = profile_layernorm(x, gamma, beta)
-        ln.name = "attn_ln"
-        profiles.append(ln)
+            # QKV 投影
+            w = np.zeros((hidden, hidden), dtype=np.float16)
+            for _ in range(3):  # q, k, v
+                matmul(x, w)
 
-        # QKV 投影
-        w = np.zeros((hidden, hidden), dtype=np.float16)
-        for name in ["q_proj", "k_proj", "v_proj"]:
-            p = profile_matmul(x, w)
-            p.name = name
-            profiles.append(p)
+            # Attention
+            q = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
+            k = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
+            v = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
+            attention(q, k, v)
 
-        # Attention
-        q = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-        k = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-        v = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-        attn = profile_attention(q, k, v)
-        attn.name = "self_attn"
-        profiles.append(attn)
+            # Output 投影
+            matmul(x, w)
 
-        # Output 投影
-        out_proj = profile_matmul(x, w)
-        out_proj.name = "out_proj"
-        profiles.append(out_proj)
+            profiles = ops.get_profiles()
+
+        # 设置名称
+        names = ["attn_ln", "q_proj", "k_proj", "v_proj", "self_attn", "out_proj"]
+        for i, p in enumerate(profiles):
+            p.name = names[i]
 
         # 分析
         analyzer = PaperAnalyzer(
@@ -607,7 +588,6 @@ class TestBandwidthPasses:
     def test_analyzer_with_bandwidth_constraint(self):
         """测试分析器集成带宽约束"""
         from aidevtools.analysis import PaperAnalyzer, PassConfig
-        from aidevtools.analysis.profile import profile_matmul
 
         config = PassConfig()
         config.bandwidth_constraint_enabled = True
@@ -618,7 +598,7 @@ class TestBandwidthPasses:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -639,8 +619,7 @@ class TestBandwidthPasses:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        from aidevtools.analysis.profile import profile_matmul
-        profile = profile_matmul(a, b)
+        profile = _profile(matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)

@@ -16,13 +16,6 @@ Usage:
 
 from .profile import (
     OpProfile,
-    profile_matmul,
-    profile_layernorm,
-    profile_softmax,
-    profile_transpose,
-    profile_attention,
-    profile_gelu,
-    profile_add,
     dtype_bytes,
 )
 
@@ -85,13 +78,6 @@ from .models import (
 __all__ = [
     # Profile
     "OpProfile",
-    "profile_matmul",
-    "profile_layernorm",
-    "profile_softmax",
-    "profile_transpose",
-    "profile_attention",
-    "profile_gelu",
-    "profile_add",
     "dtype_bytes",
     # Chip
     "ChipSpec",
