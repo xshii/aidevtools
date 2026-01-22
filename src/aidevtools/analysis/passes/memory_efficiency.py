@@ -1,0 +1,104 @@
+"""Memory Efficiency Pass - 访存效率修正
+
+根据访存模式修正访存时间:
+- sequential: 85% 效率 (连续访问)
+- strided: 50% 效率 (跨步访问, 如 transpose)
+- random: 25% 效率 (随机访问)
+"""
+
+from .base import BasePass, PassConfig, PassResult
+
+
+# 访存模式效率
+MEMORY_PATTERN_EFFICIENCY = {
+    "sequential": 0.85,
+    "strided": 0.50,
+    "random": 0.25,
+}
+
+
+class MemoryEfficiencyPass(BasePass):
+    """访存效率修正 Pass"""
+
+    name = "memory_efficiency"
+    description = "根据访存模式修正访存时延"
+    order = 2
+
+    def is_enabled(self) -> bool:
+        return self.config.enabled and self.config.memory_efficiency_enabled
+
+    def run(self, latency_breakdown, chip_spec) -> PassResult:
+        """执行访存效率修正"""
+        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
+
+        if not self.is_enabled():
+            return result
+
+        profile = latency_breakdown.profile
+        latency_before = latency_breakdown.roofline_time_us
+
+        # 获取访存效率
+        pattern = profile.memory_pattern
+        efficiency = MEMORY_PATTERN_EFFICIENCY.get(pattern, 0.85)
+
+        # 如果配置了使用有效带宽
+        if self.config.use_effective_bandwidth:
+            # 考虑 HBM 效率 (efficiency 是一个 dict 或 float)
+            hbm_efficiency = chip_spec.memory.hbm.efficiency
+            if isinstance(hbm_efficiency, dict):
+                # 使用对应访存模式的效率
+                hbm_eff_value = hbm_efficiency.get(pattern, 0.85)
+            else:
+                hbm_eff_value = hbm_efficiency if hbm_efficiency else 0.85
+            efficiency = efficiency * hbm_eff_value
+
+        # 修正访存时间
+        original_memory_time = latency_breakdown.memory_time_us
+        adjusted_memory_time = original_memory_time / efficiency
+
+        # 重新计算 roofline 时延
+        new_roofline_time = max(latency_breakdown.compute_time_us, adjusted_memory_time)
+
+        # 更新瓶颈判断
+        if adjusted_memory_time > latency_breakdown.compute_time_us:
+            latency_breakdown.bottleneck = "memory"
+        else:
+            latency_breakdown.bottleneck = "compute"
+
+        # 计算变化
+        latency_delta = new_roofline_time - latency_before
+
+        # 更新 breakdown
+        latency_breakdown.memory_time_us = adjusted_memory_time
+        latency_breakdown.roofline_time_us = new_roofline_time
+
+        # 填充结果
+        result.latency_before_us = latency_before
+        result.latency_after_us = new_roofline_time
+        result.latency_saved_us = -latency_delta  # 负数表示增加
+
+        result.details = {
+            "memory_pattern": pattern,
+            "pattern_efficiency": MEMORY_PATTERN_EFFICIENCY.get(pattern, 0.85),
+            "hbm_efficiency": chip_spec.memory.hbm.efficiency,
+            "combined_efficiency": efficiency,
+            "original_memory_time_us": original_memory_time,
+            "adjusted_memory_time_us": adjusted_memory_time,
+        }
+
+        if latency_delta > 0:
+            result.warnings.append(
+                f"访存模式 '{pattern}' 效率较低 ({efficiency*100:.0f}%)，"
+                f"访存时间增加 {latency_delta:.2f}us"
+            )
+
+        if pattern == "strided":
+            result.suggestions.append(
+                "跨步访问模式效率较低，考虑数据重排或使用连续内存布局"
+            )
+        elif pattern == "random":
+            result.suggestions.append(
+                "随机访问模式效率最低，强烈建议优化数据访问模式"
+            )
+
+        return result

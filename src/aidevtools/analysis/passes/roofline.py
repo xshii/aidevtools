@@ -1,0 +1,147 @@
+"""Roofline Pass - 基础 Roofline 模型时延计算
+
+Roofline 模型: latency = max(compute_time, memory_time)
+- compute_time = FLOPs / (peak_tflops * 1e12) * 1e6 (us)
+- memory_time = bytes / (bandwidth_gbps * 1e9) * 1e6 (us)
+"""
+
+from dataclasses import dataclass
+from typing import Dict, Any, List
+
+from .base import BasePass, PassConfig, PassResult
+
+
+@dataclass
+class RooflineMetrics:
+    """Roofline 指标"""
+    flops: int = 0
+    total_bytes: int = 0
+    arithmetic_intensity: float = 0.0  # FLOPs / Bytes
+    ridge_point: float = 0.0  # 拐点
+    is_compute_bound: bool = False
+    is_memory_bound: bool = False
+
+
+class RooflinePass(BasePass):
+    """Roofline 时延计算 Pass"""
+
+    name = "roofline"
+    description = "基础 Roofline 模型时延计算"
+    order = 1
+
+    def is_enabled(self) -> bool:
+        return self.config.enabled and self.config.roofline_enabled
+
+    def run(self, latency_breakdown, chip_spec) -> PassResult:
+        """执行 Roofline 计算"""
+        result = PassResult(pass_name=self.name, enabled=self.is_enabled())
+
+        if not self.is_enabled():
+            return result
+
+        profile = latency_breakdown.profile
+
+        # 获取计算单元规格
+        if profile.compute_unit == "cube":
+            peak_tflops = self._get_cube_tflops(chip_spec, profile.dtype)
+        else:
+            peak_gflops = self._get_vector_gflops(chip_spec, profile.dtype)
+            peak_tflops = peak_gflops / 1000.0
+
+        # 计算时间 (us)
+        compute_time_us = 0.0
+        if peak_tflops > 0 and profile.flops > 0:
+            compute_time_us = profile.flops / (peak_tflops * 1e12) * 1e6
+
+        # 访存时间 (us) - 使用 HBM 带宽
+        total_bytes = (profile.input_bytes + profile.weight_bytes +
+                       profile.output_bytes + profile.workspace_bytes)
+        hbm_bandwidth_gbps = chip_spec.memory.hbm.bandwidth_gbps
+
+        memory_time_us = 0.0
+        if hbm_bandwidth_gbps > 0 and total_bytes > 0:
+            memory_time_us = total_bytes / (hbm_bandwidth_gbps * 1e9) * 1e6
+
+        # Roofline: max(compute, memory)
+        roofline_time_us = max(compute_time_us, memory_time_us)
+
+        # 计算算术强度和拐点
+        arithmetic_intensity = profile.flops / total_bytes if total_bytes > 0 else 0
+        ridge_point = (peak_tflops * 1e12) / (hbm_bandwidth_gbps * 1e9) if hbm_bandwidth_gbps > 0 else 0
+
+        # 判断瓶颈
+        is_compute_bound = arithmetic_intensity >= ridge_point
+        is_memory_bound = not is_compute_bound
+
+        # 更新 latency_breakdown
+        latency_breakdown.compute_time_us = compute_time_us
+        latency_breakdown.memory_time_us = memory_time_us
+        latency_breakdown.roofline_time_us = roofline_time_us
+        latency_breakdown.bottleneck = "compute" if is_compute_bound else "memory"
+
+        # 计算最小带宽需求
+        if compute_time_us > 0:
+            min_bandwidth_gbps = total_bytes / (compute_time_us * 1e-6) / 1e9
+            latency_breakdown.min_bandwidth_gbps = min_bandwidth_gbps
+
+        # 填充结果
+        result.latency_before_us = 0
+        result.latency_after_us = roofline_time_us
+        result.details = {
+            "compute_time_us": compute_time_us,
+            "memory_time_us": memory_time_us,
+            "roofline_time_us": roofline_time_us,
+            "flops": profile.flops,
+            "total_bytes": total_bytes,
+            "arithmetic_intensity": arithmetic_intensity,
+            "ridge_point": ridge_point,
+            "is_compute_bound": is_compute_bound,
+            "is_memory_bound": is_memory_bound,
+            "peak_tflops": peak_tflops,
+            "hbm_bandwidth_gbps": hbm_bandwidth_gbps,
+            "min_bandwidth_gbps": latency_breakdown.min_bandwidth_gbps,
+        }
+
+        # 添加建议
+        if is_memory_bound:
+            result.suggestions.append(
+                f"算子为访存瓶颈 (AI={arithmetic_intensity:.2f} < ridge={ridge_point:.2f})，"
+                f"考虑算子融合或提升复用"
+            )
+        else:
+            result.suggestions.append(
+                f"算子为算力瓶颈 (AI={arithmetic_intensity:.2f} >= ridge={ridge_point:.2f})，"
+                f"已充分利用计算资源"
+            )
+
+        return result
+
+    def _get_cube_tflops(self, chip_spec, dtype: str) -> float:
+        """获取 Cube 单元峰值算力"""
+        cube = chip_spec.cube
+        dtype_lower = dtype.lower()
+
+        if dtype_lower in ("fp16", "float16", "half"):
+            return cube.fp16_tflops
+        elif dtype_lower in ("bf16", "bfloat16"):
+            return cube.bf16_tflops
+        elif dtype_lower in ("fp32", "float32", "float"):
+            return cube.fp32_tflops
+        elif dtype_lower in ("int8", "int8_t"):
+            return cube.int8_tops
+        else:
+            return cube.fp16_tflops
+
+    def _get_vector_gflops(self, chip_spec, dtype: str) -> float:
+        """获取 Vector 单元峰值算力"""
+        vector = chip_spec.vector
+        dtype_lower = dtype.lower()
+
+        if dtype_lower in ("fp16", "float16", "half"):
+            return vector.fp16_gflops
+        elif dtype_lower in ("bf16", "bfloat16"):
+            return vector.bf16_gflops
+        elif dtype_lower in ("fp32", "float32", "float"):
+            return vector.fp32_gflops
+        else:
+            return vector.fp16_gflops
