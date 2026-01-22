@@ -428,7 +428,3 @@ def list_chips() -> list:
     return list(_BUILTIN_CHIPS.keys())
 
 
-# 别名
-def get_chip_spec(chip_name: str) -> ChipSpec:
-    """load_chip_spec 的别名"""
-    return load_chip_spec(chip_name)

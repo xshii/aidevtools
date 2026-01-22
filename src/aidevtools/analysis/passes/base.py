@@ -152,36 +152,11 @@ class PassResult:
 class PassContext:
     """Pass 运行时上下文
 
-    提供 Pass 所需的邻近算子信息，避免 Pass 初始化时传入过多参数。
-
-    Attributes:
-        current_index: 当前算子在列表中的索引
-        all_profiles: 所有算子的 profile 列表
-        next_profile: 下一个算子的 profile (如果存在)
-        prev_profile: 上一个算子的 profile (如果存在)
+    提供 Pass 所需的邻近算子信息。
     """
-    current_index: int = 0
-    all_profiles: List[Any] = field(default_factory=list)
-
-    @property
-    def next_profile(self) -> Optional[Any]:
-        """获取下一个算子的 profile"""
-        if self.current_index + 1 < len(self.all_profiles):
-            return self.all_profiles[self.current_index + 1]
-        return None
-
-    @property
-    def prev_profile(self) -> Optional[Any]:
-        """获取上一个算子的 profile"""
-        if self.current_index > 0:
-            return self.all_profiles[self.current_index - 1]
-        return None
-
-    def get_future_profiles(self, count: int) -> List[Any]:
-        """获取未来 N 个算子的 profile"""
-        start = self.current_index + 1
-        end = min(start + count, len(self.all_profiles))
-        return self.all_profiles[start:end]
+    next_profile: Optional[Any] = None      # 下一个算子
+    prev_profile: Optional[Any] = None      # 上一个算子
+    future_profiles: List[Any] = field(default_factory=list)  # 后续算子列表
 
 
 class BasePass(ABC):
@@ -257,6 +232,9 @@ class BasePass(ABC):
         """验证输入数据，返回警告列表"""
         return []
 
-    def _create_result(self, enabled: bool = True) -> PassResult:
-        """创建结果对象 (便捷方法)"""
-        return PassResult(pass_name=self.name, enabled=enabled)
+    def _skip(self, result: PassResult, latency_us: float, reason: str) -> PassResult:
+        """跳过 Pass 时填充结果"""
+        result.latency_before_us = latency_us
+        result.latency_after_us = latency_us
+        result.details = {"reason": reason}
+        return result

@@ -22,7 +22,6 @@ Example - Backward Prefetch:
     total_saved = min(8, 3.33+3.33) * 0.8 = 5.33us
 """
 
-from typing import List, Optional
 from .base import BasePass, PassConfig, PassResult, PassContext
 
 
@@ -32,18 +31,6 @@ class ForwardPrefetchPass(BasePass):
     name = "forward_prefetch"
     description = "Cube 计算时预取下一算子权重"
     order = 3
-
-    def __init__(self, config: PassConfig = None,
-                 next_op_weight_bytes: int = 0,
-                 next_op_name: str = ""):
-        """
-        Args:
-            next_op_weight_bytes: 下一算子权重字节数 (deprecated, 使用 PassContext)
-            next_op_name: 下一算子名称 (deprecated, 使用 PassContext)
-        """
-        super().__init__(config)
-        self.next_op_weight_bytes = next_op_weight_bytes
-        self.next_op_name = next_op_name
 
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.forward_prefetch_enabled
@@ -56,23 +43,23 @@ class ForwardPrefetchPass(BasePass):
 
         # 只有 Cube 算子才能执行前向预取
         if profile.compute_unit != "cube":
-            result.details = {"reason": "非 Cube 算子，无法执行前向预取"}
-            result.latency_before_us = latency_before
-            result.latency_after_us = latency_before
-            return result
+            return self._skip(result, latency_before, "非 Cube 算子，无法执行前向预取")
 
         # 计算当前算子的空闲 DMA 时间 (compute_time - memory_time)
         compute_time = latency_breakdown.compute_time_us
         memory_time = latency_breakdown.memory_time_us
-
-        # 只有计算瓶颈时才有空闲时间用于预取
         idle_time = max(0, compute_time - memory_time)
 
-        if idle_time <= 0 or self.next_op_weight_bytes <= 0:
+        # 从 context 获取下一算子信息
+        next_profile = context.next_profile if context else None
+        next_weight_bytes = next_profile.weight_bytes if next_profile else 0
+        next_op_name = next_profile.name if next_profile else ""
+
+        if idle_time <= 0 or next_weight_bytes <= 0:
             result.details = {
                 "reason": "无空闲时间或无后续权重",
                 "idle_time_us": idle_time,
-                "next_weight_bytes": self.next_op_weight_bytes
+                "next_weight_bytes": next_weight_bytes
             }
             result.latency_before_us = latency_before
             result.latency_after_us = latency_before
@@ -80,7 +67,7 @@ class ForwardPrefetchPass(BasePass):
 
         # 计算预取下一个算子权重所需时间
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        next_weight_load_time = self.next_op_weight_bytes / (hbm_bandwidth * 1e9) * 1e6
+        next_weight_load_time = next_weight_bytes / (hbm_bandwidth * 1e9) * 1e6
 
         # 可预取时间 = min(空闲时间, 权重加载时间) * 效率
         prefetch_efficiency = self.config.prefetch_efficiency
@@ -98,8 +85,8 @@ class ForwardPrefetchPass(BasePass):
             "compute_time_us": compute_time,
             "memory_time_us": memory_time,
             "idle_time_us": idle_time,
-            "next_op_name": self.next_op_name,
-            "next_weight_bytes": self.next_op_weight_bytes,
+            "next_op_name": next_op_name,
+            "next_weight_bytes": next_weight_bytes,
             "next_weight_load_time_us": next_weight_load_time,
             "prefetch_efficiency": prefetch_efficiency,
             "prefetchable_time_us": prefetchable_time,
@@ -107,7 +94,7 @@ class ForwardPrefetchPass(BasePass):
 
         if prefetchable_time > 0:
             result.suggestions.append(
-                f"可预取下一算子 '{self.next_op_name}' 的 {self.next_op_weight_bytes/1024/1024:.2f}MB 权重，"
+                f"可预取下一算子 '{next_op_name}' 的 {next_weight_bytes/1024/1024:.2f}MB 权重，"
                 f"节省 {prefetchable_time:.2f}us"
             )
 
@@ -121,16 +108,6 @@ class BackwardPrefetchPass(BasePass):
     description = "Vector 计算时预取后续 Cube 算子权重"
     order = 4
 
-    def __init__(self, config: PassConfig = None,
-                 future_cube_ops: List[dict] = None):
-        """
-        Args:
-            future_cube_ops: 后续 Cube 算子列表 (deprecated, 使用 PassContext)
-                每项包含: name (算子名), weight_bytes (权重字节数)
-        """
-        super().__init__(config)
-        self.future_cube_ops = future_cube_ops or []
-
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.backward_prefetch_enabled
 
@@ -142,19 +119,23 @@ class BackwardPrefetchPass(BasePass):
 
         # 只有 Vector 算子才能执行后向预取
         if profile.compute_unit != "vector":
-            result.details = {"reason": "非 Vector 算子，无法执行后向预取"}
-            result.latency_before_us = latency_before
-            result.latency_after_us = latency_before
-            return result
+            return self._skip(result, latency_before, "非 Vector 算子，无法执行后向预取")
 
         # Vector 算子的完整执行时间都可用于预取
         available_time = latency_breakdown.roofline_time_us
 
-        if available_time <= 0 or not self.future_cube_ops:
+        # 从 context 获取后续 Cube 算子
+        future_cube_ops = []
+        if context and context.future_profiles:
+            for p in context.future_profiles[:self.config.backward_prefetch_depth]:
+                if p.compute_unit == "cube":
+                    future_cube_ops.append({"name": p.name, "weight_bytes": p.weight_bytes})
+
+        if available_time <= 0 or not future_cube_ops:
             result.details = {
                 "reason": "无可用时间或无后续 Cube 算子",
                 "available_time_us": available_time,
-                "future_cube_ops": len(self.future_cube_ops)
+                "future_cube_ops": len(future_cube_ops)
             }
             result.latency_before_us = latency_before
             result.latency_after_us = latency_before
@@ -162,7 +143,6 @@ class BackwardPrefetchPass(BasePass):
 
         # 在预取深度内预取后续 Cube 算子权重
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        prefetch_depth = self.config.backward_prefetch_depth
         prefetch_efficiency = self.config.prefetch_efficiency
 
         total_prefetched = 0
@@ -170,7 +150,7 @@ class BackwardPrefetchPass(BasePass):
         prefetch_details = []
 
         remaining_time = available_time
-        for i, op in enumerate(self.future_cube_ops[:prefetch_depth]):
+        for op in future_cube_ops:
             if remaining_time <= 0:
                 break
 
@@ -198,7 +178,7 @@ class BackwardPrefetchPass(BasePass):
 
         result.details = {
             "available_time_us": available_time,
-            "prefetch_depth": prefetch_depth,
+            "prefetch_depth": self.config.backward_prefetch_depth,
             "prefetch_efficiency": prefetch_efficiency,
             "total_prefetched_bytes": total_prefetched,
             "total_saved_us": total_saved,

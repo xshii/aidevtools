@@ -27,7 +27,6 @@ from .chip import (
     MemoryLevelSpec,
     PipelineSpec,
     load_chip_spec,
-    get_chip_spec,
     list_chips,
 )
 
@@ -87,7 +86,6 @@ __all__ = [
     "MemoryLevelSpec",
     "PipelineSpec",
     "load_chip_spec",
-    "get_chip_spec",
     "list_chips",
     # Latency
     "LatencyResult",

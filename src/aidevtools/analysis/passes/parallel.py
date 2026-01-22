@@ -17,7 +17,6 @@ Example:
     3. 无数据依赖阻塞
 """
 
-from typing import Optional
 from .base import BasePass, PassConfig, PassResult, PassContext
 
 
@@ -27,21 +26,6 @@ class CubeVectorParallelPass(BasePass):
     name = "cube_vector_parallel"
     description = "Cube 和 Vector 单元并行执行优化"
     order = 5
-
-    def __init__(self, config: PassConfig = None,
-                 adjacent_op_unit: str = "",
-                 adjacent_op_time_us: float = 0.0,
-                 adjacent_op_name: str = ""):
-        """
-        Args:
-            adjacent_op_unit: 相邻算子的计算单元 (deprecated, 使用 PassContext)
-            adjacent_op_time_us: 相邻算子的执行时间 (deprecated, 使用 PassContext)
-            adjacent_op_name: 相邻算子名称 (deprecated, 使用 PassContext)
-        """
-        super().__init__(config)
-        self.adjacent_op_unit = adjacent_op_unit
-        self.adjacent_op_time_us = adjacent_op_time_us
-        self.adjacent_op_name = adjacent_op_name
 
     def is_enabled(self) -> bool:
         return self.config.enabled and self.config.cube_vector_parallel_enabled
@@ -54,28 +38,33 @@ class CubeVectorParallelPass(BasePass):
 
         # 检查芯片是否支持 Cube/Vector 并行
         if not chip_spec.pipeline.cube_vector_parallel:
-            result.details = {"reason": "芯片不支持 Cube/Vector 并行"}
-            result.latency_before_us = latency_before
-            result.latency_after_us = latency_before
-            return result
+            return self._skip(result, latency_before, "芯片不支持 Cube/Vector 并行")
+
+        # 从 context 获取下一算子信息
+        next_profile = context.next_profile if context else None
+        if not next_profile:
+            return self._skip(result, latency_before, "无下一算子")
+
+        current_unit = profile.compute_unit
+        adjacent_unit = next_profile.compute_unit
+        adjacent_op_name = next_profile.name
 
         # 检查是否有相邻的不同类型算子
-        current_unit = profile.compute_unit
-        if not self.adjacent_op_unit or current_unit == self.adjacent_op_unit:
+        if current_unit == adjacent_unit:
             result.details = {
-                "reason": "无相邻不同类型算子",
+                "reason": "相邻算子使用相同计算单元",
                 "current_unit": current_unit,
-                "adjacent_unit": self.adjacent_op_unit
+                "adjacent_unit": adjacent_unit
             }
             result.latency_before_us = latency_before
             result.latency_after_us = latency_before
             return result
 
+        # 估算相邻算子时间 (基于 Roofline 模型)
+        adjacent_time = self._estimate_op_time(next_profile, chip_spec)
+
         # 计算并行节省
         current_time = latency_breakdown.roofline_time_us
-        adjacent_time = self.adjacent_op_time_us
-
-        # 串行时延 vs 并行时延
         serial_time = current_time + adjacent_time
         parallel_time = max(current_time, adjacent_time)
         saved_time = serial_time - parallel_time
@@ -91,8 +80,8 @@ class CubeVectorParallelPass(BasePass):
         result.details = {
             "current_unit": current_unit,
             "current_time_us": current_time,
-            "adjacent_unit": self.adjacent_op_unit,
-            "adjacent_op_name": self.adjacent_op_name,
+            "adjacent_unit": adjacent_unit,
+            "adjacent_op_name": adjacent_op_name,
             "adjacent_time_us": adjacent_time,
             "serial_time_us": serial_time,
             "parallel_time_us": parallel_time,
@@ -101,9 +90,26 @@ class CubeVectorParallelPass(BasePass):
 
         if saved_time > 0:
             result.suggestions.append(
-                f"{current_unit.capitalize()} 算子与相邻 {self.adjacent_op_unit.capitalize()} 算子 "
-                f"'{self.adjacent_op_name}' 可并行执行，节省 {saved_time:.2f}us "
+                f"{current_unit.capitalize()} 算子与相邻 {adjacent_unit.capitalize()} 算子 "
+                f"'{adjacent_op_name}' 可并行执行，节省 {saved_time:.2f}us "
                 f"(串行 {serial_time:.2f}us → 并行 {parallel_time:.2f}us)"
             )
 
         return result
+
+    def _estimate_op_time(self, profile, chip_spec) -> float:
+        """估算算子执行时间 (基于 Roofline 模型)"""
+        # 计算时间
+        if profile.compute_unit == "cube":
+            tflops = chip_spec.cube.fp16_tflops
+        else:
+            tflops = chip_spec.vector.fp16_gflops / 1000.0  # 转 TFLOPS
+
+        compute_time = profile.flops / (tflops * 1e12) * 1e6 if tflops > 0 else 0
+
+        # 访存时间
+        total_bytes = profile.input_bytes + profile.weight_bytes + profile.output_bytes
+        bandwidth = chip_spec.memory.hbm.bandwidth_gbps
+        memory_time = total_bytes / (bandwidth * 1e9) * 1e6 if bandwidth > 0 else 0
+
+        return max(compute_time, memory_time)
