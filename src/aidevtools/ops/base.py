@@ -13,11 +13,49 @@
 - reference 始终执行，用于 fuzzy 比对
 """
 import numpy as np
+from functools import wraps
 from typing import Callable, Dict, Any, List, Optional
 from pathlib import Path
 
 from aidevtools.core.log import logger
 from aidevtools.core.config import get_config, set_config
+
+
+def fp64_reference(func: Callable) -> Callable:
+    """
+    装饰器：自动将 ndarray 输入转为 fp64，输出转为 fp32
+
+    用于简化 reference() 方法的实现。
+
+    Example:
+        @fp64_reference
+        def reference(self, x, y):
+            return x * y  # 自动 fp64 计算，返回 fp32
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # 转换位置参数 (跳过 self)
+        new_args = []
+        for i, arg in enumerate(args):
+            if i > 0 and isinstance(arg, np.ndarray):
+                new_args.append(arg.astype(np.float64))
+            else:
+                new_args.append(arg)
+
+        # 转换关键字参数
+        new_kwargs = {}
+        for k, v in kwargs.items():
+            if isinstance(v, np.ndarray):
+                new_kwargs[k] = v.astype(np.float64)
+            else:
+                new_kwargs[k] = v
+
+        # 执行并转换结果
+        result = func(*new_args, **new_kwargs)
+        if isinstance(result, np.ndarray):
+            return result.astype(np.float32)
+        return result
+    return wrapper
 
 # Golden 实现注册表 (C++ bindings)
 _golden_cpp_registry: Dict[str, Callable] = {}

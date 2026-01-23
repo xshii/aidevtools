@@ -9,7 +9,7 @@
 """
 import numpy as np
 
-from aidevtools.ops.base import Op
+from aidevtools.ops.base import Op, fp64_reference
 from aidevtools.ops.registry import register_op
 from aidevtools.ops.cpu_golden import (
     run_cpu_golden,
@@ -56,14 +56,12 @@ class Linear(Op):
             y = y + bias
         return y.astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None) -> np.ndarray:
-        # 使用 fp64 计算高精度参考
-        x64 = x.astype(np.float64)
-        w64 = weight.astype(np.float64)
-        y = np.matmul(x64, w64)
+        y = np.matmul(x, weight)
         if bias is not None:
-            y = y + bias.astype(np.float64)
-        return y.astype(np.float32)
+            y = y + bias
+        return y
 
     def cpu_golden(self, x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None) -> np.ndarray:
         """C++ Golden 实现 (复用 MatMul cpu_golden)"""
@@ -87,8 +85,9 @@ class ReLU(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return np.maximum(0, x).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
-        return np.maximum(0, x.astype(np.float64)).astype(np.float32)
+        return np.maximum(0, x)
 
 
 @register_op(
@@ -104,9 +103,9 @@ class GELU(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
-        x64 = x.astype(np.float64)
-        return (0.5 * x64 * (1 + np.tanh(np.sqrt(2 / np.pi) * (x64 + 0.044715 * x64 ** 3)))).astype(np.float32)
+        return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))
 
 
 @register_op(
@@ -122,9 +121,9 @@ class Sigmoid(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (1 / (1 + np.exp(-x))).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
-        x64 = x.astype(np.float64)
-        return (1 / (1 + np.exp(-x64))).astype(np.float32)
+        return 1 / (1 + np.exp(-x))
 
 
 @register_op(
@@ -140,8 +139,9 @@ class Tanh(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return np.tanh(x).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
-        return np.tanh(x.astype(np.float64)).astype(np.float32)
+        return np.tanh(x)
 
 
 @register_op(
@@ -160,9 +160,9 @@ class SiLU(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (x * (1 / (1 + np.exp(-x)))).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
-        x64 = x.astype(np.float64)
-        return (x64 * (1 / (1 + np.exp(-x64)))).astype(np.float32)
+        return x * (1 / (1 + np.exp(-x)))
 
 
 @register_op(
@@ -208,11 +208,11 @@ class Softmax(Op):
 
         return y.reshape(original_shape)
 
+    @fp64_reference
     def reference(self, x: np.ndarray, axis: int = -1) -> np.ndarray:
-        x64 = x.astype(np.float64)
-        x_max = np.max(x64, axis=axis, keepdims=True)
-        x_exp = np.exp(x64 - x_max)
-        return (x_exp / np.sum(x_exp, axis=axis, keepdims=True)).astype(np.float32)
+        x_max = np.max(x, axis=axis, keepdims=True)
+        x_exp = np.exp(x - x_max)
+        return x_exp / np.sum(x_exp, axis=axis, keepdims=True)
 
 
 @register_op(
@@ -276,12 +276,12 @@ class LayerNorm(Op):
 
         return y.reshape(original_shape)
 
+    @fp64_reference
     def reference(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
-        x64 = x.astype(np.float64)
-        mean = np.mean(x64, axis=-1, keepdims=True)
-        var = np.var(x64, axis=-1, keepdims=True)
-        x_norm = (x64 - mean) / np.sqrt(var + eps)
-        return (gamma.astype(np.float64) * x_norm + beta.astype(np.float64)).astype(np.float32)
+        mean = np.mean(x, axis=-1, keepdims=True)
+        var = np.var(x, axis=-1, keepdims=True)
+        x_norm = (x - mean) / np.sqrt(var + eps)
+        return gamma * x_norm + beta
 
 
 @register_op(
@@ -309,12 +309,10 @@ class RMSNorm(Op):
         rms = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + eps)
         return (x / rms * gamma).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray, gamma: np.ndarray, eps: float = 1e-5) -> np.ndarray:
-        """高精度参考实现 (fp64)"""
-        x64 = x.astype(np.float64)
-        gamma64 = gamma.astype(np.float64)
-        rms = np.sqrt(np.mean(x64 ** 2, axis=-1, keepdims=True) + eps)
-        return (x64 / rms * gamma64).astype(np.float32)
+        rms = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + eps)
+        return x / rms * gamma
 
 
 @register_op(
@@ -343,19 +341,15 @@ class BatchNorm(Op):
         x_norm = (x - mean) / np.sqrt(var + eps)
         return (gamma * x_norm + beta).astype(np.float32)
 
+    @fp64_reference
     def reference(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray,
                   mean: np.ndarray = None, var: np.ndarray = None, eps: float = 1e-5) -> np.ndarray:
-        x64 = x.astype(np.float64)
         if mean is None:
-            mean = np.mean(x64, axis=0, keepdims=True)
-        else:
-            mean = mean.astype(np.float64)
+            mean = np.mean(x, axis=0, keepdims=True)
         if var is None:
-            var = np.var(x64, axis=0, keepdims=True)
-        else:
-            var = var.astype(np.float64)
-        x_norm = (x64 - mean) / np.sqrt(var + eps)
-        return (gamma.astype(np.float64) * x_norm + beta.astype(np.float64)).astype(np.float32)
+            var = np.var(x, axis=0, keepdims=True)
+        x_norm = (x - mean) / np.sqrt(var + eps)
+        return gamma * x_norm + beta
 
 
 @register_op(
@@ -481,8 +475,9 @@ class MatMul(Op):
                 output_shape=(M, N),
             )
 
+    @fp64_reference
     def reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return np.matmul(a.astype(np.float64), b.astype(np.float64)).astype(np.float32)
+        return np.matmul(a, b)
 
 
 @register_op(
@@ -498,8 +493,9 @@ class Add(Op):
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a + b).astype(np.float32)
 
+    @fp64_reference
     def reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return (a.astype(np.float64) + b.astype(np.float64)).astype(np.float32)
+        return a + b
 
 
 @register_op(
@@ -515,8 +511,9 @@ class Mul(Op):
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a * b).astype(np.float32)
 
+    @fp64_reference
     def reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return (a.astype(np.float64) * b.astype(np.float64)).astype(np.float32)
+        return a * b
 
 
 @register_op(
@@ -532,8 +529,9 @@ class Div(Op):
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a / b).astype(np.float32)
 
+    @fp64_reference
     def reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return (a.astype(np.float64) / b.astype(np.float64)).astype(np.float32)
+        return a / b
 
 
 @register_op(
@@ -597,10 +595,11 @@ class Transpose(Op):
 
         return result
 
+    @fp64_reference
     def reference(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
         if axes is None:
-            return np.swapaxes(x.astype(np.float64), -2, -1).astype(np.float32)
-        return np.transpose(x.astype(np.float64), axes).astype(np.float32)
+            return np.swapaxes(x, -2, -1)
+        return np.transpose(x, axes)
 
 
 def _attention_flops(s):
@@ -647,19 +646,17 @@ class Attention(Op):
         attn_weights = scores_exp / np.sum(scores_exp, axis=-1, keepdims=True)
         return np.matmul(attn_weights, v).astype(np.float32)
 
+    @fp64_reference
     def reference(self, q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray = None) -> np.ndarray:
-        q64 = q.astype(np.float64)
-        k64 = k.astype(np.float64)
-        v64 = v.astype(np.float64)
-        d_k = q64.shape[-1]
-        scores = np.matmul(q64, k64.swapaxes(-2, -1)) / np.sqrt(d_k)
+        d_k = q.shape[-1]
+        scores = np.matmul(q, k.swapaxes(-2, -1)) / np.sqrt(d_k)
         if mask is not None:
-            scores = scores + mask.astype(np.float64) * (-1e9)
+            scores = scores + mask * (-1e9)
         # softmax
         scores_max = np.max(scores, axis=-1, keepdims=True)
         scores_exp = np.exp(scores - scores_max)
         attn_weights = scores_exp / np.sum(scores_exp, axis=-1, keepdims=True)
-        return np.matmul(attn_weights, v64).astype(np.float32)
+        return np.matmul(attn_weights, v)
 
 
 # 实例化算子（方便直接调用）
