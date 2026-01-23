@@ -76,7 +76,12 @@ def export_xlsx(result: LatencyResult,
         ws_passes = wb.create_sheet("Pass Details")
         _write_passes_sheet(ws_passes, result, header_font, header_fill, border)
 
-    # 4. Gantt 图页签
+    # 4. Pass 配置页签
+    if include_passes and result.pass_config:
+        ws_config = wb.create_sheet("Pass Config")
+        _write_config_sheet(ws_config, result.pass_config, header_font, header_fill, border)
+
+    # 5. Gantt 图页签
     if include_gantt and result.gantt_data:
         ws_gantt = wb.create_sheet("Gantt Chart")
         _write_gantt_sheet(ws_gantt, result.gantt_data, header_font, header_fill, border)
@@ -244,6 +249,110 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
 
     for col in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 15
+
+
+def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
+    """写入 Pass 配置页签"""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from .passes import PassPreset
+
+    # 标题
+    ws.cell(row=1, column=1, value="Pass Configuration").font = Font(bold=True, size=14)
+    ws.merge_cells('A1:C1')
+
+    # 预设信息
+    ws.cell(row=3, column=1, value="Preset").font = Font(bold=True)
+    ws.cell(row=3, column=2, value=pass_config.preset.value)
+
+    # Pass 启用状态表
+    row = 5
+    ws.cell(row=row, column=1, value="Pass Name").font = header_font
+    ws.cell(row=row, column=1).fill = header_fill
+    ws.cell(row=row, column=2, value="Enabled").font = header_font
+    ws.cell(row=row, column=2).fill = header_fill
+    ws.cell(row=row, column=3, value="Key Parameters").font = header_font
+    ws.cell(row=row, column=3).fill = header_fill
+
+    # Pass 配置列表
+    passes_info = [
+        ("Roofline", pass_config.roofline_enabled, "-"),
+        ("MinTraffic", pass_config.min_traffic_mode_enabled,
+         f"l2_reuse={pass_config.l2_reuse_factor}, tiling_eff={pass_config.tiling_efficiency}"),
+        ("MemoryEfficiency", pass_config.memory_efficiency_enabled,
+         f"use_effective_bw={pass_config.use_effective_bandwidth}"),
+        ("BandwidthConstraint", pass_config.bandwidth_constraint_enabled,
+         f"streams={pass_config.concurrent_streams}, model={pass_config.bandwidth_contention_model}"),
+        ("ForwardPrefetch", pass_config.forward_prefetch_enabled,
+         f"efficiency={pass_config.prefetch_efficiency}"),
+        ("BackwardPrefetch", pass_config.backward_prefetch_enabled,
+         f"depth={pass_config.backward_prefetch_depth}"),
+        ("CubeVectorParallel", pass_config.cube_vector_parallel_enabled, "-"),
+        ("Overhead", pass_config.overhead_enabled,
+         f"kernel_launch={pass_config.kernel_launch_us}us, sync={pass_config.sync_overhead_us}us"),
+        ("TrafficConstraint", pass_config.traffic_constraint_enabled,
+         f"max={pass_config.max_traffic_bytes}, mode={pass_config.traffic_budget_mode}"),
+    ]
+
+    # 颜色
+    enabled_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    disabled_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    for pass_name, enabled, params in passes_info:
+        row += 1
+        ws.cell(row=row, column=1, value=pass_name).border = border
+        cell = ws.cell(row=row, column=2, value="Yes" if enabled else "No")
+        cell.fill = enabled_fill if enabled else disabled_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+        ws.cell(row=row, column=3, value=params).border = border
+
+    # 详细参数表
+    row += 3
+    ws.cell(row=row, column=1, value="All Parameters").font = Font(bold=True, size=12)
+
+    row += 1
+    ws.cell(row=row, column=1, value="Parameter").font = header_font
+    ws.cell(row=row, column=1).fill = header_fill
+    ws.cell(row=row, column=2, value="Value").font = header_font
+    ws.cell(row=row, column=2).fill = header_fill
+
+    params = [
+        ("enabled", pass_config.enabled),
+        ("preset", pass_config.preset.value),
+        ("roofline_enabled", pass_config.roofline_enabled),
+        ("memory_efficiency_enabled", pass_config.memory_efficiency_enabled),
+        ("use_effective_bandwidth", pass_config.use_effective_bandwidth),
+        ("forward_prefetch_enabled", pass_config.forward_prefetch_enabled),
+        ("prefetch_efficiency", pass_config.prefetch_efficiency),
+        ("backward_prefetch_enabled", pass_config.backward_prefetch_enabled),
+        ("backward_prefetch_depth", pass_config.backward_prefetch_depth),
+        ("cube_vector_parallel_enabled", pass_config.cube_vector_parallel_enabled),
+        ("overhead_enabled", pass_config.overhead_enabled),
+        ("kernel_launch_us", pass_config.kernel_launch_us),
+        ("sync_overhead_us", pass_config.sync_overhead_us),
+        ("bandwidth_constraint_enabled", pass_config.bandwidth_constraint_enabled),
+        ("concurrent_streams", pass_config.concurrent_streams),
+        ("bandwidth_contention_model", pass_config.bandwidth_contention_model),
+        ("traffic_constraint_enabled", pass_config.traffic_constraint_enabled),
+        ("max_traffic_bytes", pass_config.max_traffic_bytes),
+        ("traffic_budget_mode", pass_config.traffic_budget_mode),
+        ("min_traffic_mode_enabled", pass_config.min_traffic_mode_enabled),
+        ("cache_line_bytes", pass_config.cache_line_bytes),
+        ("l2_reuse_factor", pass_config.l2_reuse_factor),
+        ("tiling_efficiency", pass_config.tiling_efficiency),
+    ]
+
+    for param_name, param_value in params:
+        row += 1
+        ws.cell(row=row, column=1, value=param_name).border = border
+        cell = ws.cell(row=row, column=2, value=str(param_value))
+        cell.border = border
+        if isinstance(param_value, float):
+            cell.number_format = '0.00'
+
+    ws.column_dimensions['A'].width = 28
+    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['C'].width = 50
 
 
 def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, border):
