@@ -21,16 +21,16 @@ from aidevtools.core.log import logger
 from aidevtools.core.config import get_config, set_config
 
 
-def fp64_reference(func: Callable) -> Callable:
+def fp32_reference(func: Callable) -> Callable:
     """
-    装饰器：自动将 ndarray 输入转为 fp64，输出转为 fp32
+    装饰器：确保 ndarray 输入转为 fp32，输出也为 fp32
 
     用于简化 reference() 方法的实现。
 
     Example:
-        @fp64_reference
+        @fp32_reference
         def reference(self, x, y):
-            return x * y  # 自动 fp64 计算，返回 fp32
+            return x * y  # 自动 fp32 计算，返回 fp32
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -38,7 +38,7 @@ def fp64_reference(func: Callable) -> Callable:
         new_args = []
         for i, arg in enumerate(args):
             if i > 0 and isinstance(arg, np.ndarray):
-                new_args.append(arg.astype(np.float64))
+                new_args.append(arg.astype(np.float32))
             else:
                 new_args.append(arg)
 
@@ -46,7 +46,7 @@ def fp64_reference(func: Callable) -> Callable:
         new_kwargs = {}
         for k, v in kwargs.items():
             if isinstance(v, np.ndarray):
-                new_kwargs[k] = v.astype(np.float64)
+                new_kwargs[k] = v.astype(np.float32)
             else:
                 new_kwargs[k] = v
 
@@ -56,6 +56,10 @@ def fp64_reference(func: Callable) -> Callable:
             return result.astype(np.float32)
         return result
     return wrapper
+
+
+# 保留别名以兼容
+fp64_reference = fp32_reference
 
 # Golden 实现注册表 (C++ bindings)
 _golden_cpp_registry: Dict[str, Callable] = {}
