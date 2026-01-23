@@ -81,7 +81,11 @@ def export_xlsx(result: LatencyResult,
         ws_config = wb.create_sheet("Pass Config")
         _write_config_sheet(ws_config, result.pass_config, header_font, header_fill, border)
 
-    # 5. Gantt 图页签
+    # 5. 计算详情页签 (可手动重算验证)
+    ws_calc = wb.create_sheet("Calculation Details")
+    _write_calculation_sheet(ws_calc, result, header_font, header_fill, border)
+
+    # 6. Gantt 图页签
     if include_gantt and result.gantt_data:
         ws_gantt = wb.create_sheet("Gantt Chart")
         _write_gantt_sheet(ws_gantt, result.gantt_data, header_font, header_fill, border)
@@ -353,6 +357,192 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     ws.column_dimensions['A'].width = 28
     ws.column_dimensions['B'].width = 15
     ws.column_dimensions['C'].width = 50
+
+
+def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill, border):
+    """写入计算详情页签 - 支持手动重算验证
+
+    包含:
+    - 芯片参数 (算力、带宽)
+    - 每个算子的维度信息 (M, N, K)
+    - 数据类型和字节数
+    - FLOPs 和访存量计算
+    - 时延计算公式
+    """
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+    from .profile import dtype_bytes
+
+    chip = result.chip_spec
+
+    # ===== 第一部分: 芯片参数 =====
+    ws.cell(row=1, column=1, value="Chip Parameters (用于计算)").font = Font(bold=True, size=14)
+    ws.merge_cells('A1:D1')
+
+    chip_params = [
+        ("Chip Name", chip.name, "", ""),
+        ("Cube FP16 TFLOPS", chip.cube.fp16_tflops, "TFLOPS", "Cube 计算时延 = FLOPs / (TFLOPS × 1e12) × 1e6 us"),
+        ("Vector FP16 GFLOPS", chip.vector.fp16_gflops, "GFLOPS", "Vector 计算时延 = FLOPs / (GFLOPS × 1e9) × 1e6 us"),
+        ("HBM Bandwidth", chip.memory.hbm.bandwidth_gbps, "GB/s", "访存时延 = Bytes / (BW × 1e9) × 1e6 us"),
+    ]
+
+    row = 3
+    for label, value, unit, formula in chip_params:
+        ws.cell(row=row, column=1, value=label).border = border
+        cell = ws.cell(row=row, column=2, value=value)
+        cell.border = border
+        if isinstance(value, float):
+            cell.number_format = '0.00'
+        ws.cell(row=row, column=3, value=unit).border = border
+        ws.cell(row=row, column=4, value=formula).font = Font(italic=True, color="666666")
+        row += 1
+
+    # ===== 第二部分: 算子详情表 =====
+    row += 2
+    ws.cell(row=row, column=1, value="Operator Calculation Details").font = Font(bold=True, size=14)
+    ws.merge_cells(f'A{row}:R{row}')
+    row += 2
+
+    # 表头
+    headers = [
+        "Op Name", "Op Type", "Unit", "Dtype", "Bytes/Elem",
+        "M", "N", "K",
+        "Input (B)", "Weight (B)", "Output (B)", "Total (B)",
+        "FLOPs", "AI (FLOPs/B)",
+        "Compute (us)", "Memory (us)", "Roofline (us)", "Bottleneck"
+    ]
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    header_row = row
+    row += 1
+
+    # 数据行
+    for bd in result.breakdowns:
+        p = bd.profile
+        shapes = p.shapes or {}
+
+        # 提取维度 (支持多种命名)
+        m = shapes.get("M") or shapes.get("m") or shapes.get("batch", 1) * shapes.get("seq_len", 1)
+        n = shapes.get("N") or shapes.get("n") or shapes.get("out_features", 0)
+        k = shapes.get("K") or shapes.get("k") or shapes.get("in_features", 0)
+
+        # 如果没有 shapes，尝试从 bytes 反推
+        elem_bytes = dtype_bytes(p.dtype)
+        if not m and p.input_bytes > 0:
+            m = "-"
+        if not n and p.output_bytes > 0:
+            n = "-"
+        if not k and p.weight_bytes > 0:
+            k = "-"
+
+        values = [
+            p.name,
+            p.op_type,
+            p.compute_unit,
+            p.dtype,
+            elem_bytes,
+            m if m else "-",
+            n if n else "-",
+            k if k else "-",
+            p.input_bytes,
+            p.weight_bytes,
+            p.output_bytes,
+            p.total_bytes,
+            p.flops,
+            p.arithmetic_intensity,
+            bd.compute_time_us,
+            bd.memory_time_us,
+            bd.roofline_time_us,
+            bd.bottleneck,
+        ]
+
+        for col, value in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.border = border
+            if isinstance(value, float):
+                if col in [14]:  # AI
+                    cell.number_format = '0.0'
+                else:
+                    cell.number_format = '0.00'
+
+        row += 1
+
+    # ===== 第三部分: 公式说明 =====
+    row += 2
+    ws.cell(row=row, column=1, value="Calculation Formulas (计算公式)").font = Font(bold=True, size=14)
+    ws.merge_cells(f'A{row}:F{row}')
+    row += 2
+
+    formulas = [
+        ("MatMul FLOPs", "2 × M × N × K", "矩阵乘法浮点运算次数"),
+        ("Conv2D FLOPs", "2 × N × H × W × C × K × R × S", "卷积浮点运算次数"),
+        ("Input Bytes", "M × K × bytes_per_elem", "输入张量访存量"),
+        ("Weight Bytes", "K × N × bytes_per_elem", "权重张量访存量"),
+        ("Output Bytes", "M × N × bytes_per_elem", "输出张量访存量"),
+        ("Arithmetic Intensity", "FLOPs / Total_Bytes", "计算访存比"),
+        ("Compute Time (Cube)", "FLOPs / (Cube_TFLOPS × 1e12) × 1e6", "Cube 计算时延 (us)"),
+        ("Compute Time (Vector)", "FLOPs / (Vector_GFLOPS × 1e9) × 1e6", "Vector 计算时延 (us)"),
+        ("Memory Time", "Total_Bytes / (HBM_BW × 1e9) × 1e6", "访存时延 (us)"),
+        ("Roofline Time", "max(Compute_Time, Memory_Time)", "Roofline 时延"),
+        ("Bottleneck", "compute if Compute > Memory else memory", "瓶颈判断"),
+    ]
+
+    for name, formula, desc in formulas:
+        ws.cell(row=row, column=1, value=name).font = Font(bold=True)
+        ws.cell(row=row, column=2, value=formula).font = Font(name='Consolas')
+        ws.cell(row=row, column=4, value=desc).font = Font(italic=True, color="666666")
+        row += 1
+
+    # ===== 第四部分: Pass 影响 =====
+    row += 2
+    ws.cell(row=row, column=1, value="Pass Effects (优化效果)").font = Font(bold=True, size=14)
+    ws.merge_cells(f'A{row}:H{row}')
+    row += 2
+
+    # Pass 效果表头
+    pass_headers = [
+        "Op Name", "Prefetch Saved", "Backward Prefetch", "Parallel Saved",
+        "Overhead", "Total Time", "vs Roofline"
+    ]
+    for col, header in enumerate(pass_headers, 1):
+        cell = ws.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+
+    row += 1
+    for bd in result.breakdowns:
+        total_saved = bd.prefetch_saved_us + bd.backward_prefetch_saved_us + bd.parallel_saved_us
+        delta = bd.total_time_us - bd.roofline_time_us
+
+        values = [
+            bd.profile.name,
+            bd.prefetch_saved_us,
+            bd.backward_prefetch_saved_us,
+            bd.parallel_saved_us,
+            bd.overhead_us,
+            bd.total_time_us,
+            f"{delta:+.2f}" if delta != 0 else "0",
+        ]
+
+        for col, value in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.border = border
+            if isinstance(value, float):
+                cell.number_format = '0.00'
+
+        row += 1
+
+    # 调整列宽
+    col_widths = [18, 10, 8, 8, 10, 6, 6, 6, 12, 12, 12, 12, 14, 10, 12, 12, 12, 10]
+    for i, width in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = width
 
 
 def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, border):
