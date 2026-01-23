@@ -140,6 +140,14 @@ def register_op(
             else:
                 default_auto_gen[inp] = "random"
 
+        # 如果没有提供 flops_fn，检查类是否有自定义的 compute_flops 方法
+        actual_flops_fn = flops_fn
+        if actual_flops_fn is None and hasattr(cls, 'compute_flops'):
+            # 检查是否是自定义实现（不是基类的默认实现）
+            from aidevtools.ops.base import Op
+            if cls.compute_flops is not Op.compute_flops:
+                actual_flops_fn = cls.compute_flops
+
         # 创建元信息
         meta = OpMeta(
             name=op_name,
@@ -152,7 +160,7 @@ def register_op(
             # Profile 配置
             compute_unit=compute_unit,
             memory_pattern=memory_pattern,
-            flops_fn=flops_fn,
+            flops_fn=actual_flops_fn,
             weight_params=weight_params or [],
         )
 

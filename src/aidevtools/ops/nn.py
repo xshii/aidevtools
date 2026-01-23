@@ -18,20 +18,6 @@ from aidevtools.ops.cpu_golden import (
 )
 
 
-def _linear_flops(s):
-    """计算 Linear FLOPs: 2 * batch * M * K * N"""
-    x_shape = s.get("x_shape", (1, 1))
-    weight_shape = s.get("weight_shape", (1, 1))
-    # x: [..., M, K], weight: [K, N]
-    if len(x_shape) >= 2 and len(weight_shape) >= 2:
-        batch = int(np.prod(x_shape[:-2])) if len(x_shape) > 2 else 1
-        M = x_shape[-2] if len(x_shape) >= 2 else 1
-        K = x_shape[-1]
-        N = weight_shape[-1]
-        return batch * 2 * M * K * N
-    return 0
-
-
 @register_op(
     inputs=["x", "weight"],
     optional=["bias"],
@@ -39,16 +25,27 @@ def _linear_flops(s):
     auto_gen={
         "x": "input",
         "weight": "xavier",
-        "bias": "uniform",  # 类似 PyTorch: uniform(-1/sqrt(in), 1/sqrt(in))
+        "bias": "uniform",
     },
-    # Profile 配置
     compute_unit="cube",
-    flops_fn=_linear_flops,
     weight_params=["weight", "bias"],
 )
 class Linear(Op):
     """线性层: y = x @ W + b"""
     name = "linear"
+
+    @staticmethod
+    def compute_flops(s):
+        """FLOPs: 2 * batch * M * K * N"""
+        x_shape = s.get("x_shape", (1, 1))
+        weight_shape = s.get("weight_shape", (1, 1))
+        if len(x_shape) >= 2 and len(weight_shape) >= 2:
+            batch = int(np.prod(x_shape[:-2])) if len(x_shape) > 2 else 1
+            M = x_shape[-2] if len(x_shape) >= 2 else 1
+            K = x_shape[-1]
+            N = weight_shape[-1]
+            return batch * 2 * M * K * N
+        return 0
 
     def golden_python(self, x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None) -> np.ndarray:
         y = np.matmul(x, weight)
@@ -76,11 +73,15 @@ class Linear(Op):
     inputs=["x"],
     description="ReLU 激活 y = max(0, x)",
     compute_unit="vector",
-    flops_fn=lambda s: s.get("x_size", 0),  # 1 op/element
 )
 class ReLU(Op):
     """ReLU: y = max(0, x)"""
     name = "relu"
+
+    @staticmethod
+    def compute_flops(s):
+        """1 op/element"""
+        return s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return np.maximum(0, x).astype(np.float32)
@@ -94,11 +95,15 @@ class ReLU(Op):
     inputs=["x"],
     description="GELU 激活 (近似)",
     compute_unit="vector",
-    flops_fn=lambda s: 10 * s.get("x_size", 0),  # ~10 ops/element (tanh expensive)
 )
 class GELU(Op):
     """GELU 近似"""
     name = "gelu"
+
+    @staticmethod
+    def compute_flops(s):
+        """~10 ops/element (tanh expensive)"""
+        return 10 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))).astype(np.float32)
@@ -112,11 +117,15 @@ class GELU(Op):
     inputs=["x"],
     description="Sigmoid 激活 y = 1 / (1 + exp(-x))",
     compute_unit="vector",
-    flops_fn=lambda s: 4 * s.get("x_size", 0),  # exp + div + add + neg
 )
 class Sigmoid(Op):
     """Sigmoid: y = 1 / (1 + exp(-x))"""
     name = "sigmoid"
+
+    @staticmethod
+    def compute_flops(s):
+        """exp + div + add + neg = 4 ops/element"""
+        return 4 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (1 / (1 + np.exp(-x))).astype(np.float32)
@@ -130,11 +139,15 @@ class Sigmoid(Op):
     inputs=["x"],
     description="Tanh 激活",
     compute_unit="vector",
-    flops_fn=lambda s: 6 * s.get("x_size", 0),  # tanh is expensive
 )
 class Tanh(Op):
     """Tanh"""
     name = "tanh"
+
+    @staticmethod
+    def compute_flops(s):
+        """~6 ops/element (tanh expensive)"""
+        return 6 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return np.tanh(x).astype(np.float32)
@@ -148,7 +161,6 @@ class Tanh(Op):
     inputs=["x"],
     description="SiLU/Swish 激活 y = x * sigmoid(x) (LLaMA FFN)",
     compute_unit="vector",
-    flops_fn=lambda s: 5 * s.get("x_size", 0),  # sigmoid + mul
 )
 class SiLU(Op):
     """SiLU (Swish): y = x * sigmoid(x)
@@ -156,6 +168,11 @@ class SiLU(Op):
     用于 LLaMA, Mistral 等现代 LLM 的 FFN。
     """
     name = "silu"
+
+    @staticmethod
+    def compute_flops(s):
+        """sigmoid + mul = 5 ops/element"""
+        return 5 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (x * (1 / (1 + np.exp(-x)))).astype(np.float32)
@@ -171,11 +188,15 @@ class SiLU(Op):
     description="Softmax 激活 (防溢出)",
     has_cpp_golden=True,
     compute_unit="vector",
-    flops_fn=lambda s: 5 * s.get("x_size", 0),  # max + sub + exp + sum + div
 )
 class Softmax(Op):
     """安全 Softmax（防溢出）"""
     name = "softmax"
+
+    @staticmethod
+    def compute_flops(s):
+        """max + sub + exp + sum + div = 5 ops/element"""
+        return 5 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray, axis: int = -1) -> np.ndarray:
         x_max = np.max(x, axis=axis, keepdims=True)
@@ -226,12 +247,16 @@ class Softmax(Op):
         "beta": "zeros:-1",
     },
     compute_unit="vector",
-    flops_fn=lambda s: 8 * s.get("x_size", 0),  # mean + var + norm + scale + shift
     weight_params=["gamma", "beta"],
 )
 class LayerNorm(Op):
     """Layer Normalization"""
     name = "layernorm"
+
+    @staticmethod
+    def compute_flops(s):
+        """mean + var + norm + scale + shift = ~8 ops/element"""
+        return 8 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
         mean = np.mean(x, axis=-1, keepdims=True)
@@ -293,7 +318,6 @@ class LayerNorm(Op):
         "gamma": "ones:-1",
     },
     compute_unit="vector",
-    flops_fn=lambda s: 6 * s.get("x_size", 0),  # square + mean + sqrt + div + mul
     weight_params=["gamma"],
 )
 class RMSNorm(Op):
@@ -303,6 +327,11 @@ class RMSNorm(Op):
     比 LayerNorm 更高效（无需计算 mean）。
     """
     name = "rmsnorm"
+
+    @staticmethod
+    def compute_flops(s):
+        """square + mean + sqrt + div + mul = 6 ops/element"""
+        return 6 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray, gamma: np.ndarray, eps: float = 1e-5) -> np.ndarray:
         """Python Golden 实现 (fp32)"""
@@ -325,12 +354,16 @@ class RMSNorm(Op):
         "beta": "zeros:-1",
     },
     compute_unit="vector",
-    flops_fn=lambda s: 8 * s.get("x_size", 0),
     weight_params=["gamma", "beta"],
 )
 class BatchNorm(Op):
     """Batch Normalization"""
     name = "batchnorm"
+
+    @staticmethod
+    def compute_flops(s):
+        """~8 ops/element"""
+        return 8 * s.get("x_size", 0)
 
     def golden_python(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray,
                       mean: np.ndarray = None, var: np.ndarray = None, eps: float = 1e-5) -> np.ndarray:
@@ -356,13 +389,17 @@ class BatchNorm(Op):
     inputs=["input_ids", "embed_table"],
     description="Embedding 查表",
     compute_unit="vector",
-    memory_pattern="random",  # embedding is random access
-    flops_fn=lambda s: 0,  # pure memory operation
+    memory_pattern="random",
     weight_params=["embed_table"],
 )
 class Embedding(Op):
     """Embedding 查表"""
     name = "embedding"
+
+    @staticmethod
+    def compute_flops(s):
+        """纯内存操作，无计算"""
+        return 0
 
     def golden_python(self, input_ids: np.ndarray, embed_table: np.ndarray) -> np.ndarray:
         return embed_table[input_ids].astype(np.float32)
@@ -372,30 +409,28 @@ class Embedding(Op):
         return embed_table[input_ids].astype(np.float32)
 
 
-def _matmul_flops(s):
-    """计算 MatMul FLOPs: 2 * M * K * N"""
-    a_shape = s.get("a_shape", (1, 1))
-    b_shape = s.get("b_shape", (1, 1))
-    # batch * 2 * M * K * N
-    if len(a_shape) >= 2:
-        batch = int(np.prod(a_shape[:-2])) if len(a_shape) > 2 else 1
-        M, K = a_shape[-2:]
-        N = b_shape[-1] if len(b_shape) >= 1 else 1
-        return batch * 2 * M * K * N
-    return 0
-
-
 @register_op(
     inputs=["a", "b"],
     description="矩阵乘法 c = a @ b",
     has_cpp_golden=True,
     compute_unit="cube",
-    flops_fn=_matmul_flops,
     weight_params=["b"],
 )
 class MatMul(Op):
     """矩阵乘法"""
     name = "matmul"
+
+    @staticmethod
+    def compute_flops(s):
+        """FLOPs: batch * 2 * M * K * N"""
+        a_shape = s.get("a_shape", (1, 1))
+        b_shape = s.get("b_shape", (1, 1))
+        if len(a_shape) >= 2:
+            batch = int(np.prod(a_shape[:-2])) if len(a_shape) > 2 else 1
+            M, K = a_shape[-2:]
+            N = b_shape[-1] if len(b_shape) >= 1 else 1
+            return batch * 2 * M * K * N
+        return 0
 
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return np.matmul(a, b).astype(np.float32)
@@ -484,11 +519,15 @@ class MatMul(Op):
     inputs=["a", "b"],
     description="逐元素加法",
     compute_unit="vector",
-    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Add(Op):
     """加法"""
     name = "add"
+
+    @staticmethod
+    def compute_flops(s):
+        """1 op/element"""
+        return s.get("a_size", 0)
 
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a + b).astype(np.float32)
@@ -502,11 +541,15 @@ class Add(Op):
     inputs=["a", "b"],
     description="逐元素乘法",
     compute_unit="vector",
-    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Mul(Op):
     """乘法"""
     name = "mul"
+
+    @staticmethod
+    def compute_flops(s):
+        """1 op/element"""
+        return s.get("a_size", 0)
 
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a * b).astype(np.float32)
@@ -520,11 +563,15 @@ class Mul(Op):
     inputs=["a", "b"],
     description="逐元素除法",
     compute_unit="vector",
-    flops_fn=lambda s: s.get("a_size", 0),  # 1 op/element
 )
 class Div(Op):
     """除法"""
     name = "div"
+
+    @staticmethod
+    def compute_flops(s):
+        """1 op/element"""
+        return s.get("a_size", 0)
 
     def golden_python(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return (a / b).astype(np.float32)
@@ -540,12 +587,16 @@ class Div(Op):
     description="转置 (交换最后两个维度或指定轴)",
     has_cpp_golden=True,
     compute_unit="vector",
-    memory_pattern="strided",  # transpose is strided access
-    flops_fn=lambda s: 0,  # pure memory operation
+    memory_pattern="strided",
 )
 class Transpose(Op):
     """Transpose: 支持任意维度转置"""
     name = "transpose"
+
+    @staticmethod
+    def compute_flops(s):
+        """纯内存操作，无计算"""
+        return 0
 
     def golden_python(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
         """
@@ -602,38 +653,37 @@ class Transpose(Op):
         return np.transpose(x, axes)
 
 
-def _attention_flops(s):
-    """计算 Attention FLOPs: QK + softmax + SV"""
-    q_shape = s.get("q_shape", (1, 1, 1, 1))
-    k_shape = s.get("k_shape", (1, 1, 1, 1))
-    if len(q_shape) == 4:
-        batch, heads, seq_q, head_dim = q_shape
-        seq_kv = k_shape[-2]
-    elif len(q_shape) == 3:
-        batch, seq_q, head_dim = q_shape
-        heads = 1
-        seq_kv = k_shape[-2]
-    else:
-        return 0
-    # QK: 2 * batch * heads * seq_q * head_dim * seq_kv
-    qk_flops = batch * heads * 2 * seq_q * head_dim * seq_kv
-    # Softmax: 5 * batch * heads * seq_q * seq_kv
-    soft_flops = batch * heads * 5 * seq_q * seq_kv
-    # SV: 2 * batch * heads * seq_q * seq_kv * head_dim
-    sv_flops = batch * heads * 2 * seq_q * seq_kv * head_dim
-    return qk_flops + soft_flops + sv_flops
-
-
 @register_op(
     inputs=["q", "k", "v"],
     optional=["mask", "scale"],
     description="Scaled Dot-Product Attention",
     compute_unit="cube",  # dominated by matmul
-    flops_fn=_attention_flops,
 )
 class Attention(Op):
     """Scaled Dot-Product Attention"""
     name = "attention"
+
+    @staticmethod
+    def compute_flops(s):
+        """计算 Attention FLOPs: QK + softmax + SV"""
+        q_shape = s.get("q_shape", (1, 1, 1, 1))
+        k_shape = s.get("k_shape", (1, 1, 1, 1))
+        if len(q_shape) == 4:
+            batch, heads, seq_q, head_dim = q_shape
+            seq_kv = k_shape[-2]
+        elif len(q_shape) == 3:
+            batch, seq_q, head_dim = q_shape
+            heads = 1
+            seq_kv = k_shape[-2]
+        else:
+            return 0
+        # QK: 2 * batch * heads * seq_q * head_dim * seq_kv
+        qk_flops = batch * heads * 2 * seq_q * head_dim * seq_kv
+        # Softmax: 5 * batch * heads * seq_q * seq_kv
+        soft_flops = batch * heads * 5 * seq_q * seq_kv
+        # SV: 2 * batch * heads * seq_q * seq_kv * head_dim
+        sv_flops = batch * heads * 2 * seq_q * seq_kv * head_dim
+        return qk_flops + soft_flops + sv_flops
 
     def golden_python(self, q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray = None) -> np.ndarray:
         d_k = q.shape[-1]
@@ -663,22 +713,11 @@ class Attention(Op):
 # 损失函数
 # ============================================================
 
-def _cross_entropy_flops(s):
-    """CrossEntropy FLOPs: log_softmax + nll_loss"""
-    input_shape = s.get("input_shape", (1, 1))
-    # log_softmax: 5 * size (max, sub, exp, sum, log)
-    # nll_loss: 1 * batch
-    size = int(np.prod(input_shape))
-    batch = input_shape[0] if len(input_shape) > 0 else 1
-    return 5 * size + batch
-
-
 @register_op(
     inputs=["input", "target"],
     optional=["weight", "reduction", "label_smoothing"],
     description="交叉熵损失 (含 log_softmax)",
     compute_unit="vector",
-    flops_fn=_cross_entropy_flops,
 )
 class CrossEntropyLoss(Op):
     """交叉熵损失函数
@@ -687,6 +726,16 @@ class CrossEntropyLoss(Op):
     内部实现 log_softmax + nll_loss。
     """
     name = "cross_entropy"
+
+    @staticmethod
+    def compute_flops(s):
+        """CrossEntropy FLOPs: log_softmax + nll_loss"""
+        input_shape = s.get("input_shape", (1, 1))
+        # log_softmax: 5 * size (max, sub, exp, sum, log)
+        # nll_loss: 1 * batch
+        size = int(np.prod(input_shape))
+        batch = input_shape[0] if len(input_shape) > 0 else 1
+        return 5 * size + batch
 
     def golden_python(
         self,
@@ -754,19 +803,11 @@ class CrossEntropyLoss(Op):
         return self.golden_python(input, target, weight, reduction, label_smoothing)
 
 
-def _mse_loss_flops(s):
-    """MSE FLOPs: sub + square + mean"""
-    input_shape = s.get("input_shape", (1,))
-    size = int(np.prod(input_shape))
-    return 3 * size  # sub, square, sum/mean
-
-
 @register_op(
     inputs=["input", "target"],
     optional=["reduction"],
     description="均方误差损失",
     compute_unit="vector",
-    flops_fn=_mse_loss_flops,
 )
 class MSELoss(Op):
     """均方误差损失函数
@@ -774,6 +815,13 @@ class MSELoss(Op):
     与 torch.nn.functional.mse_loss 兼容。
     """
     name = "mse_loss"
+
+    @staticmethod
+    def compute_flops(s):
+        """MSE FLOPs: sub + square + mean"""
+        input_shape = s.get("input_shape", (1,))
+        size = int(np.prod(input_shape))
+        return 3 * size  # sub, square, sum/mean
 
     def golden_python(
         self,
@@ -807,19 +855,11 @@ class MSELoss(Op):
         return self.golden_python(input, target, reduction)
 
 
-def _l1_loss_flops(s):
-    """L1 FLOPs: sub + abs + mean"""
-    input_shape = s.get("input_shape", (1,))
-    size = int(np.prod(input_shape))
-    return 3 * size
-
-
 @register_op(
     inputs=["input", "target"],
     optional=["reduction"],
     description="L1 损失 (MAE)",
     compute_unit="vector",
-    flops_fn=_l1_loss_flops,
 )
 class L1Loss(Op):
     """L1 损失函数 (Mean Absolute Error)
@@ -827,6 +867,13 @@ class L1Loss(Op):
     与 torch.nn.functional.l1_loss 兼容。
     """
     name = "l1_loss"
+
+    @staticmethod
+    def compute_flops(s):
+        """L1 FLOPs: sub + abs + mean"""
+        input_shape = s.get("input_shape", (1,))
+        size = int(np.prod(input_shape))
+        return 3 * size
 
     def golden_python(
         self,
@@ -858,7 +905,6 @@ class L1Loss(Op):
     optional=["reduction", "beta"],
     description="Smooth L1 损失 (Huber Loss)",
     compute_unit="vector",
-    flops_fn=_l1_loss_flops,
 )
 class SmoothL1Loss(Op):
     """Smooth L1 损失 (Huber Loss)
@@ -866,6 +912,13 @@ class SmoothL1Loss(Op):
     与 torch.nn.functional.smooth_l1_loss 兼容。
     """
     name = "smooth_l1_loss"
+
+    @staticmethod
+    def compute_flops(s):
+        """Smooth L1 FLOPs: sub + abs + compare + compute"""
+        input_shape = s.get("input_shape", (1,))
+        size = int(np.prod(input_shape))
+        return 4 * size  # sub, abs, where, compute
 
     def golden_python(
         self,
@@ -904,7 +957,6 @@ class SmoothL1Loss(Op):
     optional=["weight", "reduction", "pos_weight"],
     description="二元交叉熵 (带 logits)",
     compute_unit="vector",
-    flops_fn=lambda s: 6 * int(np.prod(s.get("input_shape", (1,)))),
 )
 class BCEWithLogitsLoss(Op):
     """二元交叉熵损失 (带 logits)
@@ -912,6 +964,13 @@ class BCEWithLogitsLoss(Op):
     与 torch.nn.functional.binary_cross_entropy_with_logits 兼容。
     """
     name = "bce_with_logits"
+
+    @staticmethod
+    def compute_flops(s):
+        """BCE with logits FLOPs: sigmoid + log + mul + sum"""
+        input_shape = s.get("input_shape", (1,))
+        size = int(np.prod(input_shape))
+        return 6 * size  # max, exp, log, mul, add, etc.
 
     def golden_python(
         self,

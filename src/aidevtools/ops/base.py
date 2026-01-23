@@ -389,6 +389,34 @@ class Op:
         if self.name is None:
             raise ValueError("算子必须定义 name 属性")
 
+    @staticmethod
+    def compute_flops(shapes: Dict[str, Any]) -> int:
+        """
+        计算 FLOPs
+
+        子类可重写此方法提供精确的 FLOPs 计算。
+
+        Args:
+            shapes: 形状字典，包含:
+                - {param}_shape: 参数形状
+                - {param}_size: 参数元素数量
+
+        Returns:
+            FLOPs 数量
+
+        Example:
+            @staticmethod
+            def compute_flops(shapes):
+                # MatMul: 2 * M * K * N
+                a_shape = shapes.get("a_shape", (1, 1))
+                b_shape = shapes.get("b_shape", (1, 1))
+                M, K = a_shape[-2:]
+                N = b_shape[-1]
+                return 2 * M * K * N
+        """
+        # 默认返回 0，子类应重写
+        return 0
+
     def golden_python(self, *args, **kwargs) -> np.ndarray:
         """
         Python Golden 实现，子类必须实现
