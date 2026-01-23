@@ -2,34 +2,24 @@
 """MiniTransformer Demo - 完整比对流程演示
 
 演示完整的 golden 生成与比对流程：
-1. 使用 ops API 定义算子序列
+1. 使用 PyTorch 风格 F API 定义算子序列
 2. 执行 cpp golden (via subprocess) 和 reference (pure fp32)
 3. 构造假的 DUT 数据（模拟 bfp 格式处理）
 4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
-
-比对流程说明：
-- reference: fp32 计算（用于 fuzzy_pure 比对）
-- golden: cpp golden 计算（带量化，用于 fuzzy_qnt 比对）
-- DUT: 芯片输出（本 demo 用模拟数据）
-
-三列比对：
-- exact: DUT vs golden 的 bit 级精确比对
-- fuzzy_pure: DUT vs reference (不考虑量化误差)
-- fuzzy_qnt: DUT vs golden (量化感知比对)
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
-from aidevtools import ops
-from aidevtools.ops.base import get_records
+from aidevtools import F, ops
+from aidevtools.ops import get_records
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
 from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
-set_cpu_golden_dtype("gfp16")  # 使用 gfp16 格式
+set_cpu_golden_dtype("gfp16")
 ops.set_golden_mode("cpp")
 
 
@@ -38,22 +28,33 @@ def run_model():
     ops.seed(42)
     ops.clear()
 
-    # 定义模型: MatMul -> LayerNorm -> Softmax
-    # 使用有 cpp golden 的算子 (支持 batch)
+    # 配置
+    batch, seq, hidden, out_hidden = 2, 8, 64, 32
+    np.random.seed(42)
+
     # MatMul: (2, 8, 64) @ (64, 32) -> (2, 8, 32)
-    y = ops.matmul((2, 8, 64), (64, 32), dtype="bfp8")
-    y = ops.layernorm(y, dtype="bfp8")  # gamma/beta 自动生成
-    y = ops.softmax(y, dtype="bfp8")
+    x = np.random.randn(batch, seq, hidden).astype(np.float32)
+    w = np.random.randn(hidden, out_hidden).astype(np.float32)
+    y = F.matmul(x, w)
+    print(f"  MatMul: {x.shape} @ {w.shape} -> {y.shape}")
+
+    # LayerNorm
+    y = F.layer_norm(y, normalized_shape=(out_hidden,))
+    print(f"  LayerNorm: {y.shape}")
+
+    # Softmax
+    y = F.softmax(y, dim=-1)
+    print(f"  Softmax: {y.shape}")
 
     return get_records()
 
 
 def main():
     print(f"\n{'=' * 70}")
-    print(f"  MiniTransformer Demo - 完整比对流程")
+    print(f"  MiniTransformer Demo - PyTorch 风格 API")
     print(f"{'=' * 70}")
     print(f"  golden_mode: cpp (via subprocess)")
-    print(f"  quantization: gfp16 (cpp) + bfp8 (simulation)")
+    print(f"  quantization: gfp16 (cpp)")
 
     # 1. 运行模型
     print("\n[1] 运行模型 (MatMul -> LayerNorm -> Softmax)")
@@ -67,11 +68,10 @@ def main():
 
     # 2. 生成假的 DUT 数据
     print("\n[2] 生成假的 DUT 数据 (模拟 bfp8 格式处理)")
-    print("    流程: reference → bfp8 量化/反量化 → 加小噪声")
+    print("    流程: reference -> bfp8 量化/反量化 -> 加小噪声")
     np.random.seed(123)
     dut_outputs = []
     for r in records:
-        # 使用 reference (fp32 精确值) 生成假 DUT
         dut = generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001)
         dut_outputs.append(dut)
         print(f"    {r['name']}: dut={dut.shape}")
@@ -80,7 +80,6 @@ def main():
     print("\n[3] 比对 (使用框架 compare_3col)")
     results = []
     for i, r in enumerate(records):
-        # golden_pure = reference (fp32), golden_qnt = golden (带量化)
         result = compare_3col(
             op_name=r["op"],
             op_id=i,

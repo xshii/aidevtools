@@ -98,51 +98,48 @@ class TestTransposeCppGolden:
         assert y.shape == expected.shape
 
 
-class TestTransposeOpsAuto:
-    """ops.auto API 测试"""
+class TestTransposeFunctionalAPI:
+    """PyTorch 风格 functional API 测试"""
 
-    def test_transpose_bfp8(self):
-        """测试 bfp8 格式"""
-        from aidevtools import ops
-        from aidevtools.ops.base import get_records
-
-        ops.seed(42)
-        ops.clear()
-
-        y = ops.transpose((2, 4, 8, 32), dtype="bfp8")
-
-        records = get_records()
-        assert len(records) == 1
-        assert records[0]["op"] == "transpose"
-        assert y.shape == (2, 4, 32, 8)
-
-    def test_transpose_bfp16(self):
-        """测试 bfp16 格式"""
-        from aidevtools import ops
-        from aidevtools.ops.base import get_records
+    def test_linear_output_shape(self):
+        """测试 F.linear 输出形状"""
+        from aidevtools import F, ops
+        from aidevtools.ops import get_records
 
         ops.seed(42)
         ops.clear()
+        np.random.seed(42)
 
-        y = ops.transpose((2, 4, 8, 32), dtype="bfp16")
+        # Input: (batch, heads, seq, d_k) = (2, 4, 8, 64)
+        x = np.random.randn(2, 4, 8, 64).astype(np.float32)
+
+        # Linear: weight [out_features, in_features] = [32, 64]
+        w = np.random.randn(32, 64).astype(np.float32) * 0.02
+        b = np.random.randn(32).astype(np.float32) * 0.01
+
+        y = F.linear(x, w, b)
 
         records = get_records()
         assert len(records) == 1
-        assert y.shape == (2, 4, 32, 8)
+        assert records[0]["op"] == "linear"
+        assert y.shape == (2, 4, 8, 32)
 
     def test_linear_then_transpose(self):
-        """测试 Linear + Transpose 流水线"""
-        from aidevtools import ops
-        from aidevtools.ops.base import get_records
+        """测试 F.linear + numpy transpose"""
+        from aidevtools import F, ops
+        from aidevtools.ops import get_records
 
         ops.seed(42)
         ops.clear()
+        np.random.seed(42)
 
-        y = ops.linear((2, 4, 8, 64), 32, dtype="bfp8")
-        y = ops.transpose(y, axes=(0, 1, 3, 2), dtype="bfp8")
+        x = np.random.randn(2, 4, 8, 64).astype(np.float32)
+        w = np.random.randn(32, 64).astype(np.float32) * 0.02
+
+        y = F.linear(x, w)
+        y = np.transpose(y, axes=(0, 1, 3, 2))
 
         records = get_records()
-        assert len(records) == 2
+        assert len(records) == 1  # only linear recorded
         assert records[0]["op"] == "linear"
-        assert records[1]["op"] == "transpose"
         assert y.shape == (2, 4, 32, 8)

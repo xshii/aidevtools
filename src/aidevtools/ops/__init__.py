@@ -1,38 +1,29 @@
 """算子 API
 
-使用方法:
-    from aidevtools.ops import set_golden_mode, register_golden_cpp, clear, dump
-    from aidevtools.ops.nn import linear, relu, softmax
+PyTorch 风格 functional API:
+    from aidevtools import F
 
-    # 1. 设置 golden 模式 (默认 "python"，可选 "cpp")
-    set_golden_mode("python")
+    y = F.linear(x, weight, bias)
+    y = F.relu(y)
+    y = F.softmax(y, dim=-1)
+    y = F.layer_norm(y, normalized_shape, weight, bias)
+    y = F.scaled_dot_product_attention(q, k, v)
 
-    # 2. 注册 C++ golden 实现（可选）
-    @register_golden_cpp("linear")
-    def my_linear(x, weight, bias=None):
-        return my_cpp_lib.linear(x, weight, bias)
+工具函数:
+    from aidevtools import ops
 
-    # 3. 调用算子（自动执行 golden + reference + profile）
-    clear()  # 清空之前的记录和 profiles
-    y = linear(x, w, b)
-    y = relu(y)
-    y = softmax(y)
+    ops.seed(42)       # 设置随机种子
+    ops.clear()        # 清空记录
+    # ... 执行算子 ...
+    ops.dump("./out")  # 导出数据
 
-    # 4. 导出数据
-    dump("./workspace")
+高级用法:
+    from aidevtools.ops import set_golden_mode, get_profiles
 
-    # 5. 获取 profiles 用于 Paper Analysis
-    from aidevtools.analysis import PaperAnalyzer
-    profiles = get_profiles()
-    analyzer = PaperAnalyzer(chip="npu_910")
-    analyzer.add_profiles(profiles)
-    result = analyzer.analyze()
-
-算子包含3种计算形式:
-    - golden_cpp: C++ Golden 实现（通过 @register_golden_cpp 注册）
-    - golden_python: Python Golden 实现（内置）
-    - reference: 参考实现（fp32，用于 fuzzy 比对）
+    set_golden_mode("cpp")  # 使用 C++ golden
+    profiles = get_profiles()  # 获取性能数据
 """
+# 基础 API
 from aidevtools.ops.base import (
     Op,
     register_golden_cpp,
@@ -44,22 +35,46 @@ from aidevtools.ops.base import (
     get_golden_mode,
     set_compute_golden,
     get_compute_golden,
-    # Profile API (用于 Paper Analysis)
+    # Profile API
     get_profiles,
     set_profile_enabled,
     get_profile_enabled,
     set_profile_only,
     get_profile_only,
-    profile_only,  # 上下文管理器
+    profile_only,
 )
-from aidevtools.ops.auto import (
-    seed,
-    clear as auto_clear,
-    dump as auto_dump,
-    linear,
-    matmul,
-    attention,
-    embedding,
-    transpose,
-)
-from aidevtools.ops import nn  # 触发算子实例化
+
+# 工具函数
+from aidevtools.ops.auto import seed, get_seed
+
+# PyTorch 风格 functional API
+from aidevtools.ops import functional
+
+# 导入 nn 以触发算子注册
+from aidevtools.ops import nn
+
+__all__ = [
+    # 工具函数
+    "seed",
+    "get_seed",
+    "clear",
+    "dump",
+    # 配置
+    "set_golden_mode",
+    "get_golden_mode",
+    "set_compute_golden",
+    "get_compute_golden",
+    "get_records",
+    "get_profiles",
+    "set_profile_enabled",
+    "get_profile_enabled",
+    "set_profile_only",
+    "get_profile_only",
+    "profile_only",
+    # 高级
+    "Op",
+    "register_golden_cpp",
+    "has_golden_cpp",
+    # functional API
+    "functional",
+]

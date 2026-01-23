@@ -2,10 +2,10 @@
 """
 Transformer 模型时延分析 Demo
 
-演示如何使用 ops 模块定义模型，自动生成 OpProfile 进行 Paper Analysis。
+演示如何使用 PyTorch 风格 F API 定义模型，自动生成 OpProfile 进行 Paper Analysis。
 
 使用方式:
-1. 调用 ops 算子 (linear, layernorm, attention 等)
+1. 调用 F.linear, F.layer_norm, F.gelu 等算子
 2. 调用 ops.get_profiles() 获取自动生成的 profiles
 3. 使用 PaperAnalyzer 分析时延
 
@@ -19,8 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aidevtools import ops
-from aidevtools.ops.nn import linear, layernorm, gelu, softmax, add, attention
+from aidevtools import F, ops
 from aidevtools.analysis import (
     PaperAnalyzer,
     PassConfig,
@@ -41,7 +40,7 @@ def transformer_layer_ops(
     ffn_hidden: int = 3072,
 ):
     """
-    使用 ops 定义 Transformer Layer
+    使用 PyTorch 风格 F API 定义 Transformer Layer
 
     调用完成后，可通过 ops.get_profiles() 获取自动生成的 profiles
     """
@@ -49,24 +48,22 @@ def transformer_layer_ops(
 
     # 创建输入张量
     x = np.random.randn(batch, seq, hidden).astype(np.float32)
-    gamma = np.ones((hidden,), dtype=np.float32)
-    beta = np.zeros((hidden,), dtype=np.float32)
 
     # ============================================================
     # Self-Attention Block
     # ============================================================
 
     # LayerNorm
-    x_norm = layernorm(x, gamma, beta)
+    x_norm = F.layer_norm(x, normalized_shape=(hidden,))
 
     # Q/K/V 投影
     w_q = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
     w_k = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
     w_v = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
 
-    q = linear(x_norm, w_q)
-    k = linear(x_norm, w_k)
-    v = linear(x_norm, w_v)
+    q = F.matmul(x_norm, w_q)
+    k = F.matmul(x_norm, w_k)
+    v = F.matmul(x_norm, w_v)
 
     # Reshape for multi-head attention
     q = q.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
@@ -74,38 +71,38 @@ def transformer_layer_ops(
     v = v.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
 
     # Attention
-    attn_out = attention(q, k, v)
+    attn_out = F.scaled_dot_product_attention(q, k, v)
 
     # Reshape back
     attn_out = attn_out.transpose(0, 2, 1, 3).reshape(batch, seq, hidden)
 
     # Output projection
     w_o = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
-    attn_out = linear(attn_out, w_o)
+    attn_out = F.matmul(attn_out, w_o)
 
     # Residual
-    x = add(x, attn_out)
+    x = x + attn_out
 
     # ============================================================
     # FFN Block
     # ============================================================
 
     # LayerNorm
-    x_norm = layernorm(x, gamma, beta)
+    x_norm = F.layer_norm(x, normalized_shape=(hidden,))
 
     # FFN1: hidden -> ffn_hidden
     w_ffn1 = np.random.randn(hidden, ffn_hidden).astype(np.float32) * 0.02
-    h = linear(x_norm, w_ffn1)
+    h = F.matmul(x_norm, w_ffn1)
 
     # GELU
-    h = gelu(h)
+    h = F.gelu(h)
 
     # FFN2: ffn_hidden -> hidden
     w_ffn2 = np.random.randn(ffn_hidden, hidden).astype(np.float32) * 0.02
-    h = linear(h, w_ffn2)
+    h = F.matmul(h, w_ffn2)
 
     # Residual
-    x = add(x, h)
+    x = x + h
 
     return x
 
@@ -113,7 +110,7 @@ def transformer_layer_ops(
 def print_profiles_info(profiles: list):
     """打印 profile 信息"""
     print("\n" + "=" * 80)
-    print("Transformer Layer Operator Profiles (Auto-generated from ops)")
+    print("Transformer Layer Operator Profiles (Auto-generated from F API)")
     print("=" * 80)
 
     total_flops = 0
@@ -135,7 +132,7 @@ def print_profiles_info(profiles: list):
 def main():
     print("\n" + "=" * 80)
     print("Transformer Model Paper Analysis Demo")
-    print("Using ops module with auto profile generation")
+    print("Using PyTorch-style F API with auto profile generation")
     print("=" * 80)
 
     # 显示可用芯片
@@ -162,19 +159,20 @@ def main():
         print(f"  {k}: {v}")
 
     # ============================================================
-    # 使用 ops 定义模型 (自动生成 profiles)
+    # 使用 F API 定义模型 (自动生成 profiles)
     # ============================================================
 
-    print("\nDefining transformer layer using ops...")
+    print("\nDefining transformer layer using F API...")
     ops.clear()  # 清空之前的记录和 profiles
+    np.random.seed(42)
 
-    # 调用 ops 定义模型
+    # 调用 F API 定义模型
     output = transformer_layer_ops(**model_config)
     print(f"Output shape: {output.shape}")
 
     # 获取自动生成的 profiles
     profiles = ops.get_profiles()
-    print(f"\nAuto-generated {len(profiles)} profiles from ops calls")
+    print(f"\nAuto-generated {len(profiles)} profiles from F API calls")
 
     # 打印 profile 信息
     print_profiles_info(profiles)
