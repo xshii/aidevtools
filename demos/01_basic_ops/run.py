@@ -10,10 +10,11 @@ from pathlib import Path
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools.ops.base import clear, dump, get_records
+from aidevtools import ops
 from aidevtools.ops.nn import (
     linear, relu, gelu, softmax, layernorm, attention, embedding
 )
+from aidevtools.ops.base import get_records
 
 
 def main():
@@ -22,7 +23,7 @@ def main():
     print("=" * 60)
 
     # 清空之前的记录
-    clear()
+    ops.clear()
 
     # 1. Linear
     print("\n[1] Linear: y = x @ W + b")
@@ -82,7 +83,7 @@ def main():
     print("=" * 60)
 
     output_dir = Path(__file__).parent / "workspace"
-    dump(str(output_dir), format="raw")
+    ops.dump(str(output_dir), format="raw")
 
     records = get_records()
     print(f"\n共记录 {len(records)} 个算子:")

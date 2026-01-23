@@ -8,7 +8,7 @@
 4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
 
 比对流程说明：
-- reference: fp32/fp64 高精度计算（用于 fuzzy_pure 比对）
+- reference: fp32 计算（用于 fuzzy_pure 比对）
 - golden: cpp golden 计算（带量化，用于 fuzzy_qnt 比对）
 - DUT: 芯片输出（本 demo 用模拟数据）
 
@@ -23,14 +23,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
 from aidevtools import ops
-from aidevtools.ops.base import get_records, set_golden_mode
+from aidevtools.ops.base import get_records
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
 from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
 set_cpu_golden_dtype("gfp16")  # 使用 gfp16 格式
-set_golden_mode("cpp")
+ops.set_golden_mode("cpp")
 
 
 def run_model():
@@ -58,7 +58,7 @@ def main():
     # 1. 运行模型
     print("\n[1] 运行模型 (MatMul -> LayerNorm -> Softmax)")
     print("    框架自动执行:")
-    print("    - reference: fp32/fp64 高精度计算 (用于 fuzzy_pure)")
+    print("    - reference: fp32 计算 (用于 fuzzy_pure)")
     print("    - golden: cpp golden via subprocess (用于 fuzzy_qnt)")
     records = run_model()
 
@@ -80,7 +80,7 @@ def main():
     print("\n[3] 比对 (使用框架 compare_3col)")
     results = []
     for i, r in enumerate(records):
-        # golden_pure = reference (fp64), golden_qnt = golden (带量化)
+        # golden_pure = reference (fp32), golden_qnt = golden (带量化)
         result = compare_3col(
             op_name=r["op"],
             op_id=i,

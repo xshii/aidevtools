@@ -17,14 +17,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
 from aidevtools import ops
-from aidevtools.ops.base import get_records, set_golden_mode, clear
+from aidevtools.ops.base import get_records
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
 from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
 set_cpu_golden_dtype("gfp16")
-set_golden_mode("cpp")
+ops.set_golden_mode("cpp")
 
 
 def run_single_layer_transformer():
@@ -38,7 +38,7 @@ def run_single_layer_transformer():
               -> MatMul(FFN_up) -> Softmax -> MatMul(FFN_down) -> LayerNorm
     """
     ops.seed(42)
-    clear()
+    ops.clear()
 
     # 配置
     batch, seq, hidden = 2, 16, 64
