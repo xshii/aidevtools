@@ -440,6 +440,343 @@ class TestIntegration:
                 assert bd.profile.compute_unit == "cube"
 
 
+class TestPrefetchPasses:
+    """Prefetch Pass 测试"""
+
+    def test_forward_prefetch_cube_op(self):
+        """测试前向预取 - Cube 算子"""
+        from aidevtools.analysis.passes import ForwardPrefetchPass, PassConfig, PassContext
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.forward_prefetch_enabled = True
+        config.prefetch_efficiency = 0.8
+
+        # 当前 Cube 算子 (compute bound, 有空闲 DMA 时间)
+        current_profile = OpProfile(
+            name="matmul_0",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            flops=int(2e12),
+            input_bytes=int(1e6),
+            weight_bytes=int(1e6),
+            output_bytes=int(1e6),
+        )
+
+        # 下一个算子有权重需要预取
+        next_profile = OpProfile(
+            name="matmul_1",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            weight_bytes=int(2e6),  # 2MB 权重
+        )
+
+        breakdown = LatencyBreakdown(profile=current_profile)
+        breakdown.compute_time_us = 100.0  # 计算时间
+        breakdown.memory_time_us = 50.0    # 访存时间
+        breakdown.roofline_time_us = 100.0
+
+        context = PassContext(next_profile=next_profile)
+
+        prefetch_pass = ForwardPrefetchPass(config)
+        result = prefetch_pass.run(breakdown, chip, context)
+
+        # 应该有预取节省
+        assert breakdown.prefetch_saved_us > 0
+        assert result.details["idle_time_us"] == 50.0  # compute - memory
+        assert result.details["prefetch_efficiency"] == 0.8
+
+    def test_forward_prefetch_vector_op_skip(self):
+        """测试前向预取 - Vector 算子跳过"""
+        from aidevtools.analysis.passes import ForwardPrefetchPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.forward_prefetch_enabled = True
+
+        # Vector 算子不能执行前向预取
+        profile = OpProfile(
+            name="layernorm",
+            op_type="layernorm",
+            compute_unit="vector",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 50.0
+
+        prefetch_pass = ForwardPrefetchPass(config)
+        result = prefetch_pass.run(breakdown, chip)
+
+        # 应该跳过
+        assert breakdown.prefetch_saved_us == 0
+        assert "非 Cube 算子" in result.details.get("reason", "")
+
+    def test_backward_prefetch_vector_op(self):
+        """测试后向预取 - Vector 算子预取后续 Cube 权重"""
+        from aidevtools.analysis.passes import BackwardPrefetchPass, PassConfig, PassContext
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.backward_prefetch_enabled = True
+        config.backward_prefetch_depth = 2
+        config.prefetch_efficiency = 0.8
+
+        # 当前 Vector 算子
+        current_profile = OpProfile(
+            name="layernorm",
+            op_type="layernorm",
+            compute_unit="vector",
+            dtype="fp16",
+        )
+
+        # 后续 Cube 算子
+        future_profiles = [
+            OpProfile(name="ffn1", op_type="matmul", compute_unit="cube", weight_bytes=int(4e6)),
+            OpProfile(name="ffn2", op_type="matmul", compute_unit="cube", weight_bytes=int(4e6)),
+        ]
+
+        breakdown = LatencyBreakdown(profile=current_profile)
+        breakdown.roofline_time_us = 20.0  # Vector 执行时间
+
+        context = PassContext(future_profiles=future_profiles)
+
+        prefetch_pass = BackwardPrefetchPass(config)
+        result = prefetch_pass.run(breakdown, chip, context)
+
+        # 应该有后向预取节省
+        assert breakdown.backward_prefetch_saved_us > 0
+        assert result.details["prefetch_depth"] == 2
+        assert len(result.details["prefetch_details"]) > 0
+
+    def test_backward_prefetch_cube_op_skip(self):
+        """测试后向预取 - Cube 算子跳过"""
+        from aidevtools.analysis.passes import BackwardPrefetchPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.backward_prefetch_enabled = True
+
+        # Cube 算子不能执行后向预取
+        profile = OpProfile(
+            name="matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 100.0
+
+        prefetch_pass = BackwardPrefetchPass(config)
+        result = prefetch_pass.run(breakdown, chip)
+
+        # 应该跳过
+        assert breakdown.backward_prefetch_saved_us == 0
+        assert "非 Vector 算子" in result.details.get("reason", "")
+
+
+class TestOverheadPass:
+    """Overhead Pass 测试"""
+
+    def test_overhead_basic(self):
+        """测试基本开销计算"""
+        from aidevtools.analysis.passes import OverheadPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.overhead_enabled = True
+        config.kernel_launch_us = 5.0
+        config.sync_overhead_us = 2.0
+        config.context_switch_us = 1.0
+        config.tiling_overhead_us = 0.5
+        config.tiling_count = 1  # 无 tiling
+
+        profile = OpProfile(
+            name="matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 100.0
+        breakdown.prefetch_saved_us = 0
+        breakdown.backward_prefetch_saved_us = 0
+        breakdown.parallel_saved_us = 0
+
+        overhead_pass = OverheadPass(config)
+        result = overhead_pass.run(breakdown, chip)
+
+        # 总开销 = 5 + 2 + 1 + 0.5*1 = 8.5us
+        expected_overhead = 5.0 + 2.0 + 1.0 + 0.5
+        assert breakdown.overhead_us == expected_overhead
+        assert breakdown.total_time_us == 100.0 + expected_overhead
+
+    def test_overhead_with_tiling(self):
+        """测试带 tiling 的开销计算"""
+        from aidevtools.analysis.passes import OverheadPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.overhead_enabled = True
+        config.kernel_launch_us = 5.0
+        config.sync_overhead_us = 2.0
+        config.context_switch_us = 1.0
+        config.tiling_overhead_us = 0.5
+        config.tiling_count = 4  # 4 tiles (2x2)
+
+        profile = OpProfile(
+            name="matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 100.0
+        breakdown.prefetch_saved_us = 0
+        breakdown.backward_prefetch_saved_us = 0
+        breakdown.parallel_saved_us = 0
+
+        overhead_pass = OverheadPass(config)
+        result = overhead_pass.run(breakdown, chip)
+
+        # 总开销 = 5 + 2 + 1 + 0.5*4 = 10us
+        expected_overhead = 5.0 + 2.0 + 1.0 + 0.5 * 4
+        assert breakdown.overhead_us == expected_overhead
+        assert result.details["tiling_count"] == 4
+        assert result.details["tiling_total_us"] == 2.0
+
+    def test_overhead_with_prefetch_savings(self):
+        """测试开销计算考虑预取节省"""
+        from aidevtools.analysis.passes import OverheadPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.overhead_enabled = True
+        config.kernel_launch_us = 5.0
+        config.sync_overhead_us = 2.0
+        config.context_switch_us = 1.0
+        config.tiling_overhead_us = 0.0
+
+        profile = OpProfile(
+            name="matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 100.0
+        breakdown.prefetch_saved_us = 10.0  # 预取节省
+        breakdown.backward_prefetch_saved_us = 5.0
+        breakdown.parallel_saved_us = 3.0
+
+        overhead_pass = OverheadPass(config)
+        result = overhead_pass.run(breakdown, chip)
+
+        # final = roofline + overhead - prefetch - backward - parallel
+        # final = 100 + 8 - 10 - 5 - 3 = 90us
+        expected_total = 100.0 + 8.0 - 10.0 - 5.0 - 3.0
+        assert breakdown.total_time_us == expected_total
+
+    def test_overhead_auto_tiling_estimation(self):
+        """测试自动 tiling count 估算"""
+        from aidevtools.analysis.passes import OverheadPass, PassConfig
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.overhead_enabled = True
+        config.tiling_count = 1  # 使用自动估算
+
+        # 大矩阵应该触发 tiling
+        profile = OpProfile(
+            name="large_matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+            shapes={"M": 4096, "N": 4096, "K": 4096},  # 大矩阵
+        )
+
+        breakdown = LatencyBreakdown(profile=profile)
+        breakdown.roofline_time_us = 100.0
+
+        overhead_pass = OverheadPass(config)
+        result = overhead_pass.run(breakdown, chip)
+
+        # 大矩阵应该有多个 tiles
+        assert result.details["tiling_count"] >= 1
+
+
+class TestCubeVectorParallelPass:
+    """Cube/Vector 并行 Pass 测试"""
+
+    def test_parallel_pass_cube_op(self):
+        """测试 Cube 算子并行"""
+        from aidevtools.analysis.passes import CubeVectorParallelPass, PassConfig, PassContext
+        from aidevtools.analysis.chip import load_chip_spec
+        from aidevtools.analysis.latency import LatencyBreakdown
+        from aidevtools.analysis.profile import OpProfile
+
+        chip = load_chip_spec("npu_910")
+        config = PassConfig()
+        config.cube_vector_parallel_enabled = True
+
+        # 当前 Cube 算子
+        current_profile = OpProfile(
+            name="matmul",
+            op_type="matmul",
+            compute_unit="cube",
+            dtype="fp16",
+        )
+
+        # 下一个是 Vector 算子
+        next_profile = OpProfile(
+            name="layernorm",
+            op_type="layernorm",
+            compute_unit="vector",
+            dtype="fp16",
+        )
+
+        breakdown = LatencyBreakdown(profile=current_profile)
+        breakdown.roofline_time_us = 100.0
+
+        context = PassContext(next_profile=next_profile)
+
+        parallel_pass = CubeVectorParallelPass(config)
+        result = parallel_pass.run(breakdown, chip, context)
+
+        # Pass 应该执行
+        assert result.enabled is True
+
+
 class TestBandwidthPasses:
     """带宽约束 Pass 测试"""
 
