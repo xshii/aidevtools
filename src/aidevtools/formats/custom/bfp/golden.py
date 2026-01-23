@@ -125,54 +125,28 @@ def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
 
 # ==================== 量化注册 ====================
 
-@register_quantize("bfp16")
-def to_bfp16(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
-    """
-    fp32 -> BFP16 (block_size=16, mantissa=8bit)
-    """
-    block_size = kwargs.get("block_size", 16)
-    mantissas, shared_exps, meta = fp32_to_bfp(data, block_size=block_size, mantissa_bits=8)
-
-    # 打包: [shared_exps..., mantissas...]
-    packed = np.concatenate([
-        shared_exps.astype(np.int8),
-        mantissas.astype(np.int8)
-    ])
-
-    return packed, meta
+# BFP 格式配置: (format_name, default_block_size, mantissa_bits, description)
+_BFP_FORMATS = [
+    ("bfp16", 16, 8, "BFP16 (block_size=16, mantissa=8bit)"),
+    ("bfp8", 32, 4, "BFP8 (block_size=32, mantissa=4bit)"),
+    ("bfp4", 64, 2, "BFP4 (block_size=64, mantissa=2bit) - 极端量化"),
+]
 
 
-@register_quantize("bfp8")
-def to_bfp8(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
-    """
-    fp32 -> BFP8 (block_size=32, mantissa=4bit)
-    """
-    block_size = kwargs.get("block_size", 32)
-    mantissas, shared_exps, meta = fp32_to_bfp(data, block_size=block_size, mantissa_bits=4)
-
-    # 打包: [shared_exps..., mantissas...]
-    packed = np.concatenate([
-        shared_exps.astype(np.int8),
-        mantissas.astype(np.int8)
-    ])
-
-    return packed, meta
+def _make_bfp_quantizer(default_block_size: int, mantissa_bits: int):
+    """生成 BFP 量化函数"""
+    def quantizer(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
+        block_size = kwargs.get("block_size", default_block_size)
+        mantissas, shared_exps, meta = fp32_to_bfp(
+            data, block_size=block_size, mantissa_bits=mantissa_bits
+        )
+        packed = np.concatenate([shared_exps.astype(np.int8), mantissas.astype(np.int8)])
+        return packed, meta
+    return quantizer
 
 
-@register_quantize("bfp4")
-def to_bfp4(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
-    """
-    fp32 -> BFP4 (block_size=64, mantissa=2bit)
-
-    极端量化格式，仅保留 2 位尾数，适用于极致压缩场景
-    """
-    block_size = kwargs.get("block_size", 64)
-    mantissas, shared_exps, meta = fp32_to_bfp(data, block_size=block_size, mantissa_bits=2)
-
-    # 打包: [shared_exps..., mantissas...]
-    packed = np.concatenate([
-        shared_exps.astype(np.int8),
-        mantissas.astype(np.int8)
-    ])
-
-    return packed, meta
+# 批量注册 BFP 格式
+for _name, _block_size, _mantissa_bits, _desc in _BFP_FORMATS:
+    _fn = _make_bfp_quantizer(_block_size, _mantissa_bits)
+    _fn.__doc__ = f"fp32 -> {_desc}"
+    register_quantize(_name)(_fn)

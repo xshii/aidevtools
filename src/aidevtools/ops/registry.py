@@ -58,6 +58,17 @@ class OpMeta:
     # 算子实例 (运行时填充)
     op_instance: Optional[Any] = None
 
+    # ============================================================
+    # Profile 相关配置 (用于 Paper Analysis)
+    # ============================================================
+    compute_unit: str = "vector"     # "cube" | "vector"
+    memory_pattern: str = "sequential"  # "sequential" | "strided" | "random"
+    # FLOPs 计算函数: flops_fn(shapes) -> int
+    # shapes 是从输入推断的形状字典
+    flops_fn: Optional[Callable] = None
+    # 权重参数名 (用于区分 input_bytes 和 weight_bytes)
+    weight_params: List[str] = field(default_factory=list)
+
 
 # ============================================================
 # 全局注册表
@@ -72,6 +83,11 @@ def register_op(
     description: str = "",
     has_cpp_golden: bool = False,
     auto_gen: Dict[str, str] = None,
+    # Profile 配置 (用于 Paper Analysis)
+    compute_unit: str = "vector",
+    memory_pattern: str = "sequential",
+    flops_fn: Callable = None,
+    weight_params: List[str] = None,
 ):
     """
     算子注册装饰器
@@ -82,6 +98,10 @@ def register_op(
         description: 算子描述
         has_cpp_golden: 是否有 C++ golden 实现
         auto_gen: auto API 参数生成配置
+        compute_unit: 计算单元 ("cube" | "vector")，用于 Paper Analysis
+        memory_pattern: 访存模式 ("sequential" | "strided" | "random")
+        flops_fn: FLOPs 计算函数 flops_fn(shapes_dict) -> int
+        weight_params: 权重参数名列表 (用于区分 input_bytes 和 weight_bytes)
 
     Returns:
         类装饰器
@@ -96,6 +116,9 @@ def register_op(
                 "gamma": "ones:-1",
                 "beta": "zeros:-1",
             },
+            compute_unit="vector",
+            flops_fn=lambda s: 8 * s["x_size"],  # ~8 ops/element
+            weight_params=["gamma", "beta"],
         )
         class LayerNorm(Op):
             name = "layernorm"
@@ -126,6 +149,11 @@ def register_op(
             has_cpp_golden=has_cpp_golden,
             auto_gen=auto_gen or default_auto_gen,
             op_class=cls,
+            # Profile 配置
+            compute_unit=compute_unit,
+            memory_pattern=memory_pattern,
+            flops_fn=flops_fn,
+            weight_params=weight_params or [],
         )
 
         # 注册到全局表
