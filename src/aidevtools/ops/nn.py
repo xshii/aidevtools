@@ -659,6 +659,298 @@ class Attention(Op):
         return np.matmul(attn_weights, v)
 
 
+# ============================================================
+# 损失函数
+# ============================================================
+
+def _cross_entropy_flops(s):
+    """CrossEntropy FLOPs: log_softmax + nll_loss"""
+    input_shape = s.get("input_shape", (1, 1))
+    # log_softmax: 5 * size (max, sub, exp, sum, log)
+    # nll_loss: 1 * batch
+    size = int(np.prod(input_shape))
+    batch = input_shape[0] if len(input_shape) > 0 else 1
+    return 5 * size + batch
+
+
+@register_op(
+    inputs=["input", "target"],
+    optional=["weight", "reduction", "label_smoothing"],
+    description="交叉熵损失 (含 log_softmax)",
+    compute_unit="vector",
+    flops_fn=_cross_entropy_flops,
+)
+class CrossEntropyLoss(Op):
+    """交叉熵损失函数
+
+    与 torch.nn.functional.cross_entropy 兼容。
+    内部实现 log_softmax + nll_loss。
+    """
+    name = "cross_entropy"
+
+    def golden_python(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        weight: np.ndarray = None,
+        reduction: str = "mean",
+        label_smoothing: float = 0.0,
+    ) -> np.ndarray:
+        """
+        Args:
+            input: [N, C] 或 [N, C, ...] logits (未经 softmax)
+            target: [N] 或 [N, ...] 类别索引 (0 ~ C-1)
+            weight: [C] 类别权重 (可选)
+            reduction: "none" | "mean" | "sum"
+            label_smoothing: 标签平滑 (0.0 ~ 1.0)
+        """
+        # 处理多维情况: [N, C, H, W] -> [N, C, H*W] -> [N*H*W, C]
+        if input.ndim > 2:
+            N, C = input.shape[:2]
+            spatial = input.shape[2:]
+            input = input.reshape(N, C, -1).transpose(0, 2, 1).reshape(-1, C)
+            target = target.reshape(-1)
+
+        N, C = input.shape
+
+        # log_softmax (数值稳定)
+        x_max = np.max(input, axis=-1, keepdims=True)
+        log_sum_exp = np.log(np.sum(np.exp(input - x_max), axis=-1, keepdims=True)) + x_max
+        log_probs = input - log_sum_exp  # [N, C]
+
+        # 标签平滑
+        if label_smoothing > 0:
+            # smoothed target: (1 - smoothing) * one_hot + smoothing / C
+            smooth_target = np.full((N, C), label_smoothing / C, dtype=np.float32)
+            smooth_target[np.arange(N), target.astype(int)] += (1.0 - label_smoothing)
+            loss = -np.sum(smooth_target * log_probs, axis=-1)
+        else:
+            # 标准 nll_loss
+            loss = -log_probs[np.arange(N), target.astype(int)]
+
+        # 应用类别权重
+        if weight is not None:
+            loss = loss * weight[target.astype(int)]
+
+        # reduction
+        if reduction == "none":
+            return loss.astype(np.float32)
+        elif reduction == "sum":
+            return np.array(np.sum(loss), dtype=np.float32)
+        else:  # mean
+            if weight is not None:
+                return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
+            return np.array(np.mean(loss), dtype=np.float32)
+
+    @fp32_reference
+    def reference(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        weight: np.ndarray = None,
+        reduction: str = "mean",
+        label_smoothing: float = 0.0,
+    ) -> np.ndarray:
+        return self.golden_python(input, target, weight, reduction, label_smoothing)
+
+
+def _mse_loss_flops(s):
+    """MSE FLOPs: sub + square + mean"""
+    input_shape = s.get("input_shape", (1,))
+    size = int(np.prod(input_shape))
+    return 3 * size  # sub, square, sum/mean
+
+
+@register_op(
+    inputs=["input", "target"],
+    optional=["reduction"],
+    description="均方误差损失",
+    compute_unit="vector",
+    flops_fn=_mse_loss_flops,
+)
+class MSELoss(Op):
+    """均方误差损失函数
+
+    与 torch.nn.functional.mse_loss 兼容。
+    """
+    name = "mse_loss"
+
+    def golden_python(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+    ) -> np.ndarray:
+        """
+        Args:
+            input: 预测值
+            target: 目标值
+            reduction: "none" | "mean" | "sum"
+        """
+        diff = input - target
+        loss = diff ** 2
+
+        if reduction == "none":
+            return loss.astype(np.float32)
+        elif reduction == "sum":
+            return np.array(np.sum(loss), dtype=np.float32)
+        else:  # mean
+            return np.array(np.mean(loss), dtype=np.float32)
+
+    @fp32_reference
+    def reference(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+    ) -> np.ndarray:
+        return self.golden_python(input, target, reduction)
+
+
+def _l1_loss_flops(s):
+    """L1 FLOPs: sub + abs + mean"""
+    input_shape = s.get("input_shape", (1,))
+    size = int(np.prod(input_shape))
+    return 3 * size
+
+
+@register_op(
+    inputs=["input", "target"],
+    optional=["reduction"],
+    description="L1 损失 (MAE)",
+    compute_unit="vector",
+    flops_fn=_l1_loss_flops,
+)
+class L1Loss(Op):
+    """L1 损失函数 (Mean Absolute Error)
+
+    与 torch.nn.functional.l1_loss 兼容。
+    """
+    name = "l1_loss"
+
+    def golden_python(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+    ) -> np.ndarray:
+        loss = np.abs(input - target)
+
+        if reduction == "none":
+            return loss.astype(np.float32)
+        elif reduction == "sum":
+            return np.array(np.sum(loss), dtype=np.float32)
+        else:  # mean
+            return np.array(np.mean(loss), dtype=np.float32)
+
+    @fp32_reference
+    def reference(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+    ) -> np.ndarray:
+        return self.golden_python(input, target, reduction)
+
+
+@register_op(
+    inputs=["input", "target"],
+    optional=["reduction", "beta"],
+    description="Smooth L1 损失 (Huber Loss)",
+    compute_unit="vector",
+    flops_fn=_l1_loss_flops,
+)
+class SmoothL1Loss(Op):
+    """Smooth L1 损失 (Huber Loss)
+
+    与 torch.nn.functional.smooth_l1_loss 兼容。
+    """
+    name = "smooth_l1_loss"
+
+    def golden_python(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+        beta: float = 1.0,
+    ) -> np.ndarray:
+        diff = np.abs(input - target)
+        loss = np.where(
+            diff < beta,
+            0.5 * diff ** 2 / beta,
+            diff - 0.5 * beta
+        )
+
+        if reduction == "none":
+            return loss.astype(np.float32)
+        elif reduction == "sum":
+            return np.array(np.sum(loss), dtype=np.float32)
+        else:  # mean
+            return np.array(np.mean(loss), dtype=np.float32)
+
+    @fp32_reference
+    def reference(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        reduction: str = "mean",
+        beta: float = 1.0,
+    ) -> np.ndarray:
+        return self.golden_python(input, target, reduction, beta)
+
+
+@register_op(
+    inputs=["input", "target"],
+    optional=["weight", "reduction", "pos_weight"],
+    description="二元交叉熵 (带 logits)",
+    compute_unit="vector",
+    flops_fn=lambda s: 6 * int(np.prod(s.get("input_shape", (1,)))),
+)
+class BCEWithLogitsLoss(Op):
+    """二元交叉熵损失 (带 logits)
+
+    与 torch.nn.functional.binary_cross_entropy_with_logits 兼容。
+    """
+    name = "bce_with_logits"
+
+    def golden_python(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        weight: np.ndarray = None,
+        reduction: str = "mean",
+        pos_weight: np.ndarray = None,
+    ) -> np.ndarray:
+        # 数值稳定的 BCE: max(x, 0) - x * t + log(1 + exp(-|x|))
+        max_val = np.maximum(-input, 0)
+        if pos_weight is not None:
+            log_weight = (pos_weight - 1) * target + 1
+            loss = (1 - target) * input + log_weight * (max_val + np.log(np.exp(-max_val) + np.exp(-input - max_val)))
+        else:
+            loss = (1 - target) * input + max_val + np.log(np.exp(-max_val) + np.exp(-input - max_val))
+
+        if weight is not None:
+            loss = loss * weight
+
+        if reduction == "none":
+            return loss.astype(np.float32)
+        elif reduction == "sum":
+            return np.array(np.sum(loss), dtype=np.float32)
+        else:  # mean
+            return np.array(np.mean(loss), dtype=np.float32)
+
+    @fp32_reference
+    def reference(
+        self,
+        input: np.ndarray,
+        target: np.ndarray,
+        weight: np.ndarray = None,
+        reduction: str = "mean",
+        pos_weight: np.ndarray = None,
+    ) -> np.ndarray:
+        return self.golden_python(input, target, weight, reduction, pos_weight)
+
+
 # 实例化算子（方便直接调用）
 linear = Linear()
 relu = ReLU()
@@ -677,3 +969,10 @@ mul = Mul()
 div = Div()
 transpose = Transpose()
 attention = Attention()
+
+# 损失函数
+cross_entropy_loss = CrossEntropyLoss()
+mse_loss = MSELoss()
+l1_loss = L1Loss()
+smooth_l1_loss = SmoothL1Loss()
+bce_with_logits_loss = BCEWithLogitsLoss()

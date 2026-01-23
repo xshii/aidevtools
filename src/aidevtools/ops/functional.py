@@ -503,6 +503,223 @@ def conv2d(
 
 
 # ============================================================
+# 损失函数
+# ============================================================
+
+def cross_entropy(
+    input: np.ndarray,
+    target: np.ndarray,
+    weight: Optional[np.ndarray] = None,
+    ignore_index: int = -100,
+    reduction: str = "mean",
+    label_smoothing: float = 0.0,
+) -> np.ndarray:
+    """交叉熵损失
+
+    与 torch.nn.functional.cross_entropy 兼容。
+
+    Args:
+        input: [N, C] 或 [N, C, H, W] logits (未经 softmax)
+        target: [N] 或 [N, H, W] 类别索引 (0 ~ C-1)
+        weight: [C] 类别权重 (可选)
+        ignore_index: 忽略的标签索引 (暂不支持)
+        reduction: "none" | "mean" | "sum"
+        label_smoothing: 标签平滑系数 (0.0 ~ 1.0)
+
+    Returns:
+        损失值
+
+    Example:
+        >>> logits = np.random.randn(4, 10)  # 4 samples, 10 classes
+        >>> target = np.array([1, 3, 5, 7])   # class indices
+        >>> loss = F.cross_entropy(logits, target)
+    """
+    return _nn.cross_entropy_loss(input, target, weight, reduction, label_smoothing)
+
+
+def nll_loss(
+    input: np.ndarray,
+    target: np.ndarray,
+    weight: Optional[np.ndarray] = None,
+    ignore_index: int = -100,
+    reduction: str = "mean",
+) -> np.ndarray:
+    """负对数似然损失
+
+    与 torch.nn.functional.nll_loss 兼容。
+    注意: input 应该是 log_softmax 的输出。
+
+    Args:
+        input: [N, C] log probabilities (log_softmax 输出)
+        target: [N] 类别索引
+        weight: [C] 类别权重
+        reduction: "none" | "mean" | "sum"
+
+    Returns:
+        损失值
+    """
+    N = input.shape[0]
+    loss = -input[np.arange(N), target.astype(int)]
+
+    if weight is not None:
+        loss = loss * weight[target.astype(int)]
+
+    if reduction == "none":
+        return loss.astype(np.float32)
+    elif reduction == "sum":
+        return np.array(np.sum(loss), dtype=np.float32)
+    else:  # mean
+        if weight is not None:
+            return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
+
+
+def mse_loss(
+    input: np.ndarray,
+    target: np.ndarray,
+    reduction: str = "mean",
+) -> np.ndarray:
+    """均方误差损失
+
+    与 torch.nn.functional.mse_loss 兼容。
+
+    Args:
+        input: 预测值
+        target: 目标值
+        reduction: "none" | "mean" | "sum"
+
+    Returns:
+        损失值
+
+    Example:
+        >>> pred = np.array([1.0, 2.0, 3.0])
+        >>> target = np.array([1.1, 2.2, 2.8])
+        >>> loss = F.mse_loss(pred, target)
+    """
+    return _nn.mse_loss(input, target, reduction)
+
+
+def l1_loss(
+    input: np.ndarray,
+    target: np.ndarray,
+    reduction: str = "mean",
+) -> np.ndarray:
+    """L1 损失 (Mean Absolute Error)
+
+    与 torch.nn.functional.l1_loss 兼容。
+
+    Args:
+        input: 预测值
+        target: 目标值
+        reduction: "none" | "mean" | "sum"
+
+    Returns:
+        损失值
+    """
+    return _nn.l1_loss(input, target, reduction)
+
+
+def smooth_l1_loss(
+    input: np.ndarray,
+    target: np.ndarray,
+    reduction: str = "mean",
+    beta: float = 1.0,
+) -> np.ndarray:
+    """Smooth L1 损失 (Huber Loss)
+
+    与 torch.nn.functional.smooth_l1_loss 兼容。
+
+    Args:
+        input: 预测值
+        target: 目标值
+        reduction: "none" | "mean" | "sum"
+        beta: L1/L2 过渡点
+
+    Returns:
+        损失值
+    """
+    return _nn.smooth_l1_loss(input, target, reduction, beta)
+
+
+def binary_cross_entropy(
+    input: np.ndarray,
+    target: np.ndarray,
+    weight: Optional[np.ndarray] = None,
+    reduction: str = "mean",
+) -> np.ndarray:
+    """二元交叉熵损失
+
+    与 torch.nn.functional.binary_cross_entropy 兼容。
+    注意: input 应该是 sigmoid 的输出 (0~1 之间的概率)。
+
+    Args:
+        input: [N, *] 预测概率 (0~1)
+        target: [N, *] 目标值 (0 或 1)
+        weight: 样本权重
+        reduction: "none" | "mean" | "sum"
+
+    Returns:
+        损失值
+    """
+    # BCE = -[t * log(p) + (1-t) * log(1-p)]
+    eps = 1e-7
+    input = np.clip(input, eps, 1 - eps)
+    loss = -(target * np.log(input) + (1 - target) * np.log(1 - input))
+
+    if weight is not None:
+        loss = loss * weight
+
+    if reduction == "none":
+        return loss.astype(np.float32)
+    elif reduction == "sum":
+        return np.array(np.sum(loss), dtype=np.float32)
+    else:  # mean
+        return np.array(np.mean(loss), dtype=np.float32)
+
+
+def binary_cross_entropy_with_logits(
+    input: np.ndarray,
+    target: np.ndarray,
+    weight: Optional[np.ndarray] = None,
+    reduction: str = "mean",
+    pos_weight: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """二元交叉熵损失 (带 logits)
+
+    与 torch.nn.functional.binary_cross_entropy_with_logits 兼容。
+
+    Args:
+        input: [N, *] logits (未经 sigmoid)
+        target: [N, *] 目标值 (0 或 1)
+        weight: 样本权重
+        reduction: "none" | "mean" | "sum"
+        pos_weight: 正样本权重
+
+    Returns:
+        损失值
+    """
+    return _nn.bce_with_logits_loss(input, target, weight, reduction, pos_weight)
+
+
+def log_softmax(input: np.ndarray, dim: int = -1) -> np.ndarray:
+    """Log Softmax
+
+    与 torch.nn.functional.log_softmax 兼容。
+
+    Args:
+        input: 输入张量
+        dim: 计算维度
+
+    Returns:
+        log(softmax(input))
+    """
+    # 数值稳定的 log_softmax
+    x_max = np.max(input, axis=dim, keepdims=True)
+    log_sum_exp = np.log(np.sum(np.exp(input - x_max), axis=dim, keepdims=True)) + x_max
+    return (input - log_sum_exp).astype(np.float32)
+
+
+# ============================================================
 # 别名 (兼容不同命名习惯)
 # ============================================================
 
@@ -513,3 +730,7 @@ rmsnorm = rms_norm
 
 # 缩写
 sdpa = scaled_dot_product_attention
+
+# 损失函数别名
+bce_loss = binary_cross_entropy
+bce_with_logits = binary_cross_entropy_with_logits
