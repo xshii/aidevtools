@@ -2,8 +2,8 @@
 """xlsx 双向工作流示例
 
 展示两种使用方向:
-1. Python → Excel: 代码生成 trace，导出到 xlsx 配置
-2. Excel → Python: 从 xlsx 配置生成代码并运行
+1. Python -> Excel: 代码生成 trace，导出到 xlsx 配置
+2. Excel -> Python: 从 xlsx 配置生成代码并运行
 
 使用方法:
     cd demos/04_xlsx_basic
@@ -16,8 +16,8 @@ from pathlib import Path
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools import ops
-from aidevtools.ops.base import get_records, set_golden_mode, clear
+from aidevtools import F, ops
+from aidevtools.ops import get_records, set_golden_mode, clear
 from aidevtools.xlsx import create_template, export_xlsx, import_xlsx, run_xlsx
 
 # 设置 cpu golden dtype 并使用 cpp golden
@@ -28,28 +28,31 @@ set_golden_mode("cpp")
 
 def demo_python_to_excel():
     """
-    方向1: Python → Excel
+    方向1: Python -> Excel
 
     场景: 已有 Python 代码，想导出为 xlsx 配置方便管理
     """
     print("=" * 60)
-    print("方向1: Python → Excel")
+    print("方向1: Python -> Excel")
     print("=" * 60)
 
     # 1. 执行算子流程 (使用 cpp golden)
     print("\n[1] 执行算子流程 (使用 cpp golden)...")
     ops.seed(42)
     clear()
+    np.random.seed(42)
 
     # 模拟一个简单的 MLP: MatMul -> Softmax -> LayerNorm
-    # 使用支持 cpp golden 的算子 (linear 没有 cpp golden，改用 matmul)
-    y = ops.matmul((1, 8, 64), (64, 128), dtype="bfp8")  # matmul_0
-    y = ops.softmax(y, dtype="bfp8")                      # softmax_0
-    y = ops.layernorm(y, dtype="bfp8")  # gamma/beta 自动生成
+    x = np.random.randn(1, 8, 64).astype(np.float32)
+    w = np.random.randn(64, 128).astype(np.float32)
 
-    print(f"    MLP: input(1,8,64) → matmul(128) → softmax → layernorm → output{y.shape}")
+    y = F.matmul(x, w)                           # matmul_0
+    y = F.softmax(y, dim=-1)                     # softmax_0
+    y = F.layer_norm(y, normalized_shape=(128,)) # layernorm_0
+
+    print(f"    MLP: input(1,8,64) -> matmul(128) -> softmax -> layernorm -> output{y.shape}")
     print(f"    golden_mode: cpp (via subprocess)")
-    print(f"    quantization: gfp16 (cpp) + bfp8 (input)")
+    print(f"    quantization: gfp16 (cpp)")
 
     # 2. 导出到 xlsx
     print("\n[2] 导出到 xlsx...")
@@ -92,12 +95,12 @@ def demo_python_to_excel():
 
 def demo_excel_to_python():
     """
-    方向2: Excel → Python
+    方向2: Excel -> Python
 
     场景: 用 Excel 配置算子用例，自动生成 Python 代码
     """
     print("\n" + "=" * 60)
-    print("方向2: Excel → Python")
+    print("方向2: Excel -> Python")
     print("=" * 60)
 
     # 1. 创建 xlsx 模板
@@ -167,7 +170,7 @@ def demo_excel_to_python():
         status = r.get("status", "?")
         op_id = r.get("id", "?")
         note = r.get("note", "")
-        status_icon = "✓" if status == "PASS" else "✗" if status == "FAIL" else "○"
+        status_icon = "V" if status == "PASS" else "X" if status == "FAIL" else "O"
         print(f"      [{status_icon}] id={op_id}: {status} {note}")
 
     print(f"\n    完成! 结果已更新到 xlsx")
@@ -177,15 +180,15 @@ def demo_excel_to_python():
 def main():
     """主函数"""
     print("""
-╔══════════════════════════════════════════════════════════════╗
-║              xlsx 双向工作流示例                              ║
-╠══════════════════════════════════════════════════════════════╣
-║  方向1: Python → Excel   代码导出为配置                      ║
-║  方向2: Excel → Python   配置生成代码                        ║
-║                                                              ║
-║  使用 cpp golden (via subprocess)                            ║
-║  量化: gfp16 (cpp) + bfp8 (input)                            ║
-╚══════════════════════════════════════════════════════════════╝
+================================================================
+              xlsx 双向工作流示例
+================================================================
+  方向1: Python -> Excel   代码导出为配置
+  方向2: Excel -> Python   配置生成代码
+
+  使用 cpp golden (via subprocess)
+  量化: gfp16 (cpp)
+================================================================
 """)
 
     # 检查 openpyxl

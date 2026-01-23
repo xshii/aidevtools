@@ -1,11 +1,7 @@
 #!/usr/bin/env python
-"""Transformer Demo - 使用 ops API 构建完整 Transformer
+"""Transformer Demo - 使用 PyTorch 风格 API 构建完整 Transformer
 
-演示使用新的 ops API 构建 Transformer 模型：
-1. 使用 ops.matmul, ops.softmax, ops.layernorm 等
-2. 自动生成输入和权重
-3. 使用 cpp golden (via subprocess)
-4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
+演示使用 F.matmul, F.softmax, F.layer_norm 等构建 Transformer 模型。
 
 使用方法:
     cd demos/03_transformer
@@ -16,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
-from aidevtools import ops
-from aidevtools.ops.base import get_records
+from aidevtools import F, ops
+from aidevtools.ops import get_records
 from aidevtools.tools.compare.diff import compare_3col, print_compare_table
 from aidevtools.formats.quantize import generate_fake_dut
 
@@ -43,59 +39,65 @@ def run_single_layer_transformer():
     # 配置
     batch, seq, hidden = 2, 16, 64
     ffn_hidden = 256
-    dtype = "bfp8"
+    np.random.seed(42)
 
     print(f"配置: batch={batch}, seq={seq}, hidden={hidden}, ffn={ffn_hidden}")
-    print(f"量化: {dtype} (input) + gfp16 (cpp golden)")
 
     # ========== Self-Attention ==========
     print("\n[Self-Attention]")
 
-    # Input projection (用 matmul 代替 linear，因为 linear 没有 cpp golden)
-    x = ops.matmul((batch, seq, hidden), (hidden, hidden), dtype=dtype)  # Input
+    # Input
+    x = np.random.randn(batch, seq, hidden).astype(np.float32)
     print(f"  Input: {x.shape}")
 
     # Q, K, V projections
-    q = ops.matmul(x, (hidden, hidden), dtype=dtype)  # Q
-    k = ops.matmul(x, (hidden, hidden), dtype=dtype)  # K
-    v = ops.matmul(x, (hidden, hidden), dtype=dtype)  # V
+    w_q = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    w_k = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    w_v = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+
+    q = F.matmul(x, w_q)
+    k = F.matmul(x, w_k)
+    v = F.matmul(x, w_v)
     print(f"  Q/K/V: {q.shape}")
 
     # Attention: Q @ K^T -> Softmax -> @ V
-    # 为了简化，这里直接用 matmul 模拟 attention
-    # 实际 attention 需要 transpose K，这里用 (seq, seq) 模拟 attention scores
-    attn_scores = ops.matmul(q, (hidden, seq), dtype=dtype)  # 模拟 Q @ K^T
-    attn_weights = ops.softmax(attn_scores, dtype=dtype)
+    # Q @ K^T: (batch, seq, hidden) @ (batch, hidden, seq) -> (batch, seq, seq)
+    k_t = np.swapaxes(k, -2, -1)
+    attn_scores = F.matmul(q, k_t) / np.sqrt(hidden)
+    attn_weights = F.softmax(attn_scores, dim=-1)
     print(f"  Attention weights: {attn_weights.shape}")
 
-    attn_out = ops.matmul(attn_weights, (seq, hidden), dtype=dtype)  # 模拟 @ V
+    attn_out = F.matmul(attn_weights, v)
     print(f"  Attention output: {attn_out.shape}")
 
     # Output projection
-    o = ops.matmul(attn_out, (hidden, hidden), dtype=dtype)
+    w_o = np.random.randn(hidden, hidden).astype(np.float32) * 0.02
+    o = F.matmul(attn_out, w_o)
     print(f"  O projection: {o.shape}")
 
     # LayerNorm 1
-    ln1 = ops.layernorm(o, dtype=dtype)  # gamma/beta 自动生成
+    ln1 = F.layer_norm(o, normalized_shape=(hidden,))
     print(f"  LayerNorm 1: {ln1.shape}")
 
     # ========== FFN ==========
     print("\n[FFN]")
 
     # FFN up
-    ffn_up = ops.matmul(ln1, (hidden, ffn_hidden), dtype=dtype)
+    w_up = np.random.randn(hidden, ffn_hidden).astype(np.float32) * 0.02
+    ffn_up = F.matmul(ln1, w_up)
     print(f"  FFN up: {ffn_up.shape}")
 
-    # Activation (用 softmax 代替 GELU，因为 GELU 没有 cpp golden)
-    ffn_act = ops.softmax(ffn_up, dtype=dtype)
+    # Activation (GELU)
+    ffn_act = F.gelu(ffn_up)
     print(f"  FFN activation: {ffn_act.shape}")
 
     # FFN down
-    ffn_down = ops.matmul(ffn_act, (ffn_hidden, hidden), dtype=dtype)
+    w_down = np.random.randn(ffn_hidden, hidden).astype(np.float32) * 0.02
+    ffn_down = F.matmul(ffn_act, w_down)
     print(f"  FFN down: {ffn_down.shape}")
 
     # LayerNorm 2
-    output = ops.layernorm(ffn_down, dtype=dtype)  # gamma/beta 自动生成
+    output = F.layer_norm(ffn_down, normalized_shape=(hidden,))
     print(f"  Output: {output.shape}")
 
     return get_records()
@@ -104,16 +106,16 @@ def run_single_layer_transformer():
 def main():
     print(f"""
 {'=' * 70}
-  Transformer Demo - 使用 ops API
+  Transformer Demo - PyTorch 风格 API
 {'=' * 70}
   golden_mode: cpp (via subprocess)
-  quantization: gfp16 (cpp) + bfp8 (input)
+  quantization: gfp16 (cpp)
 """)
 
     # 1. 运行模型
     print("[1] 运行 Transformer 模型")
     print("-" * 50)
-    records = run_model()
+    records = run_single_layer_transformer()
 
     print(f"\n共 {len(records)} 个算子:")
     for r in records:
@@ -122,7 +124,7 @@ def main():
     # 2. 生成假 DUT
     print(f"\n[2] 生成假的 DUT 数据")
     print("-" * 50)
-    print("流程: reference → bfp8 量化/反量化 → 加小噪声")
+    print("流程: reference -> bfp8 量化/反量化 -> 加小噪声")
     np.random.seed(123)
     dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001) for r in records]
 
@@ -148,11 +150,6 @@ def main():
     output_dir = Path(__file__).parent / "workspace"
     ops.dump(str(output_dir))
     print(f"输出目录: {output_dir}")
-
-
-def run_model():
-    """运行模型的包装函数"""
-    return run_single_layer_transformer()
 
 
 if __name__ == "__main__":
