@@ -31,7 +31,7 @@
 算子包含3种计算形式:
     - golden_cpp: C++ Golden 实现（通过 @register_golden_cpp 注册）
     - golden_python: Python Golden 实现（内置）
-    - reference: 高精度参考实现（fp64，用于 fuzzy 比对）
+    - reference: 参考实现（fp32，用于 fuzzy 比对）
 """
 from aidevtools.ops.base import (
     Op,

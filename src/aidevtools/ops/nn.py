@@ -3,7 +3,7 @@
 每个算子包含三种实现：
 - golden_python: Python Golden 实现（fp32，精确实现）
 - cpu_golden: C++ Golden 实现（通过 subprocess 调用）
-- reference: 高精度参考实现（fp64，用于 fuzzy 比对）
+- reference: 参考实现（fp32，用于 fuzzy 比对）
 
 使用 @register_op 装饰器自动注册算子元信息。
 """
@@ -368,7 +368,7 @@ class Embedding(Op):
         return embed_table[input_ids].astype(np.float32)
 
     def reference(self, input_ids: np.ndarray, embed_table: np.ndarray) -> np.ndarray:
-        # Embedding 是查表操作，fp64 无额外精度收益
+        # Embedding 是查表操作，直接返回 fp32
         return embed_table[input_ids].astype(np.float32)
 
 

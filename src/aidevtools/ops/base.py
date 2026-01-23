@@ -4,7 +4,7 @@
 - 每个算子包含3种计算形式：
   1. cpu_golden: C++ Golden 实现（子类方法，has_cpp_golden=True 的算子）
   2. golden_python: Python Golden 实现（子类实现）
-  3. reference: 高精度参考实现（numpy fp32/fp64，用于 fuzzy 比对）
+  3. reference: 参考实现（numpy fp32，用于 fuzzy 比对）
 
 - 调用算子时，根据全局配置 golden_mode 选择执行哪种 golden：
   - golden_mode="cpp": 使用 cpu_golden 方法（如果存在）
@@ -58,8 +58,6 @@ def fp32_reference(func: Callable) -> Callable:
     return wrapper
 
 
-# 保留别名以兼容
-fp64_reference = fp32_reference
 
 # Golden 实现注册表 (C++ bindings)
 _golden_cpp_registry: Dict[str, Callable] = {}
@@ -375,7 +373,7 @@ class Op:
     子类必须实现：
     - name: 算子名称
     - golden_python(): Python Golden 实现
-    - reference(): 高精度参考实现（用于 fuzzy 比对）
+    - reference(): 参考实现（用于 fuzzy 比对）
 
     可选：
     - 通过 @register_golden_cpp 注册 C++ Golden 实现
@@ -401,7 +399,7 @@ class Op:
 
     def reference(self, *args, **kwargs) -> np.ndarray:
         """
-        高精度参考实现（numpy fp32/fp64）
+        参考实现（numpy fp32）
 
         用于 fuzzy 比对，子类必须实现
         """
