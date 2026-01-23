@@ -292,7 +292,8 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
          f"depth={pass_config.backward_prefetch_depth}"),
         ("CubeVectorParallel", pass_config.cube_vector_parallel_enabled, "-"),
         ("Overhead", pass_config.overhead_enabled,
-         f"kernel_launch={pass_config.kernel_launch_us}us, sync={pass_config.sync_overhead_us}us"),
+         f"kernel={pass_config.kernel_launch_us}us, sync={pass_config.sync_overhead_us}us, "
+         f"ctx_switch={pass_config.context_switch_us}us, tiling={pass_config.tiling_overhead_us}us"),
         ("TrafficConstraint", pass_config.traffic_constraint_enabled,
          f"max={pass_config.max_traffic_bytes}, mode={pass_config.traffic_budget_mode}"),
     ]
@@ -334,6 +335,9 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
         ("overhead_enabled", pass_config.overhead_enabled),
         ("kernel_launch_us", pass_config.kernel_launch_us),
         ("sync_overhead_us", pass_config.sync_overhead_us),
+        ("context_switch_us", pass_config.context_switch_us),
+        ("tiling_overhead_us", pass_config.tiling_overhead_us),
+        ("tiling_count", pass_config.tiling_count),
         ("bandwidth_constraint_enabled", pass_config.bandwidth_constraint_enabled),
         ("concurrent_streams", pass_config.concurrent_streams),
         ("bandwidth_contention_model", pass_config.bandwidth_contention_model),
@@ -491,6 +495,14 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         ("Memory Time", "Total_Bytes / (HBM_BW × 1e9) × 1e6", "访存时延 (us)"),
         ("Roofline Time", "max(Compute_Time, Memory_Time)", "Roofline 时延"),
         ("Bottleneck", "compute if Compute > Memory else memory", "瓶颈判断"),
+        ("", "", ""),
+        ("--- Overhead ---", "", "开销计算"),
+        ("Kernel Launch", "kernel_launch_us", "kernel 启动开销"),
+        ("Sync Overhead", "sync_overhead_us", "同步开销"),
+        ("Context Switch", "context_switch_us", "算子切换时延"),
+        ("Tiling Overhead", "tiling_overhead_us × tiling_count", "Tiling 调度开销"),
+        ("Total Overhead", "kernel + sync + ctx_switch + tiling", "总开销"),
+        ("Final Latency", "roofline + overhead - prefetch - parallel", "最终时延"),
     ]
 
     for name, formula, desc in formulas:

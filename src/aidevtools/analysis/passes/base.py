@@ -65,6 +65,9 @@ class PassConfig:
     overhead_enabled: bool = True
     kernel_launch_us: float = 5.0  # kernel 启动开销
     sync_overhead_us: float = 2.0  # 同步开销
+    context_switch_us: float = 1.0  # 算子切换时延 (上下文切换)
+    tiling_overhead_us: float = 0.5  # Tiling 调度开销 (per tile)
+    tiling_count: int = 1  # 默认 tile 数量 (可从 shapes 计算)
 
     # === 全局带宽约束 ===
     bandwidth_constraint_enabled: bool = True
