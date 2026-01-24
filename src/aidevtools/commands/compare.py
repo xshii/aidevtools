@@ -12,7 +12,7 @@ from aidevtools.ops.base import get_records, dump as do_dump, clear as do_clear
 
 def _action_dump(output, **kwargs):
     """导出 Golden 数据"""
-    do_dump(output, format=kwargs.get("format", "raw"))
+    do_dump(output, fmt=kwargs.get("format", "raw"))
     print(f"导出 Golden 数据到: {output}")
     return 0
 
@@ -31,8 +31,8 @@ def _action_single(golden, result, dtype, shape, **kwargs):
         return 1
     dt = parse_dtype(dtype)
     sh = parse_shape(shape)
-    g = load(golden, format="raw", dtype=dt, shape=sh)
-    r = load(result, format="raw", dtype=dt, shape=sh)
+    g = load(golden, fmt="raw", dtype=dt, shape=sh)
+    r = load(result, fmt="raw", dtype=dt, shape=sh)
     diff = compare_full(g, r)
     status = "PASS" if diff.passed else "FAIL"
     print(f"状态: {status}")
@@ -50,8 +50,8 @@ def _action_fuzzy(golden, result, dtype, shape, **kwargs):
         return 1
     dt = parse_dtype(dtype)
     sh = parse_shape(shape)
-    g = load(golden, format="raw", dtype=dt, shape=sh)
-    r = load(result, format="raw", dtype=dt, shape=sh)
+    g = load(golden, fmt="raw", dtype=dt, shape=sh)
+    r = load(result, fmt="raw", dtype=dt, shape=sh)
 
     g_f64 = g.astype(np.float64).flatten()
     r_f64 = r.astype(np.float64).flatten()
@@ -88,7 +88,7 @@ def _action_convert(golden, output, dtype, shape, target_dtype, **kwargs):
 
     dt = parse_dtype(dtype)
     sh = parse_shape(shape)
-    data = load(golden, format="raw", dtype=dt, shape=sh)
+    data = load(golden, fmt="raw", dtype=dt, shape=sh)
 
     try:
         converted, meta = quantize(data, target_dtype)
@@ -131,7 +131,7 @@ def cmd_compare(
     xlsx: str = "",
     output: str = "./workspace",
     model: str = "model",
-    format: str = "raw",
+    format: str = "raw",  # pylint: disable=redefined-builtin  # CLI 参数名
     golden: str = "",
     result: str = "",
     dtype: str = "float32",
@@ -192,7 +192,7 @@ def cmd_compare(
             dtype=dtype, shape=shape, target_dtype=target_dtype
         )
     if action == "xlsx":
-        return _handle_xlsx(subaction, xlsx, output, model, format, ops)
+        return _handle_xlsx(subaction, xlsx, output, model, fmt=format, ops_str=ops)
     logger.error(f"未知子命令: {action}")
     print("可用子命令: dump, clear, single, fuzzy, convert, qtypes, xlsx")
     return 1
@@ -236,12 +236,12 @@ def _xlsx_import(xlsx_path, output, model, **kwargs):
     return 0
 
 
-def _xlsx_run(xlsx_path, output, format, **kwargs):
+def _xlsx_run(xlsx_path, output, fmt, **kwargs):
     from aidevtools.xlsx import run_xlsx
     if not xlsx_path:
         logger.error("请指定 xlsx 文件: compare xlsx run --xlsx=config.xlsx")
         return 1
-    results = run_xlsx(xlsx_path, output, format)
+    results = run_xlsx(xlsx_path, output, fmt=fmt)
     pass_count = sum(1 for r in results if r.get("status") == "PASS")
     fail_count = sum(1 for r in results if r.get("status") == "FAIL")
     skip_count = sum(1 for r in results if r.get("status") in ("SKIP", "PENDING", "ERROR"))
@@ -268,11 +268,11 @@ _XLSX_ACTIONS = {
 }
 
 
-def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, format: str, ops_str: str) -> int:
+def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, fmt: str, ops_str: str) -> int:
     """处理 xlsx 子命令"""
     if subaction in _XLSX_ACTIONS:
         return _XLSX_ACTIONS[subaction](
-            xlsx_path=xlsx_path, output=output, model=model, format=format, ops_str=ops_str
+            xlsx_path=xlsx_path, output=output, model=model, fmt=fmt, ops_str=ops_str
         )
     logger.error(f"未知 xlsx 子命令: {subaction}")
     print("可用 xlsx 子命令: template(t), export(e), import(i), run(r), ops(o)")

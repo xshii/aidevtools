@@ -29,13 +29,13 @@ def get(name: str) -> FormatBase:
         raise ValueError(f"未知格式: {name}")
     return _registry[name]
 
-def load(path: str, format: str = "raw", **kwargs) -> np.ndarray:
+def load(path: str, fmt: str = "raw", **kwargs) -> np.ndarray:
     """加载数据"""
-    return get(format).load(path, **kwargs)
+    return get(fmt).load(path, **kwargs)
 
-def save(path: str, data: np.ndarray, format: str = "raw", **kwargs):
+def save(path: str, data: np.ndarray, fmt: str = "raw", **kwargs):
     """保存数据"""
-    get(format).save(path, data, **kwargs)
+    get(fmt).save(path, data, **kwargs)
 
 # 导入内置格式以触发注册
 from aidevtools.formats import raw  # noqa: F401  # pylint: disable=unused-import

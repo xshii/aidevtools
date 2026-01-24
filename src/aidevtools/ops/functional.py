@@ -1,3 +1,5 @@
+# pylint: disable=redefined-builtin
+# 使用 `input` 作为参数名以兼容 PyTorch API
 """PyTorch 风格的函数式 API
 
 与 torch.nn.functional 接口兼容，方便从 PyTorch 代码迁移。

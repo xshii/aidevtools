@@ -59,7 +59,7 @@ def _is_array_like(obj):
     return isinstance(obj, np.ndarray) or (hasattr(obj, '__array__') and not isinstance(obj, dict))
 
 
-def dump(output_dir: str = "./workspace", format: str = "raw"):
+def dump(output_dir: str = "./workspace", fmt: str = "raw"):
     """导出所有记录"""
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
@@ -68,13 +68,13 @@ def dump(output_dir: str = "./workspace", format: str = "raw"):
         name = r["name"]
         # 保存输出 (golden)
         if r["output"] is not None and _is_array_like(r["output"]):
-            save_data(str(path / f"{name}_golden.bin"), np.asarray(r["output"]), format=format)
+            save_data(str(path / f"{name}_golden.bin"), np.asarray(r["output"]), fmt=fmt)
         # 保存输入
         if r["input"] is not None and _is_array_like(r["input"]):
-            save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), format=format)
+            save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), fmt=fmt)
         # 保存权重
         if r["weight"] is not None and _is_array_like(r["weight"]):
-            save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), format=format)
+            save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), fmt=fmt)
         logger.info(f"dump: {name}")
 
 

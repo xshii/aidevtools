@@ -203,7 +203,7 @@ def _compare_record(record: Dict, idx: int, out_path: Path) -> Dict[str, Any]:
 def run_xlsx(
     xlsx_path: str,
     output_dir: str = "./workspace",
-    format: str = "raw",
+    fmt: str = "raw",
 ) -> List[Dict[str, Any]]:
     """从 xlsx 配置运行算子并比对"""
     _check_openpyxl()
@@ -224,7 +224,7 @@ def run_xlsx(
 
     # 获取记录并导出
     records = get_records()
-    dump(output_dir, format=format)
+    dump(output_dir, fmt=fmt)
 
     # 执行仿真
     _run_simulations(records, op_configs, out_path)

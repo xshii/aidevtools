@@ -37,6 +37,6 @@ def clear() -> None:
     _clear()
 
 
-def dump(output_dir: str = "./workspace", format: str = "raw") -> None:
+def dump(output_dir: str = "./workspace", fmt: str = "raw") -> None:
     """导出所有 bin 文件"""
-    _dump(output_dir, format)
+    _dump(output_dir, fmt=fmt)

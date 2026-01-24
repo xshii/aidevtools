@@ -46,7 +46,7 @@ def export_failed_cases(golden: np.ndarray, result: np.ndarray,
         g_slice = g_flat[elem_start:elem_end]
         case_name = f"case_0x{offset:04x}"
         bin_path = path / f"{case_name}.bin"
-        save(str(bin_path), g_slice, format="raw")
+        save(str(bin_path), g_slice, fmt="raw")
 
         # 导出参数
         param = {

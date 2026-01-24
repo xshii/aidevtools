@@ -1,3 +1,5 @@
+# pylint: disable=redefined-builtin
+# 使用 `input` 作为参数名以兼容 PyTorch API
 """神经网络算子
 
 每个算子包含三种实现：

@@ -505,13 +505,13 @@ def _is_array_like(obj: Any) -> bool:
     return isinstance(obj, np.ndarray) or (hasattr(obj, '__array__') and not isinstance(obj, (dict, list)))
 
 
-def dump(output_dir: str = "./workspace", format: str = "raw") -> None:
+def dump(output_dir: str = "./workspace", fmt: str = "raw") -> None:
     """
     导出所有记录的数据
 
     Args:
         output_dir: 输出目录
-        format: 数据格式 ("raw", "npy", "npz")
+        fmt: 数据格式 ("raw", "npy", "npz")
 
     导出文件：
         - {name}_golden.bin: Golden 输出
@@ -528,14 +528,14 @@ def dump(output_dir: str = "./workspace", format: str = "raw") -> None:
         name = r["name"]
         # 保存 golden
         if r["golden"] is not None and _is_array_like(r["golden"]):
-            save_data(str(path / f"{name}_golden.bin"), np.asarray(r["golden"]), format=format)
+            save_data(str(path / f"{name}_golden.bin"), np.asarray(r["golden"]), fmt=fmt)
         # 保存 reference
         if r["reference"] is not None and _is_array_like(r["reference"]):
-            save_data(str(path / f"{name}_reference.bin"), np.asarray(r["reference"]), format=format)
+            save_data(str(path / f"{name}_reference.bin"), np.asarray(r["reference"]), fmt=fmt)
         # 保存输入
         if r["input"] is not None and _is_array_like(r["input"]):
-            save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), format=format)
+            save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), fmt=fmt)
         # 保存权重
         if r["weight"] is not None and _is_array_like(r["weight"]):
-            save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), format=format)
+            save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), fmt=fmt)
         logger.info(f"dump: {name}")
