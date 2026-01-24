@@ -42,6 +42,17 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/aidevtools"]
 
+[tool.pylint.messages_control]
+disable = [
+    "import-outside-toplevel",  # 延迟导入可选依赖是合理设计
+]
+
+[tool.pylint.basic]
+# 允许单字母变量名 (矩阵维度 M, K, N 等)
+good-names = ["i", "j", "k", "n", "m", "x", "y", "z", "M", "K", "N", "H", "W", "C", "B", "T", "S", "Q", "V", "_"]
+# 允许模块级私有变量使用小写
+const-rgx = "(_?[A-Z][A-Z0-9_]*|_?[a-z][a-z0-9_]*)$"
+
 [tool.ruff]
 line-length = 100
 
