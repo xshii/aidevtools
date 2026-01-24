@@ -792,9 +792,9 @@ class CrossEntropyLoss(Op):
         if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
         # mean
-            if weight is not None:
-                return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
-            return np.array(np.mean(loss), dtype=np.float32)
+        if weight is not None:
+            return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
     def reference(
@@ -848,12 +848,12 @@ class MSELoss(Op):
         if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
         # mean
-            return np.array(np.mean(loss), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
     def reference(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         reduction: str = "mean",
     ) -> np.ndarray:
@@ -882,7 +882,7 @@ class L1Loss(Op):
 
     def golden_python(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         reduction: str = "mean",
     ) -> np.ndarray:
@@ -893,12 +893,12 @@ class L1Loss(Op):
         if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
         # mean
-            return np.array(np.mean(loss), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
     def reference(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         reduction: str = "mean",
     ) -> np.ndarray:
@@ -927,7 +927,7 @@ class SmoothL1Loss(Op):
 
     def golden_python(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         reduction: str = "mean",
         beta: float = 1.0,
@@ -944,12 +944,12 @@ class SmoothL1Loss(Op):
         if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
         # mean
-            return np.array(np.mean(loss), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
     def reference(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         reduction: str = "mean",
         beta: float = 1.0,
@@ -1001,12 +1001,12 @@ class BCEWithLogitsLoss(Op):
         if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
         # mean
-            return np.array(np.mean(loss), dtype=np.float32)
+        return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
     def reference(
         self,
-        input: np.ndarray,
+        input: np.ndarray,  # pylint: disable=redefined-builtin
         target: np.ndarray,
         weight: np.ndarray = None,
         reduction: str = "mean",

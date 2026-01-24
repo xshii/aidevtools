@@ -24,7 +24,7 @@ _seed: int = 42
 
 def seed(s: int) -> None:
     """设置随机种子"""
-    global _seed
+    global _seed  # pylint: disable=global-statement
     _seed = s
     np.random.seed(s)
 

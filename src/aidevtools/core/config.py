@@ -67,7 +67,7 @@ _global_config: Optional[GlobalConfig] = None
 
 def get_config() -> GlobalConfig:
     """获取全局配置"""
-    global _global_config
+    global _global_config  # pylint: disable=global-statement
     with _config_lock:
         if _global_config is None:
             _global_config = GlobalConfig()
@@ -87,7 +87,7 @@ def set_config(
     fuzzy: FuzzyConfig = None,
 ) -> GlobalConfig:
     """设置全局配置"""
-    global _global_config
+    global _global_config  # pylint: disable=global-statement
     with _config_lock:
         if _global_config is None:
             _global_config = GlobalConfig()
@@ -110,6 +110,6 @@ def set_config(
 
 def reset_config():
     """重置为默认配置"""
-    global _global_config
+    global _global_config  # pylint: disable=global-statement
     with _config_lock:
         _global_config = GlobalConfig()

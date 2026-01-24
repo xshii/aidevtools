@@ -274,7 +274,7 @@ def import_xlsx(xlsx_path: str, output_py: Optional[str] = None) -> str:
     Returns:
         生成的 Python 代码
     """
-    enabled_ops, op_configs = parse_xlsx(xlsx_path)
+    _, op_configs = parse_xlsx(xlsx_path)
 
     # 生成代码
     lines = [

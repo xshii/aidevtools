@@ -10,9 +10,11 @@ class FormatBase:
     name: str = ""
 
     def load(self, path: str, **kwargs) -> np.ndarray:
+        """加载数据文件"""
         raise NotImplementedError
 
     def save(self, path: str, data: np.ndarray, **kwargs):
+        """保存数据到文件"""
         raise NotImplementedError
 
     def __init_subclass__(cls, **kwargs):
@@ -39,7 +41,5 @@ def save(path: str, data: np.ndarray, fmt: str = "raw", **kwargs):
     get(fmt).save(path, data, **kwargs)
 
 # 导入内置格式以触发注册
-from aidevtools.formats import (
-    numpy_fmt,  # noqa: F401  # pylint: disable=unused-import
-    raw,  # noqa: F401  # pylint: disable=unused-import
-)
+from aidevtools.formats import numpy_fmt  # noqa: F401,E402  pylint: disable=unused-import,wrong-import-position
+from aidevtools.formats import raw  # noqa: F401,E402  pylint: disable=unused-import,wrong-import-position

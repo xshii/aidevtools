@@ -154,7 +154,7 @@ def clear() -> None:
 
 def set_profile_enabled(enabled: bool) -> None:
     """设置是否自动生成 profile (用于 Paper Analysis)"""
-    global _profile_enabled
+    global _profile_enabled  # pylint: disable=global-statement
     _profile_enabled = enabled
 
 
@@ -190,7 +190,7 @@ def set_profile_only(enabled: bool) -> None:
         # 获取 profiles 用于分析
         profiles = ops.get_profiles()
     """
-    global _profile_only
+    global _profile_only  # pylint: disable=global-statement
     _profile_only = enabled
     if enabled:
         # profile-only 模式自动启用 profile 生成

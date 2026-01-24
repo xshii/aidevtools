@@ -16,11 +16,13 @@ _level = INFO
 _module = "aidevtools"
 
 def set_level(level: Level):
-    global _level
+    """设置日志级别"""
+    global _level  # pylint: disable=global-statement
     _level = level
 
 def set_module(name: str):
-    global _module
+    """设置默认模块名"""
+    global _module  # pylint: disable=global-statement
     _module = name
 
 def _log(level: Level, module: str, msg: str):
@@ -37,18 +39,21 @@ class Logger:
         self.module = module or _module
 
     def debug(self, msg: str):
+        """记录 DEBUG 级别日志"""
         _log(DEBUG, self.module, msg)
 
     def info(self, msg: str):
+        """记录 INFO 级别日志"""
         _log(INFO, self.module, msg)
 
     def warn(self, msg: str):
+        """记录 WARN 级别日志"""
         _log(WARN, self.module, msg)
 
-    # 标准 logging 兼容别名
-    warning = warn
+    warning = warn  # 标准 logging 兼容别名
 
     def error(self, msg: str):
+        """记录 ERROR 级别日志"""
         _log(ERROR, self.module, msg)
 
 logger = Logger()

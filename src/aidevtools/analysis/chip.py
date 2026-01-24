@@ -334,7 +334,7 @@ def load_chip_spec(chip_name: str) -> ChipSpec:
 
     # 解析芯片名
     if "_" in chip_name:
-        arch, version = chip_name.split("_", 1)
+        arch = chip_name.split("_", 1)[0]
         yaml_path = specs_dir / arch / f"{chip_name}.yaml"
     else:
         yaml_path = specs_dir / f"{chip_name}.yaml"

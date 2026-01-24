@@ -430,7 +430,7 @@ def interpolate(
         # 计算 scale factor
         spatial_dims = input.shape[2:]
         zoom_factors = [1.0, 1.0]  # batch, channel
-        for i, (s, t) in enumerate(zip(spatial_dims, size)):
+        for s, t in zip(spatial_dims, size):
             zoom_factors.append(t / s)
     elif scale_factor is not None:
         zoom_factors = [1.0, 1.0] + [scale_factor] * (input.ndim - 2)
@@ -478,7 +478,7 @@ def conv2d(
     if isinstance(padding, int):
         padding = (padding, padding)
 
-    N, C_in, H, W = input.shape
+    N, C_in, _, _ = input.shape
     C_out, _, kH, kW = weight.shape
 
     # Padding

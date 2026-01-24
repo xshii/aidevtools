@@ -37,11 +37,7 @@ def export_xlsx(result: LatencyResult,
     """
     try:
         import openpyxl
-        from openpyxl.chart import BarChart, Reference
-        from openpyxl.chart.series import DataPoint
-        from openpyxl.drawing.fill import ColorChoice, PatternFillProperties
-        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-        from openpyxl.utils import get_column_letter
+        from openpyxl.styles import Border, Font, PatternFill, Side
     except ImportError:
         raise ImportError("openpyxl is required for xlsx export. Install with: pip install openpyxl")
 
@@ -227,7 +223,7 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
         cell.border = border
 
     row_idx = 2
-    for i, (bd, passes) in enumerate(zip(result.breakdowns, result.pass_results)):
+    for bd, passes in zip(result.breakdowns, result.pass_results):
         for pr in passes:
             values = [
                 bd.profile.name,
