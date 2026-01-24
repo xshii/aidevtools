@@ -1,7 +1,5 @@
 """Trace 模块测试"""
-import pytest
 import numpy as np
-from pathlib import Path
 
 from aidevtools.trace.tracer import trace, dump, clear, _records
 

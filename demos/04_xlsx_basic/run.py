@@ -51,8 +51,8 @@ def demo_python_to_excel():
     y = F.layer_norm(y, normalized_shape=(128,)) # layernorm_0
 
     print(f"    MLP: input(1,8,64) -> matmul(128) -> softmax -> layernorm -> output{y.shape}")
-    print(f"    golden_mode: cpp (via subprocess)")
-    print(f"    quantization: gfp16 (cpp)")
+    print("    golden_mode: cpp (via subprocess)")
+    print("    quantization: gfp16 (cpp)")
 
     # 2. 导出到 xlsx
     print("\n[2] 导出到 xlsx...")
@@ -64,7 +64,7 @@ def demo_python_to_excel():
     export_xlsx(str(xlsx_path), records)
 
     print(f"    导出 {len(records)} 条记录到: {xlsx_path}")
-    print(f"    包含 3 个 sheet: op_registry, ops, compare")
+    print("    包含 3 个 sheet: op_registry, ops, compare")
 
     # 3. 展示 xlsx 内容
     print("\n[3] xlsx 内容预览...")
@@ -112,7 +112,7 @@ def demo_excel_to_python():
     # 限定使用支持 cpp golden 的算子
     create_template(str(xlsx_path), ops=["matmul", "softmax", "layernorm"])
     print(f"    模板: {xlsx_path}")
-    print(f"    限定算子: matmul, softmax, layernorm (支持 cpp golden)")
+    print("    限定算子: matmul, softmax, layernorm (支持 cpp golden)")
 
     # 2. 模拟用户编辑 xlsx
     print("\n[2] 模拟用户编辑 xlsx...")
@@ -165,7 +165,7 @@ def demo_excel_to_python():
     print("\n[4] 运行 xlsx 配置...")
     results = run_xlsx(str(xlsx_path), str(output_dir))
 
-    print(f"\n    运行结果:")
+    print("\n    运行结果:")
     for r in results:
         status = r.get("status", "?")
         op_id = r.get("id", "?")
@@ -173,7 +173,7 @@ def demo_excel_to_python():
         status_icon = "V" if status == "PASS" else "X" if status == "FAIL" else "O"
         print(f"      [{status_icon}] id={op_id}: {status} {note}")
 
-    print(f"\n    完成! 结果已更新到 xlsx")
+    print("\n    完成! 结果已更新到 xlsx")
     return str(xlsx_path)
 
 
@@ -200,8 +200,8 @@ def main():
         return
 
     # 运行示例
-    xlsx1 = demo_python_to_excel()
-    xlsx2 = demo_excel_to_python()
+    demo_python_to_excel()
+    demo_excel_to_python()
 
     # 总结
     print("\n" + "=" * 60)

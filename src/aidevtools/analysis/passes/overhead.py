@@ -51,13 +51,13 @@ class OverheadPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """计算开销"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 获取开销参数
-        kernel_launch_us = self.config.kernel_launch_us
-        sync_overhead_us = self.config.sync_overhead_us
-        context_switch_us = self.config.context_switch_us
-        tiling_overhead_us = self.config.tiling_overhead_us
+        kernel_launch_us = self.config.overhead.kernel_launch_us
+        sync_overhead_us = self.config.overhead.sync_us
+        context_switch_us = self.config.overhead.context_switch_us
+        tiling_overhead_us = self.config.overhead.tiling_us
 
         # 计算 tiling count (从 shapes 或使用默认值)
         tiling_count = self._estimate_tiling_count(profile, chip_spec)
@@ -70,20 +70,20 @@ class OverheadPass(BasePass):
                           context_switch_us + tiling_total_us)
 
         # 更新 breakdown
-        latency_breakdown.overhead_us = total_overhead
+        latency_breakdown.timing.overhead_us = total_overhead
 
         # 计算最终时延
         final_latency = latency_before + total_overhead
 
         # 减去预取和并行节省
-        final_latency -= latency_breakdown.prefetch_saved_us
-        final_latency -= latency_breakdown.backward_prefetch_saved_us
-        final_latency -= latency_breakdown.parallel_saved_us
+        final_latency -= latency_breakdown.savings.prefetch_us
+        final_latency -= latency_breakdown.savings.backward_prefetch_us
+        final_latency -= latency_breakdown.savings.parallel_us
 
         # 确保不为负
         final_latency = max(0, final_latency)
 
-        latency_breakdown.total_time_us = final_latency
+        latency_breakdown.timing.total_us = final_latency
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -98,9 +98,9 @@ class OverheadPass(BasePass):
             "tiling_count": tiling_count,
             "tiling_total_us": tiling_total_us,
             "total_overhead_us": total_overhead,
-            "prefetch_saved_us": latency_breakdown.prefetch_saved_us,
-            "backward_prefetch_saved_us": latency_breakdown.backward_prefetch_saved_us,
-            "parallel_saved_us": latency_breakdown.parallel_saved_us,
+            "prefetch_saved_us": latency_breakdown.savings.prefetch_us,
+            "backward_prefetch_saved_us": latency_breakdown.savings.backward_prefetch_us,
+            "parallel_saved_us": latency_breakdown.savings.parallel_us,
             "roofline_time_us": latency_before,
             "final_latency_us": final_latency,
             "overhead_breakdown": {
@@ -128,54 +128,53 @@ class OverheadPass(BasePass):
         return result
 
     def _estimate_tiling_count(self, profile, chip_spec) -> int:
-        """估算 tiling count
-
-        基于算子类型和形状估算需要的 tile 数量。
-        如果无法计算，返回配置的默认值。
-        """
-        shapes = profile.shapes or {}
-
+        """估算 tiling count"""
         # 如果配置了固定值，直接使用
-        if self.config.tiling_count > 1:
-            return self.config.tiling_count
+        if self.config.overhead.tiling_count > 1:
+            return self.config.overhead.tiling_count
 
-        # 获取 L2 缓存大小 (用于判断是否需要 tiling)
-        l2_size = chip_spec.memory.l2.capacity_bytes if hasattr(chip_spec.memory, 'l2') else 32 * 1024 * 1024
-
-        # 典型 tile size (基于常见配置)
-        tile_size = 512  # 默认 tile 边长
-
-        # 根据算子类型计算
+        shapes = profile.shapes or {}
+        l2_size = getattr(getattr(chip_spec.memory, 'l2', None), 'capacity_bytes', 32 * 1024 * 1024)
+        tile_size = 512
         op_type = profile.op_type.lower()
 
+        # 分发到具体计算函数
         if op_type in ["matmul", "gemm", "linear"]:
-            # MatMul [M, K] @ [K, N] -> [M, N]
-            m = shapes.get("M") or shapes.get("m") or shapes.get("batch", 1) * shapes.get("seq_len", 1)
-            n = shapes.get("N") or shapes.get("n") or shapes.get("out_features", 0)
-            k = shapes.get("K") or shapes.get("k") or shapes.get("in_features", 0)
-
-            if m and n and k:
-                # 检查是否需要 tiling
-                output_size = m * n * 2  # fp16
-                if output_size > l2_size:
-                    # 需要 tiling
-                    tiles_m = max(1, (m + tile_size - 1) // tile_size)
-                    tiles_n = max(1, (n + tile_size - 1) // tile_size)
-                    return tiles_m * tiles_n
-
+            return self._tiling_for_matmul(shapes, l2_size, tile_size)
         elif op_type in ["conv2d", "conv"]:
-            # Conv2D 通常需要多次 tiling
-            h = shapes.get("H") or shapes.get("height", 0)
-            w = shapes.get("W") or shapes.get("width", 0)
-            c_out = shapes.get("C_out") or shapes.get("out_channels", 0)
+            return self._tiling_for_conv2d(shapes, l2_size, tile_size)
 
-            if h and w and c_out:
-                output_size = h * w * c_out * 2
-                if output_size > l2_size:
-                    # 空间维度 tiling
-                    tiles_h = max(1, (h + tile_size - 1) // tile_size)
-                    tiles_w = max(1, (w + tile_size - 1) // tile_size)
-                    return tiles_h * tiles_w
-
-        # 默认无 tiling
         return 1
+
+    def _tiling_for_matmul(self, shapes: dict, l2_size: int, tile_size: int) -> int:
+        """计算 MatMul 的 tiling count"""
+        m = shapes.get("M") or shapes.get("m") or shapes.get("batch", 1) * shapes.get("seq_len", 1)
+        n = shapes.get("N") or shapes.get("n") or shapes.get("out_features", 0)
+
+        if not (m and n):
+            return 1
+
+        output_size = m * n * 2  # fp16
+        if output_size <= l2_size:
+            return 1
+
+        tiles_m = max(1, (m + tile_size - 1) // tile_size)
+        tiles_n = max(1, (n + tile_size - 1) // tile_size)
+        return tiles_m * tiles_n
+
+    def _tiling_for_conv2d(self, shapes: dict, l2_size: int, tile_size: int) -> int:
+        """计算 Conv2D 的 tiling count"""
+        h = shapes.get("H") or shapes.get("height", 0)
+        w = shapes.get("W") or shapes.get("width", 0)
+        c_out = shapes.get("C_out") or shapes.get("out_channels", 0)
+
+        if not (h and w and c_out):
+            return 1
+
+        output_size = h * w * c_out * 2
+        if output_size <= l2_size:
+            return 1
+
+        tiles_h = max(1, (h + tile_size - 1) // tile_size)
+        tiles_w = max(1, (w + tile_size - 1) // tile_size)
+        return tiles_h * tiles_w

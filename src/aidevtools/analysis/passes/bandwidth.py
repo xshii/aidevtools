@@ -49,11 +49,11 @@ class BandwidthConstraintPass(BasePass):
     def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
                 context: PassContext = None) -> PassResult:
         """执行带宽约束分析"""
-        latency_before = latency_breakdown.roofline_time_us
-        original_memory_time = latency_breakdown.memory_time_us
+        latency_before = latency_breakdown.timing.roofline_us
+        original_memory_time = latency_breakdown.timing.memory_us
 
         # 获取并发流数
-        concurrent_streams = self.config.concurrent_streams
+        concurrent_streams = self.config.bandwidth.concurrent_streams
         if concurrent_streams <= 1:
             # 无并发，无需约束
             result.details = {
@@ -65,7 +65,7 @@ class BandwidthConstraintPass(BasePass):
             return result
 
         # 计算带宽竞争因子
-        contention_model = self.config.bandwidth_contention_model
+        contention_model = self.config.bandwidth.contention_model
         contention_factor = self._calculate_contention_factor(
             concurrent_streams, contention_model
         )
@@ -75,16 +75,14 @@ class BandwidthConstraintPass(BasePass):
         effective_bandwidth = hbm_bandwidth / contention_factor
 
         # 重新计算访存时间
-        profile = latency_breakdown.profile
-        total_bytes = profile.total_bytes
 
         adjusted_memory_time = original_memory_time * contention_factor
 
         # 更新 roofline 时延
-        new_roofline_time = max(latency_breakdown.compute_time_us, adjusted_memory_time)
+        new_roofline_time = max(latency_breakdown.timing.compute_us, adjusted_memory_time)
 
         # 更新瓶颈
-        if adjusted_memory_time > latency_breakdown.compute_time_us:
+        if adjusted_memory_time > latency_breakdown.timing.compute_us:
             latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
             latency_breakdown.bottleneck = BOTTLENECK_COMPUTE
@@ -92,11 +90,11 @@ class BandwidthConstraintPass(BasePass):
         latency_delta = new_roofline_time - latency_before
 
         # 更新 breakdown
-        latency_breakdown.memory_time_us = adjusted_memory_time
-        latency_breakdown.roofline_time_us = new_roofline_time
+        latency_breakdown.timing.memory_us = adjusted_memory_time
+        latency_breakdown.timing.roofline_us = new_roofline_time
 
         # 记录有效带宽到 breakdown
-        latency_breakdown.effective_bandwidth_gbps = effective_bandwidth
+        latency_breakdown.bandwidth.effective_gbps = effective_bandwidth
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -152,12 +150,12 @@ class TrafficConstraintPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行流量约束检查"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.total_time_us or latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.total_us or latency_breakdown.timing.roofline_us
         total_traffic = profile.total_bytes
 
         # 获取约束
-        max_traffic = self.config.max_traffic_bytes
-        budget_mode = self.config.traffic_budget_mode
+        max_traffic = self.config.traffic.max_bytes
+        budget_mode = self.config.traffic.budget_mode
 
         # 检查是否超限
         over_budget = max_traffic > 0 and total_traffic > max_traffic
@@ -215,12 +213,12 @@ class MinTrafficPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行最低流量优化"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 获取优化参数
-        l2_reuse_factor = self.config.l2_reuse_factor
-        tiling_efficiency = self.config.tiling_efficiency
-        cache_line_bytes = self.config.cache_line_bytes
+        l2_reuse_factor = self.config.min_traffic.l2_reuse_factor
+        tiling_efficiency = self.config.min_traffic.tiling_efficiency
+        cache_line_bytes = self.config.min_traffic.cache_line_bytes
         original_traffic = profile.total_bytes
 
         # 应用 L2 缓存复用 (主要影响权重)
@@ -257,20 +255,20 @@ class MinTrafficPass(BasePass):
 
         # 重新计算访存时间
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        original_memory_time = latency_breakdown.memory_time_us
+        original_memory_time = latency_breakdown.timing.memory_us
         optimized_memory_time = optimized_traffic / (hbm_bandwidth * GBPS_TO_BPS) * S_TO_US
 
         # 更新 roofline 时延
-        new_roofline_time = max(latency_breakdown.compute_time_us, optimized_memory_time)
+        new_roofline_time = max(latency_breakdown.timing.compute_us, optimized_memory_time)
 
         latency_saved = latency_before - new_roofline_time
 
         # 更新 breakdown
-        latency_breakdown.memory_time_us = optimized_memory_time
-        latency_breakdown.roofline_time_us = new_roofline_time
+        latency_breakdown.timing.memory_us = optimized_memory_time
+        latency_breakdown.timing.roofline_us = new_roofline_time
 
         # 更新瓶颈
-        if optimized_memory_time > latency_breakdown.compute_time_us:
+        if optimized_memory_time > latency_breakdown.timing.compute_us:
             latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
             latency_breakdown.bottleneck = BOTTLENECK_COMPUTE

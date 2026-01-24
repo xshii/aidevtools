@@ -1,7 +1,5 @@
 """测试 ops.registry 统一算子注册"""
-import pytest
 from aidevtools.ops.registry import (
-    register_op,
     get_op_meta,
     get_op_info,
     list_ops,
@@ -9,7 +7,6 @@ from aidevtools.ops.registry import (
     get_op_instance,
     OpMeta,
 )
-from aidevtools.ops.base import Op
 
 
 class TestRegisterOp:

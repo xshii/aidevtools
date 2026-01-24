@@ -5,8 +5,8 @@ import threading
 import queue
 import time
 import re
-from typing import Optional, List, Callable, Any
-from dataclasses import dataclass, field
+from typing import Optional, List, Callable
+from dataclasses import dataclass
 from contextlib import contextmanager
 
 __all__ = ["InteractiveSession", "TestResult", "TimeoutError"]

@@ -1,7 +1,7 @@
 """Mock 工具，用于模拟 prompt_toolkit 输入"""
 import sys
-from typing import List, Iterator, Callable, Any
-from unittest.mock import patch, MagicMock
+from typing import List, Iterator, Any
+from unittest.mock import patch
 from contextlib import contextmanager
 
 __all__ = ["MockInput", "mock_prompt", "mock_confirm", "mock_select"]
@@ -48,7 +48,6 @@ class MockInput:
         """替换 prompt_toolkit 的 PromptSession.prompt"""
         from prompt_toolkit import PromptSession
 
-        original_prompt = PromptSession.prompt
 
         def mock_prompt_method(self_session, *args, **kwargs):
             try:

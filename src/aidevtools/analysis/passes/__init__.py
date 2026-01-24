@@ -18,6 +18,12 @@ from .base import (
     PassPreset,
     PassContext,
     BasePass,
+    # 子配置类
+    PrefetchConfig,
+    OverheadConfig,
+    BandwidthConfig,
+    TrafficConfig,
+    MinTrafficConfig,
 )
 
 from .roofline import RooflinePass
@@ -53,6 +59,12 @@ __all__ = [
     "PassPreset",
     "PassContext",
     "BasePass",
+    # 子配置类
+    "PrefetchConfig",
+    "OverheadConfig",
+    "BandwidthConfig",
+    "TrafficConfig",
+    "MinTrafficConfig",
     # Passes
     "RooflinePass",
     "MinTrafficPass",

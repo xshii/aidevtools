@@ -272,98 +272,76 @@ def get_profiles() -> List[Any]:
     return _profiles.copy()
 
 
+def _parse_param_values(args: tuple, kwargs: dict, param_names: list) -> dict:
+    """解析参数为字典"""
+    param_values = {}
+    for i, arg in enumerate(args):
+        if i < len(param_names):
+            param_values[param_names[i]] = arg
+    param_values.update(kwargs)
+    return param_values
+
+
+def _collect_array_info(param_values: dict, weight_params: set) -> tuple:
+    """收集数组信息：shapes, dtype, input_bytes, weight_bytes"""
+    shapes, dtype = {}, "fp16"
+    input_bytes, weight_bytes = 0, 0
+
+    for name, value in param_values.items():
+        if not _is_array_like(value):
+            continue
+
+        arr = np.asarray(value)
+        shapes[f"{name}_shape"] = arr.shape
+        shapes[f"{name}_size"] = arr.size
+
+        if arr.dtype == np.float16:
+            dtype = "fp16"
+        elif arr.dtype == np.float32:
+            dtype = "fp32"
+
+        if name in weight_params:
+            weight_bytes += arr.nbytes
+        else:
+            input_bytes += arr.nbytes
+
+    return shapes, dtype, input_bytes, weight_bytes
+
+
 def _create_profile(op_name: str, full_name: str, args: tuple, kwargs: dict) -> Optional[Any]:
-    """
-    根据算子元信息自动创建 OpProfile
-
-    Args:
-        op_name: 算子名称 (如 "linear")
-        full_name: 完整名称 (如 "linear_0")
-        args: 调用参数
-        kwargs: 调用关键字参数
-
-    Returns:
-        OpProfile 或 None
-    """
+    """根据算子元信息自动创建 OpProfile"""
     from aidevtools.ops.registry import get_op_meta
 
     meta = get_op_meta(op_name)
     if meta is None:
         return None
 
-    # 懒加载 OpProfile (避免循环导入)
     try:
-        from aidevtools.analysis.profile import OpProfile, dtype_bytes
+        from aidevtools.analysis.profile import OpProfile
     except ImportError:
         return None
 
-    # 收集输入形状和字节数
-    input_bytes = 0
-    weight_bytes = 0
-    output_bytes = 0
-    shapes = {}
-    dtype = "fp16"
+    param_values = _parse_param_values(args, kwargs, meta.inputs + meta.optional)
+    shapes, dtype, input_bytes, weight_bytes = _collect_array_info(param_values, set(meta.weight_params))
 
-    # 解析参数
-    param_names = meta.inputs + meta.optional
-    param_values = {}
-
-    for i, arg in enumerate(args):
-        if i < len(param_names):
-            param_values[param_names[i]] = arg
-
-    param_values.update(kwargs)
-
-    # 计算字节数
-    for name, value in param_values.items():
-        if not _is_array_like(value):
-            continue
-
-        arr = np.asarray(value)
-        nbytes = arr.nbytes
-        shapes[f"{name}_shape"] = arr.shape
-        shapes[f"{name}_size"] = arr.size
-
-        # 推断 dtype
-        if arr.dtype == np.float16:
-            dtype = "fp16"
-        elif arr.dtype == np.float32:
-            dtype = "fp32"
-
-        # 区分 input/weight
-        if name in meta.weight_params:
-            weight_bytes += nbytes
-        else:
-            input_bytes += nbytes
-
-    # 计算输出字节数 (从第一个输入推断)
+    # 输出字节数
     first_input = args[0] if args else None
-    if first_input is not None and _is_array_like(first_input):
-        output_bytes = np.asarray(first_input).nbytes
+    output_bytes = np.asarray(first_input).nbytes if first_input is not None and _is_array_like(first_input) else 0
 
-    # 计算 FLOPs
+    # FLOPs
     flops = 0
     if meta.flops_fn is not None:
         try:
             flops = meta.flops_fn(shapes)
         except Exception:
-            flops = 0
+            pass
 
-    # 创建 profile
-    profile = OpProfile(
-        name=full_name,
-        op_type=op_name,
-        shapes=shapes,
-        dtype=dtype,
-        flops=int(flops),
-        compute_unit=meta.compute_unit,
-        input_bytes=int(input_bytes),
-        weight_bytes=int(weight_bytes),
-        output_bytes=int(output_bytes),
-        memory_pattern=meta.memory_pattern,
+    return OpProfile(
+        name=full_name, op_type=op_name, shapes=shapes, dtype=dtype,
+        flops=int(flops), compute_unit=meta.compute_unit,
+        input_bytes=int(input_bytes), weight_bytes=int(weight_bytes),
+        output_bytes=int(output_bytes), memory_pattern=meta.memory_pattern,
     )
-
-    return profile
 
 
 class Op:

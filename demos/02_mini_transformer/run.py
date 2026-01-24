@@ -51,10 +51,10 @@ def run_model():
 
 def main():
     print(f"\n{'=' * 70}")
-    print(f"  MiniTransformer Demo - PyTorch 风格 API")
+    print("  MiniTransformer Demo - PyTorch 风格 API")
     print(f"{'=' * 70}")
-    print(f"  golden_mode: cpp (via subprocess)")
-    print(f"  quantization: gfp16 (cpp)")
+    print("  golden_mode: cpp (via subprocess)")
+    print("  quantization: gfp16 (cpp)")
 
     # 1. 运行模型
     print("\n[1] 运行模型 (MatMul -> LayerNorm -> Softmax)")
@@ -103,7 +103,7 @@ def main():
         save_data(str(output_dir / f"{r['name']}_dut.bin"), dut_outputs[i])
 
     print(f"\n    输出目录: {output_dir}")
-    print(f"    文件列表:")
+    print("    文件列表:")
     for f in sorted(output_dir.glob("*.bin")):
         print(f"      {f.name}")
 

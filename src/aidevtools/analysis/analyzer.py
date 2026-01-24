@@ -8,7 +8,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Optional
 
 from .profile import OpProfile
 from .chip import ChipSpec, load_chip_spec
@@ -30,36 +30,64 @@ from .passes import (
 
 
 @dataclass
-class AnalysisSummary:
-    """分析摘要"""
-    total_latency_us: float = 0.0
-    total_compute_time_us: float = 0.0
-    total_memory_time_us: float = 0.0
-    total_flops: int = 0
-    total_bytes: int = 0
+class SummaryTotals:
+    """汇总指标"""
+    latency_us: float = 0.0
+    compute_time_us: float = 0.0
+    memory_time_us: float = 0.0
+    flops: int = 0
+    bytes: int = 0
 
-    # 瓶颈统计
+
+@dataclass
+class BottleneckStats:
+    """瓶颈统计"""
     compute_bound_ops: int = 0
     memory_bound_ops: int = 0
 
-    # 优化效果
-    total_prefetch_saved_us: float = 0.0
-    total_parallel_saved_us: float = 0.0
-    total_overhead_us: float = 0.0
 
-    # 吞吐量
+@dataclass
+class OptimizationStats:
+    """优化效果统计"""
+    prefetch_saved_us: float = 0.0
+    parallel_saved_us: float = 0.0
+    overhead_us: float = 0.0
+
+
+@dataclass
+class ThroughputStats:
+    """吞吐量统计"""
     achieved_tflops: float = 0.0
     achieved_bandwidth_gbps: float = 0.0
 
-    # Cube/Vector 占比
+
+@dataclass
+class UnitStats:
+    """计算单元时间统计"""
     cube_time_us: float = 0.0
     vector_time_us: float = 0.0
 
-    # 流量分析 (新增)
-    total_original_traffic_bytes: int = 0   # 原始总流量
-    total_optimized_traffic_bytes: int = 0  # 优化后总流量
-    traffic_saved_ratio: float = 0.0        # 流量节省比例
-    effective_bandwidth_gbps: float = 0.0   # 平均有效带宽
+
+@dataclass
+class TrafficStats:
+    """流量统计"""
+    original_bytes: int = 0
+    optimized_bytes: int = 0
+    saved_ratio: float = 0.0
+    effective_bandwidth_gbps: float = 0.0
+
+
+@dataclass
+class AnalysisSummary:
+    """分析摘要 (使用组合模式，无兼容性属性)"""
+
+    # === 组合子对象 ===
+    totals: SummaryTotals = field(default_factory=SummaryTotals)
+    bottleneck: BottleneckStats = field(default_factory=BottleneckStats)
+    optimization: OptimizationStats = field(default_factory=OptimizationStats)
+    throughput: ThroughputStats = field(default_factory=ThroughputStats)
+    unit: UnitStats = field(default_factory=UnitStats)
+    traffic: TrafficStats = field(default_factory=TrafficStats)
 
 
 class PaperAnalyzer:
@@ -135,7 +163,7 @@ class PaperAnalyzer:
             op_pass_results = []
 
             # 构建 PassContext
-            depth = self.pass_config.backward_prefetch_depth
+            depth = self.pass_config.prefetch.backward_depth
             context = PassContext(
                 next_profile=self._profiles[i + 1] if i + 1 < len(self._profiles) else None,
                 prev_profile=self._profiles[i - 1] if i > 0 else None,
@@ -185,55 +213,55 @@ class PaperAnalyzer:
         bw_count = 0
 
         for bd in self._breakdowns:
-            summary.total_latency_us += bd.total_time_us
-            summary.total_compute_time_us += bd.compute_time_us
-            summary.total_memory_time_us += bd.memory_time_us
-            summary.total_flops += bd.profile.flops
-            summary.total_bytes += (bd.profile.input_bytes + bd.profile.weight_bytes +
-                                    bd.profile.output_bytes)
+            summary.totals.latency_us += bd.timing.total_us
+            summary.totals.compute_time_us += bd.timing.compute_us
+            summary.totals.memory_time_us += bd.timing.memory_us
+            summary.totals.flops += bd.profile.flops
+            summary.totals.bytes += (bd.profile.input_bytes + bd.profile.weight_bytes +
+                                     bd.profile.output_bytes)
 
             if bd.bottleneck == "compute":
-                summary.compute_bound_ops += 1
+                summary.bottleneck.compute_bound_ops += 1
             else:
-                summary.memory_bound_ops += 1
+                summary.bottleneck.memory_bound_ops += 1
 
-            summary.total_prefetch_saved_us += bd.prefetch_saved_us + bd.backward_prefetch_saved_us
-            summary.total_parallel_saved_us += bd.parallel_saved_us
-            summary.total_overhead_us += bd.overhead_us
+            summary.optimization.prefetch_saved_us += bd.savings.prefetch_us + bd.savings.backward_prefetch_us
+            summary.optimization.parallel_saved_us += bd.savings.parallel_us
+            summary.optimization.overhead_us += bd.timing.overhead_us
 
             if bd.profile.compute_unit == "cube":
-                summary.cube_time_us += bd.roofline_time_us
+                summary.unit.cube_time_us += bd.timing.roofline_us
             else:
-                summary.vector_time_us += bd.roofline_time_us
+                summary.unit.vector_time_us += bd.timing.roofline_us
 
             # 流量统计
             original = (bd.profile.input_bytes + bd.profile.weight_bytes +
                         bd.profile.output_bytes + bd.profile.workspace_bytes)
-            summary.total_original_traffic_bytes += original
-            if bd.optimized_traffic_bytes > 0:
-                summary.total_optimized_traffic_bytes += bd.optimized_traffic_bytes
+            summary.traffic.original_bytes += original
+            if bd.traffic.optimized_bytes > 0:
+                summary.traffic.optimized_bytes += bd.traffic.optimized_bytes
             else:
-                summary.total_optimized_traffic_bytes += original
+                summary.traffic.optimized_bytes += original
 
             # 有效带宽统计
-            if bd.effective_bandwidth_gbps > 0:
-                total_effective_bw += bd.effective_bandwidth_gbps
+            if bd.bandwidth.effective_gbps > 0:
+                total_effective_bw += bd.bandwidth.effective_gbps
                 bw_count += 1
 
         # 计算实际吞吐量
-        if summary.total_latency_us > 0:
-            summary.achieved_tflops = summary.total_flops / (summary.total_latency_us * 1e-6) / 1e12
-            summary.achieved_bandwidth_gbps = summary.total_bytes / (summary.total_latency_us * 1e-6) / 1e9
+        if summary.totals.latency_us > 0:
+            summary.throughput.achieved_tflops = summary.totals.flops / (summary.totals.latency_us * 1e-6) / 1e12
+            summary.throughput.achieved_bandwidth_gbps = summary.totals.bytes / (summary.totals.latency_us * 1e-6) / 1e9
 
         # 流量节省比例
-        if summary.total_original_traffic_bytes > 0:
-            summary.traffic_saved_ratio = (
-                1 - summary.total_optimized_traffic_bytes / summary.total_original_traffic_bytes
+        if summary.traffic.original_bytes > 0:
+            summary.traffic.saved_ratio = (
+                1 - summary.traffic.optimized_bytes / summary.traffic.original_bytes
             )
 
         # 平均有效带宽
         if bw_count > 0:
-            summary.effective_bandwidth_gbps = total_effective_bw / bw_count
+            summary.traffic.effective_bandwidth_gbps = total_effective_bw / bw_count
 
         return summary
 
@@ -248,23 +276,23 @@ class PaperAnalyzer:
                 op_name=bd.profile.name,
                 unit=bd.profile.compute_unit,
                 start_us=current_time,
-                end_us=current_time + bd.total_time_us,
+                end_us=current_time + bd.timing.total_us,
                 category="execution",
             )
             items.append(item)
 
             # 如果有预取，添加预取条目
-            if bd.prefetch_saved_us > 0:
+            if bd.savings.prefetch_us > 0:
                 prefetch_item = GanttItem(
                     op_name=f"{bd.profile.name}_prefetch",
                     unit="dma",
                     start_us=current_time,
-                    end_us=current_time + bd.prefetch_saved_us,
+                    end_us=current_time + bd.savings.prefetch_us,
                     category="prefetch",
                 )
                 items.append(prefetch_item)
 
-            current_time += bd.total_time_us
+            current_time += bd.timing.total_us
 
         return GanttData(
             items=items,
@@ -304,30 +332,30 @@ class PaperAnalyzer:
         print(f"Paper Analysis Summary - {self.chip_spec.name}")
         print(f"{'='*60}")
         print(f"Total Operators: {len(self._profiles)}")
-        print(f"Total Latency: {s.total_latency_us:.2f} us ({s.total_latency_us/1000:.3f} ms)")
-        print(f"\n--- Breakdown ---")
-        print(f"Compute Time: {s.total_compute_time_us:.2f} us")
-        print(f"Memory Time: {s.total_memory_time_us:.2f} us")
-        print(f"Overhead: {s.total_overhead_us:.2f} us")
-        print(f"\n--- Bottleneck ---")
-        print(f"Compute Bound Ops: {s.compute_bound_ops}")
-        print(f"Memory Bound Ops: {s.memory_bound_ops}")
-        print(f"\n--- Optimizations ---")
-        print(f"Prefetch Saved: {s.total_prefetch_saved_us:.2f} us")
-        print(f"Parallel Saved: {s.total_parallel_saved_us:.2f} us")
-        print(f"\n--- Throughput ---")
-        print(f"Achieved TFLOPS: {s.achieved_tflops:.2f}")
-        print(f"Achieved Bandwidth: {s.achieved_bandwidth_gbps:.2f} GB/s")
-        if s.effective_bandwidth_gbps > 0:
-            print(f"Effective Bandwidth (contention): {s.effective_bandwidth_gbps:.2f} GB/s")
-        print(f"\n--- Traffic Analysis ---")
-        print(f"Original Traffic: {s.total_original_traffic_bytes/(1024*1024):.2f} MB")
-        print(f"Optimized Traffic: {s.total_optimized_traffic_bytes/(1024*1024):.2f} MB")
-        if s.traffic_saved_ratio > 0:
-            print(f"Traffic Saved: {s.traffic_saved_ratio*100:.1f}%")
-        print(f"\n--- Unit Utilization ---")
-        print(f"Cube Time: {s.cube_time_us:.2f} us ({s.cube_time_us/s.total_latency_us*100:.1f}%)")
-        print(f"Vector Time: {s.vector_time_us:.2f} us ({s.vector_time_us/s.total_latency_us*100:.1f}%)")
+        print(f"Total Latency: {s.totals.latency_us:.2f} us ({s.totals.latency_us/1000:.3f} ms)")
+        print("\n--- Breakdown ---")
+        print(f"Compute Time: {s.totals.compute_time_us:.2f} us")
+        print(f"Memory Time: {s.totals.memory_time_us:.2f} us")
+        print(f"Overhead: {s.optimization.overhead_us:.2f} us")
+        print("\n--- Bottleneck ---")
+        print(f"Compute Bound Ops: {s.bottleneck.compute_bound_ops}")
+        print(f"Memory Bound Ops: {s.bottleneck.memory_bound_ops}")
+        print("\n--- Optimizations ---")
+        print(f"Prefetch Saved: {s.optimization.prefetch_saved_us:.2f} us")
+        print(f"Parallel Saved: {s.optimization.parallel_saved_us:.2f} us")
+        print("\n--- Throughput ---")
+        print(f"Achieved TFLOPS: {s.throughput.achieved_tflops:.2f}")
+        print(f"Achieved Bandwidth: {s.throughput.achieved_bandwidth_gbps:.2f} GB/s")
+        if s.traffic.effective_bandwidth_gbps > 0:
+            print(f"Effective Bandwidth (contention): {s.traffic.effective_bandwidth_gbps:.2f} GB/s")
+        print("\n--- Traffic Analysis ---")
+        print(f"Original Traffic: {s.traffic.original_bytes/(1024*1024):.2f} MB")
+        print(f"Optimized Traffic: {s.traffic.optimized_bytes/(1024*1024):.2f} MB")
+        if s.traffic.saved_ratio > 0:
+            print(f"Traffic Saved: {s.traffic.saved_ratio*100:.1f}%")
+        print("\n--- Unit Utilization ---")
+        print(f"Cube Time: {s.unit.cube_time_us:.2f} us ({s.unit.cube_time_us/s.totals.latency_us*100:.1f}%)")
+        print(f"Vector Time: {s.unit.vector_time_us:.2f} us ({s.unit.vector_time_us/s.totals.latency_us*100:.1f}%)")
         print(f"{'='*60}\n")
 
     def to_dataframe(self):
@@ -346,15 +374,15 @@ class PaperAnalyzer:
                 "Input Bytes": p.input_bytes,
                 "Weight Bytes": p.weight_bytes,
                 "Output Bytes": p.output_bytes,
-                "Compute Time (us)": bd.compute_time_us,
-                "Memory Time (us)": bd.memory_time_us,
-                "Roofline Time (us)": bd.roofline_time_us,
-                "Prefetch Saved (us)": bd.prefetch_saved_us,
-                "Parallel Saved (us)": bd.parallel_saved_us,
-                "Overhead (us)": bd.overhead_us,
-                "Total Time (us)": bd.total_time_us,
+                "Compute Time (us)": bd.timing.compute_us,
+                "Memory Time (us)": bd.timing.memory_us,
+                "Roofline Time (us)": bd.timing.roofline_us,
+                "Prefetch Saved (us)": bd.savings.prefetch_us,
+                "Parallel Saved (us)": bd.savings.parallel_us,
+                "Overhead (us)": bd.timing.overhead_us,
+                "Total Time (us)": bd.timing.total_us,
                 "Bottleneck": bd.bottleneck,
-                "Min Bandwidth (GB/s)": bd.min_bandwidth_gbps,
+                "Min Bandwidth (GB/s)": bd.bandwidth.min_gbps,
             }
             rows.append(row)
 

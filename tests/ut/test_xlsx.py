@@ -141,7 +141,7 @@ class TestXlsxExport:
 
     def test_preserve_results(self):
         """保留已有结果"""
-        from aidevtools.xlsx import export_xlsx, create_template
+        from aidevtools.xlsx import export_xlsx
         from aidevtools.xlsx.export import update_compare_results
         from openpyxl import load_workbook
 
@@ -940,7 +940,7 @@ class TestSimCmd:
 
         enabled_ops, op_configs = parse_xlsx(str(xlsx_path))
         assert len(op_configs) == 1
-        assert op_configs[0].sim_cmd == "./my_sim.sh {golden_bin} {result_bin}"
+        assert op_configs[0].paths.sim_cmd == "./my_sim.sh {golden_bin} {result_bin}"
 
     def test_run_sim_cmd_placeholder_substitution(self):
         """测试 sim_cmd 占位符替换"""

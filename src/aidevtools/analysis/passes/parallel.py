@@ -33,7 +33,7 @@ class CubeVectorParallelPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行 Cube/Vector 并行优化"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 检查芯片是否支持 Cube/Vector 并行
         if not chip_spec.pipeline.cube_vector_parallel:
@@ -63,13 +63,13 @@ class CubeVectorParallelPass(BasePass):
         adjacent_time = self._estimate_op_time(next_profile, chip_spec)
 
         # 计算并行节省
-        current_time = latency_breakdown.roofline_time_us
+        current_time = latency_breakdown.timing.roofline_us
         serial_time = current_time + adjacent_time
         parallel_time = max(current_time, adjacent_time)
         saved_time = serial_time - parallel_time
 
         # 更新 breakdown
-        latency_breakdown.parallel_saved_us = saved_time
+        latency_breakdown.savings.parallel_us = saved_time
 
         # 填充结果
         result.latency_before_us = latency_before

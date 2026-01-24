@@ -1,9 +1,6 @@
-import io
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from prettycli.cli import CLI
 from prettycli.command import BaseCommand, command, clear_commands, CommandInfo
@@ -410,7 +407,7 @@ class TestCLIShowHelp:
         cli = CLI("test")
         cli._class_commands["helpcmd"] = HelpCmd()
 
-        with patch('prettycli.ui.print_table') as mock:
+        with patch('prettycli.ui.print_table'):
             cli._show_help()
 
     def test_show_help_with_func_commands(self):

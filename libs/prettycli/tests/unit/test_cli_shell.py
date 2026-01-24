@@ -1,5 +1,4 @@
 """测试 CLI 的 bash 会话持久化"""
-import pytest
 from prettycli.cli import CLI
 
 

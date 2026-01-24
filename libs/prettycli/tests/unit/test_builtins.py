@@ -1,6 +1,6 @@
 """Tests for built-in commands."""
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from prettycli.command import clear_commands, all_commands
 

@@ -1,7 +1,5 @@
 """算子 API 单元测试"""
-import pytest
 import numpy as np
-from pathlib import Path
 
 
 class TestOpsBase:

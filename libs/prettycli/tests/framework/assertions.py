@@ -1,6 +1,6 @@
 """测试断言"""
 import re
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 __all__ = [
     "assert_contains",

@@ -2,9 +2,7 @@
 
 通过命令行接口进行端到端测试
 """
-import pytest
 import numpy as np
-from pathlib import Path
 
 
 class TestCompareSingleCmd:

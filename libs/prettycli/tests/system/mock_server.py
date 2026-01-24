@@ -4,7 +4,7 @@ Mock WebSocket server for testing prettycli vscode client
 import json
 import threading
 import time
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List
 import asyncio
 
 try:

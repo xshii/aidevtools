@@ -7,11 +7,8 @@
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
 
-from .latency import LatencyResult, LatencyBreakdown, GanttData, GanttItem
-from .analyzer import AnalysisSummary
+from .latency import LatencyResult, GanttData
 
 
 # Gantt 图颜色映射
@@ -130,15 +127,15 @@ def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, borde
             p.input_bytes / 1024,
             p.weight_bytes / 1024,
             p.output_bytes / 1024,
-            bd.compute_time_us,
-            bd.memory_time_us,
-            bd.roofline_time_us,
-            bd.prefetch_saved_us,
-            bd.parallel_saved_us,
-            bd.overhead_us,
-            bd.total_time_us,
+            bd.timing.compute_us,
+            bd.timing.memory_us,
+            bd.timing.roofline_us,
+            bd.savings.prefetch_us,
+            bd.savings.parallel_us,
+            bd.timing.overhead_us,
+            bd.timing.total_us,
             bd.bottleneck,
-            bd.min_bandwidth_gbps,
+            bd.bandwidth.min_gbps,
         ]
 
         for col, value in enumerate(values, 1):
@@ -175,31 +172,31 @@ def _write_summary_sheet(ws, result: LatencyResult, header_font, header_fill, bo
         ("", ""),
         ("Analysis Summary", ""),
         ("Total Operators", len(result.breakdowns)),
-        ("Total Latency (us)", s.total_latency_us),
-        ("Total Latency (ms)", s.total_latency_us / 1000),
+        ("Total Latency (us)", s.totals.latency_us),
+        ("Total Latency (ms)", s.totals.latency_us / 1000),
         ("", ""),
         ("Time Breakdown", ""),
-        ("Compute Time (us)", s.total_compute_time_us),
-        ("Memory Time (us)", s.total_memory_time_us),
-        ("Overhead (us)", s.total_overhead_us),
+        ("Compute Time (us)", s.totals.compute_time_us),
+        ("Memory Time (us)", s.totals.memory_time_us),
+        ("Overhead (us)", s.optimization.overhead_us),
         ("", ""),
         ("Bottleneck Stats", ""),
-        ("Compute Bound Ops", s.compute_bound_ops),
-        ("Memory Bound Ops", s.memory_bound_ops),
+        ("Compute Bound Ops", s.bottleneck.compute_bound_ops),
+        ("Memory Bound Ops", s.bottleneck.memory_bound_ops),
         ("", ""),
         ("Optimizations", ""),
-        ("Prefetch Saved (us)", s.total_prefetch_saved_us),
-        ("Parallel Saved (us)", s.total_parallel_saved_us),
+        ("Prefetch Saved (us)", s.optimization.prefetch_saved_us),
+        ("Parallel Saved (us)", s.optimization.parallel_saved_us),
         ("", ""),
         ("Throughput", ""),
-        ("Achieved TFLOPS", s.achieved_tflops),
-        ("Achieved Bandwidth (GB/s)", s.achieved_bandwidth_gbps),
+        ("Achieved TFLOPS", s.throughput.achieved_tflops),
+        ("Achieved Bandwidth (GB/s)", s.throughput.achieved_bandwidth_gbps),
         ("", ""),
         ("Unit Utilization", ""),
-        ("Cube Time (us)", s.cube_time_us),
-        ("Vector Time (us)", s.vector_time_us),
-        ("Cube Ratio (%)", s.cube_time_us / s.total_latency_us * 100 if s.total_latency_us > 0 else 0),
-        ("Vector Ratio (%)", s.vector_time_us / s.total_latency_us * 100 if s.total_latency_us > 0 else 0),
+        ("Cube Time (us)", s.unit.cube_time_us),
+        ("Vector Time (us)", s.unit.vector_time_us),
+        ("Cube Ratio (%)", s.unit.cube_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0),
+        ("Vector Ratio (%)", s.unit.vector_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0),
     ]
 
     for row_idx, (label, value) in enumerate(data, 3):
@@ -258,7 +255,6 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
 def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     """写入 Pass 配置页签"""
     from openpyxl.styles import Font, PatternFill, Alignment
-    from .passes import PassPreset
 
     # 标题
     ws.cell(row=1, column=1, value="Pass Configuration").font = Font(bold=True, size=14)
@@ -280,22 +276,22 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     # Pass 配置列表
     passes_info = [
         ("Roofline", pass_config.roofline_enabled, "-"),
-        ("MinTraffic", pass_config.min_traffic_mode_enabled,
-         f"l2_reuse={pass_config.l2_reuse_factor}, tiling_eff={pass_config.tiling_efficiency}"),
+        ("MinTraffic", pass_config.min_traffic.enabled,
+         f"l2_reuse={pass_config.min_traffic.l2_reuse_factor}, tiling_eff={pass_config.min_traffic.tiling_efficiency}"),
         ("MemoryEfficiency", pass_config.memory_efficiency_enabled,
          f"use_effective_bw={pass_config.use_effective_bandwidth}"),
-        ("BandwidthConstraint", pass_config.bandwidth_constraint_enabled,
-         f"streams={pass_config.concurrent_streams}, model={pass_config.bandwidth_contention_model}"),
-        ("ForwardPrefetch", pass_config.forward_prefetch_enabled,
-         f"efficiency={pass_config.prefetch_efficiency}"),
-        ("BackwardPrefetch", pass_config.backward_prefetch_enabled,
-         f"depth={pass_config.backward_prefetch_depth}"),
+        ("BandwidthConstraint", pass_config.bandwidth.enabled,
+         f"streams={pass_config.bandwidth.concurrent_streams}, model={pass_config.bandwidth.contention_model}"),
+        ("ForwardPrefetch", pass_config.prefetch.forward_enabled,
+         f"efficiency={pass_config.prefetch.efficiency}"),
+        ("BackwardPrefetch", pass_config.prefetch.backward_enabled,
+         f"depth={pass_config.prefetch.backward_depth}"),
         ("CubeVectorParallel", pass_config.cube_vector_parallel_enabled, "-"),
-        ("Overhead", pass_config.overhead_enabled,
-         f"kernel={pass_config.kernel_launch_us}us, sync={pass_config.sync_overhead_us}us, "
-         f"ctx_switch={pass_config.context_switch_us}us, tiling={pass_config.tiling_overhead_us}us"),
-        ("TrafficConstraint", pass_config.traffic_constraint_enabled,
-         f"max={pass_config.max_traffic_bytes}, mode={pass_config.traffic_budget_mode}"),
+        ("Overhead", pass_config.overhead.enabled,
+         f"kernel={pass_config.overhead.kernel_launch_us}us, sync={pass_config.overhead.sync_us}us, "
+         f"ctx_switch={pass_config.overhead.context_switch_us}us, tiling={pass_config.overhead.tiling_us}us"),
+        ("TrafficConstraint", pass_config.traffic.enabled,
+         f"max={pass_config.traffic.max_bytes}, mode={pass_config.traffic.budget_mode}"),
     ]
 
     # 颜色
@@ -327,27 +323,27 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
         ("roofline_enabled", pass_config.roofline_enabled),
         ("memory_efficiency_enabled", pass_config.memory_efficiency_enabled),
         ("use_effective_bandwidth", pass_config.use_effective_bandwidth),
-        ("forward_prefetch_enabled", pass_config.forward_prefetch_enabled),
-        ("prefetch_efficiency", pass_config.prefetch_efficiency),
-        ("backward_prefetch_enabled", pass_config.backward_prefetch_enabled),
-        ("backward_prefetch_depth", pass_config.backward_prefetch_depth),
+        ("prefetch.forward_enabled", pass_config.prefetch.forward_enabled),
+        ("prefetch.efficiency", pass_config.prefetch.efficiency),
+        ("prefetch.backward_enabled", pass_config.prefetch.backward_enabled),
+        ("prefetch.backward_depth", pass_config.prefetch.backward_depth),
         ("cube_vector_parallel_enabled", pass_config.cube_vector_parallel_enabled),
-        ("overhead_enabled", pass_config.overhead_enabled),
-        ("kernel_launch_us", pass_config.kernel_launch_us),
-        ("sync_overhead_us", pass_config.sync_overhead_us),
-        ("context_switch_us", pass_config.context_switch_us),
-        ("tiling_overhead_us", pass_config.tiling_overhead_us),
-        ("tiling_count", pass_config.tiling_count),
-        ("bandwidth_constraint_enabled", pass_config.bandwidth_constraint_enabled),
-        ("concurrent_streams", pass_config.concurrent_streams),
-        ("bandwidth_contention_model", pass_config.bandwidth_contention_model),
-        ("traffic_constraint_enabled", pass_config.traffic_constraint_enabled),
-        ("max_traffic_bytes", pass_config.max_traffic_bytes),
-        ("traffic_budget_mode", pass_config.traffic_budget_mode),
-        ("min_traffic_mode_enabled", pass_config.min_traffic_mode_enabled),
-        ("cache_line_bytes", pass_config.cache_line_bytes),
-        ("l2_reuse_factor", pass_config.l2_reuse_factor),
-        ("tiling_efficiency", pass_config.tiling_efficiency),
+        ("overhead.enabled", pass_config.overhead.enabled),
+        ("overhead.kernel_launch_us", pass_config.overhead.kernel_launch_us),
+        ("overhead.sync_us", pass_config.overhead.sync_us),
+        ("overhead.context_switch_us", pass_config.overhead.context_switch_us),
+        ("overhead.tiling_us", pass_config.overhead.tiling_us),
+        ("overhead.tiling_count", pass_config.overhead.tiling_count),
+        ("bandwidth.enabled", pass_config.bandwidth.enabled),
+        ("bandwidth.concurrent_streams", pass_config.bandwidth.concurrent_streams),
+        ("bandwidth.contention_model", pass_config.bandwidth.contention_model),
+        ("traffic.enabled", pass_config.traffic.enabled),
+        ("traffic.max_bytes", pass_config.traffic.max_bytes),
+        ("traffic.budget_mode", pass_config.traffic.budget_mode),
+        ("min_traffic.enabled", pass_config.min_traffic.enabled),
+        ("min_traffic.cache_line_bytes", pass_config.min_traffic.cache_line_bytes),
+        ("min_traffic.l2_reuse_factor", pass_config.min_traffic.l2_reuse_factor),
+        ("min_traffic.tiling_efficiency", pass_config.min_traffic.tiling_efficiency),
     ]
 
     for param_name, param_value in params:
@@ -363,25 +359,12 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     ws.column_dimensions['C'].width = 50
 
 
-def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill, border):
-    """写入计算详情页签 - 支持手动重算验证
+def _write_chip_params_section(ws, chip, border, start_row: int) -> int:
+    """写入芯片参数部分"""
+    from openpyxl.styles import Font
 
-    包含:
-    - 芯片参数 (算力、带宽)
-    - 每个算子的维度信息 (M, N, K)
-    - 数据类型和字节数
-    - FLOPs 和访存量计算
-    - 时延计算公式
-    """
-    from openpyxl.styles import Font, Alignment
-    from openpyxl.utils import get_column_letter
-    from .profile import dtype_bytes
-
-    chip = result.chip_spec
-
-    # ===== 第一部分: 芯片参数 =====
-    ws.cell(row=1, column=1, value="Chip Parameters (用于计算)").font = Font(bold=True, size=14)
-    ws.merge_cells('A1:D1')
+    ws.cell(row=start_row, column=1, value="Chip Parameters (用于计算)").font = Font(bold=True, size=14)
+    ws.merge_cells(f'A{start_row}:D{start_row}')
 
     chip_params = [
         ("Chip Name", chip.name, "", ""),
@@ -390,7 +373,7 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         ("HBM Bandwidth", chip.memory.hbm.bandwidth_gbps, "GB/s", "访存时延 = Bytes / (BW × 1e9) × 1e6 us"),
     ]
 
-    row = 3
+    row = start_row + 2
     for label, value, unit, formula in chip_params:
         ws.cell(row=row, column=1, value=label).border = border
         cell = ws.cell(row=row, column=2, value=value)
@@ -401,13 +384,19 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         ws.cell(row=row, column=4, value=formula).font = Font(italic=True, color="666666")
         row += 1
 
-    # ===== 第二部分: 算子详情表 =====
-    row += 2
+    return row
+
+
+def _write_operator_details_section(ws, result: LatencyResult, header_font, header_fill, border, start_row: int) -> int:
+    """写入算子详情部分"""
+    from openpyxl.styles import Font, Alignment
+    from .profile import dtype_bytes
+
+    row = start_row + 2
     ws.cell(row=row, column=1, value="Operator Calculation Details").font = Font(bold=True, size=14)
     ws.merge_cells(f'A{row}:R{row}')
     row += 2
 
-    # 表头
     headers = [
         "Op Name", "Op Type", "Unit", "Dtype", "Bytes/Elem",
         "M", "N", "K",
@@ -423,62 +412,45 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         cell.border = border
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
 
-    header_row = row
     row += 1
 
-    # 数据行
     for bd in result.breakdowns:
         p = bd.profile
         shapes = p.shapes or {}
 
-        # 提取维度 (支持多种命名)
         m = shapes.get("M") or shapes.get("m") or shapes.get("batch", 1) * shapes.get("seq_len", 1)
         n = shapes.get("N") or shapes.get("n") or shapes.get("out_features", 0)
         k = shapes.get("K") or shapes.get("k") or shapes.get("in_features", 0)
 
-        # 如果没有 shapes，尝试从 bytes 反推
         elem_bytes = dtype_bytes(p.dtype)
-        if not m and p.input_bytes > 0:
-            m = "-"
-        if not n and p.output_bytes > 0:
-            n = "-"
-        if not k and p.weight_bytes > 0:
-            k = "-"
+        m = m if m else "-"
+        n = n if n else "-"
+        k = k if k else "-"
 
         values = [
-            p.name,
-            p.op_type,
-            p.compute_unit,
-            p.dtype,
-            elem_bytes,
-            m if m else "-",
-            n if n else "-",
-            k if k else "-",
-            p.input_bytes,
-            p.weight_bytes,
-            p.output_bytes,
-            p.total_bytes,
-            p.flops,
-            p.arithmetic_intensity,
-            bd.compute_time_us,
-            bd.memory_time_us,
-            bd.roofline_time_us,
-            bd.bottleneck,
+            p.name, p.op_type, p.compute_unit, p.dtype, elem_bytes,
+            m, n, k,
+            p.input_bytes, p.weight_bytes, p.output_bytes, p.total_bytes,
+            p.flops, p.arithmetic_intensity,
+            bd.timing.compute_us, bd.timing.memory_us, bd.timing.roofline_us, bd.bottleneck,
         ]
 
         for col, value in enumerate(values, 1):
             cell = ws.cell(row=row, column=col, value=value)
             cell.border = border
             if isinstance(value, float):
-                if col in [14]:  # AI
-                    cell.number_format = '0.0'
-                else:
-                    cell.number_format = '0.00'
+                cell.number_format = '0.0' if col == 14 else '0.00'
 
         row += 1
 
-    # ===== 第三部分: 公式说明 =====
-    row += 2
+    return row
+
+
+def _write_formulas_section(ws, start_row: int) -> int:
+    """写入公式说明部分"""
+    from openpyxl.styles import Font
+
+    row = start_row + 2
     ws.cell(row=row, column=1, value="Calculation Formulas (计算公式)").font = Font(bold=True, size=14)
     ws.merge_cells(f'A{row}:F{row}')
     row += 2
@@ -511,17 +483,19 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         ws.cell(row=row, column=4, value=desc).font = Font(italic=True, color="666666")
         row += 1
 
-    # ===== 第四部分: Pass 影响 =====
-    row += 2
+    return row
+
+
+def _write_pass_effects_section(ws, result: LatencyResult, header_font, header_fill, border, start_row: int) -> int:
+    """写入 Pass 优化效果部分"""
+    from openpyxl.styles import Font
+
+    row = start_row + 2
     ws.cell(row=row, column=1, value="Pass Effects (优化效果)").font = Font(bold=True, size=14)
     ws.merge_cells(f'A{row}:H{row}')
     row += 2
 
-    # Pass 效果表头
-    pass_headers = [
-        "Op Name", "Prefetch Saved", "Backward Prefetch", "Parallel Saved",
-        "Overhead", "Total Time", "vs Roofline"
-    ]
+    pass_headers = ["Op Name", "Prefetch Saved", "Backward Prefetch", "Parallel Saved", "Overhead", "Total Time", "vs Roofline"]
     for col, header in enumerate(pass_headers, 1):
         cell = ws.cell(row=row, column=col, value=header)
         cell.font = header_font
@@ -530,16 +504,10 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
 
     row += 1
     for bd in result.breakdowns:
-        total_saved = bd.prefetch_saved_us + bd.backward_prefetch_saved_us + bd.parallel_saved_us
-        delta = bd.total_time_us - bd.roofline_time_us
-
+        delta = bd.timing.total_us - bd.timing.roofline_us
         values = [
-            bd.profile.name,
-            bd.prefetch_saved_us,
-            bd.backward_prefetch_saved_us,
-            bd.parallel_saved_us,
-            bd.overhead_us,
-            bd.total_time_us,
+            bd.profile.name, bd.savings.prefetch_us, bd.savings.backward_prefetch_us,
+            bd.savings.parallel_us, bd.timing.overhead_us, bd.timing.total_us,
             f"{delta:+.2f}" if delta != 0 else "0",
         ]
 
@@ -550,6 +518,20 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
                 cell.number_format = '0.00'
 
         row += 1
+
+    return row
+
+
+def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill, border):
+    """写入计算详情页签 - 支持手动重算验证"""
+    from openpyxl.utils import get_column_letter
+
+    chip = result.chip_spec
+
+    row = _write_chip_params_section(ws, chip, border, 1)
+    row = _write_operator_details_section(ws, result, header_font, header_fill, border, row)
+    row = _write_formulas_section(ws, row)
+    _write_pass_effects_section(ws, result, header_font, header_fill, border, row)
 
     # 调整列宽
     col_widths = [18, 10, 8, 8, 10, 6, 6, 6, 12, 12, 12, 12, 14, 10, 12, 12, 12, 10]
@@ -600,7 +582,6 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, bord
             ws.cell(row=row, column=col, value=f"{time_val:.0f}")
         ws.column_dimensions[get_column_letter(col)].width = 2
 
-    header_row = row
     row += 1
 
     # Gantt 条目
@@ -664,9 +645,9 @@ def export_csv(result: LatencyResult, output_path: str):
             row = [
                 p.name, p.op_type, p.compute_unit, p.dtype,
                 p.flops, p.input_bytes, p.weight_bytes, p.output_bytes,
-                bd.compute_time_us, bd.memory_time_us, bd.roofline_time_us,
-                bd.prefetch_saved_us, bd.parallel_saved_us, bd.overhead_us,
-                bd.total_time_us, bd.bottleneck, bd.min_bandwidth_gbps
+                bd.timing.compute_us, bd.timing.memory_us, bd.timing.roofline_us,
+                bd.savings.prefetch_us, bd.savings.parallel_us, bd.timing.overhead_us,
+                bd.timing.total_us, bd.bottleneck, bd.bandwidth.min_gbps
             ]
             writer.writerow(row)
 
@@ -677,7 +658,6 @@ def export_json(result: LatencyResult, output_path: str):
     """导出为 JSON 格式"""
     import json
     from pathlib import Path
-    from dataclasses import asdict
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -691,13 +671,13 @@ def export_json(result: LatencyResult, output_path: str):
             "hbm_bandwidth_gbps": result.chip_spec.memory.hbm.bandwidth_gbps,
         },
         "summary": {
-            "total_latency_us": result.summary.total_latency_us,
-            "total_flops": result.summary.total_flops,
-            "total_bytes": result.summary.total_bytes,
-            "compute_bound_ops": result.summary.compute_bound_ops,
-            "memory_bound_ops": result.summary.memory_bound_ops,
-            "achieved_tflops": result.summary.achieved_tflops,
-            "achieved_bandwidth_gbps": result.summary.achieved_bandwidth_gbps,
+            "total_latency_us": result.summary.totals.latency_us,
+            "total_flops": result.summary.totals.flops,
+            "total_bytes": result.summary.totals.bytes,
+            "compute_bound_ops": result.summary.bottleneck.compute_bound_ops,
+            "memory_bound_ops": result.summary.bottleneck.memory_bound_ops,
+            "achieved_tflops": result.summary.throughput.achieved_tflops,
+            "achieved_bandwidth_gbps": result.summary.throughput.achieved_bandwidth_gbps,
         },
         "breakdowns": []
     }
@@ -713,12 +693,12 @@ def export_json(result: LatencyResult, output_path: str):
             "input_bytes": p.input_bytes,
             "weight_bytes": p.weight_bytes,
             "output_bytes": p.output_bytes,
-            "compute_time_us": bd.compute_time_us,
-            "memory_time_us": bd.memory_time_us,
-            "roofline_time_us": bd.roofline_time_us,
-            "total_time_us": bd.total_time_us,
+            "compute_time_us": bd.timing.compute_us,
+            "memory_time_us": bd.timing.memory_us,
+            "roofline_time_us": bd.timing.roofline_us,
+            "total_time_us": bd.timing.total_us,
             "bottleneck": bd.bottleneck,
-            "min_bandwidth_gbps": bd.min_bandwidth_gbps,
+            "min_bandwidth_gbps": bd.bandwidth.min_gbps,
         }
         data["breakdowns"].append(breakdown_data)
 

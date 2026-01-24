@@ -6,7 +6,7 @@ import time
 import os
 import re
 import signal
-from typing import Optional, Tuple, List
+from typing import Optional, List
 from dataclasses import dataclass
 
 __all__ = ["ShellSession", "ShellResult"]

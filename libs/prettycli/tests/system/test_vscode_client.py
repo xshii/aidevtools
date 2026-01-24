@@ -16,7 +16,7 @@ class TestVSCodeClientConnection:
     """Test WebSocket connection"""
 
     def test_connect_success(self):
-        with MockVSCodeServer(port=19971) as server:
+        with MockVSCodeServer(port=19971):
             client = VSCodeClient(port=19971)
             assert client.connect() is True
             assert client.is_connected is True
@@ -28,14 +28,14 @@ class TestVSCodeClientConnection:
         assert client.is_connected is False
 
     def test_disconnect(self):
-        with MockVSCodeServer(port=19972) as server:
+        with MockVSCodeServer(port=19972):
             client = VSCodeClient(port=19972)
             client.connect()
             client.disconnect()
             assert client.is_connected is False
 
     def test_context_manager(self):
-        with MockVSCodeServer(port=19973) as server:
+        with MockVSCodeServer(port=19973):
             with VSCodeClient(port=19973) as client:
                 assert client.is_connected is True
             assert client.is_connected is False
@@ -273,7 +273,7 @@ class TestVSCodeStatus:
         assert status[1] == "warning"
 
     def test_get_status_connected(self):
-        with MockVSCodeServer(port=19976) as server:
+        with MockVSCodeServer(port=19976):
             reset_client()
 
             client = get_client(port=19976)
@@ -286,7 +286,7 @@ class TestVSCodeStatus:
             client.disconnect()
 
     def test_get_status_with_file(self):
-        with MockVSCodeServer(port=19977) as server:
+        with MockVSCodeServer(port=19977):
             reset_client()
 
             client = get_client(port=19977)
@@ -336,7 +336,7 @@ class TestVSCodeClientAutoReconnect:
     """Test auto-reconnect functionality"""
 
     def test_ping_success(self):
-        with MockVSCodeServer(port=19980) as server:
+        with MockVSCodeServer(port=19980):
             client = VSCodeClient(port=19980)
             client.connect()
 
@@ -349,7 +349,7 @@ class TestVSCodeClientAutoReconnect:
         assert client.ping() is False
 
     def test_ensure_connected_already_connected(self):
-        with MockVSCodeServer(port=19981) as server:
+        with MockVSCodeServer(port=19981):
             client = VSCodeClient(port=19981)
             client.connect()
 
@@ -360,7 +360,7 @@ class TestVSCodeClientAutoReconnect:
             client.disconnect()
 
     def test_ensure_connected_reconnect(self):
-        with MockVSCodeServer(port=19982) as server:
+        with MockVSCodeServer(port=19982):
             client = VSCodeClient(port=19982)
 
             # Not connected initially
@@ -374,7 +374,7 @@ class TestVSCodeClientAutoReconnect:
             client.disconnect()
 
     def test_auto_reconnect_on_send(self):
-        with MockVSCodeServer(port=19983) as server:
+        with MockVSCodeServer(port=19983):
             client = VSCodeClient(port=19983, auto_reconnect=True, max_retries=3)
             client.connect()
 

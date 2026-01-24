@@ -42,19 +42,19 @@ def run_model():
 
 def main():
     print(f"\n{'=' * 80}")
-    print(f"  Transpose Demo - Linear + Transpose (4D)")
-    print(f"  PyTorch 风格 F API")
+    print("  Transpose Demo - Linear + Transpose (4D)")
+    print("  PyTorch 风格 F API")
     print(f"{'=' * 80}")
 
     # 运行模型
-    print(f"\n[1] 运行模型 (Linear -> Transpose)")
+    print("\n[1] 运行模型 (Linear -> Transpose)")
     records = run_model()
 
     for r in records:
         print(f"    {r['name']}: input={r['input'].shape}, output={r['golden'].shape}")
 
     # 生成假 DUT
-    print(f"\n[2] 生成假的 DUT 数据")
+    print("\n[2] 生成假的 DUT 数据")
     np.random.seed(123)
     dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.0005) for r in records]
 
@@ -62,7 +62,7 @@ def main():
         print(f"    {r['name']}: dut={dut_outputs[i].shape}")
 
     # 比对
-    print(f"\n[3] 比对结果")
+    print("\n[3] 比对结果")
     results = []
     for i, r in enumerate(records):
         result = compare_3col(

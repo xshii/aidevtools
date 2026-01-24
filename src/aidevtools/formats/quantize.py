@@ -195,5 +195,5 @@ def generate_fake_dut(
 
 
 # 导入自定义格式以触发注册
-from aidevtools.formats.custom.gfloat import golden as _gfloat_golden
-from aidevtools.formats.custom.bfp import golden as _bfp_golden
+from aidevtools.formats.custom.bfp import golden as _bfp_golden  # noqa: F401
+from aidevtools.formats.custom import gfloat as _gfloat  # noqa: F401

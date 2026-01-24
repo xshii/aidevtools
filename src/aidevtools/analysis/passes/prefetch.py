@@ -38,15 +38,15 @@ class ForwardPrefetchPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行前向预取优化"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 只有 Cube 算子才能执行前向预取
         if profile.compute_unit != UNIT_CUBE:
             return self._skip(result, latency_before, "非 Cube 算子，无法执行前向预取")
 
         # 计算当前算子的空闲 DMA 时间 (compute_time - memory_time)
-        compute_time = latency_breakdown.compute_time_us
-        memory_time = latency_breakdown.memory_time_us
+        compute_time = latency_breakdown.timing.compute_us
+        memory_time = latency_breakdown.timing.memory_us
         idle_time = max(0, compute_time - memory_time)
 
         # 从 context 获取下一算子信息
@@ -69,11 +69,11 @@ class ForwardPrefetchPass(BasePass):
         next_weight_load_time = next_weight_bytes / (hbm_bandwidth * GBPS_TO_BPS) * S_TO_US
 
         # 可预取时间 = min(空闲时间, 权重加载时间) * 效率
-        prefetch_efficiency = self.config.prefetch_efficiency
+        prefetch_efficiency = self.config.prefetch.efficiency
         prefetchable_time = min(idle_time, next_weight_load_time) * prefetch_efficiency
 
         # 更新 breakdown
-        latency_breakdown.prefetch_saved_us = prefetchable_time
+        latency_breakdown.savings.prefetch_us = prefetchable_time
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -112,19 +112,19 @@ class BackwardPrefetchPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行后向预取优化"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 只有 Vector 算子才能执行后向预取
         if profile.compute_unit != UNIT_VECTOR:
             return self._skip(result, latency_before, "非 Vector 算子，无法执行后向预取")
 
         # Vector 算子的完整执行时间都可用于预取
-        available_time = latency_breakdown.roofline_time_us
+        available_time = latency_breakdown.timing.roofline_us
 
         # 从 context 获取后续 Cube 算子
         future_cube_ops = []
         if context and context.future_profiles:
-            for p in context.future_profiles[:self.config.backward_prefetch_depth]:
+            for p in context.future_profiles[:self.config.prefetch.backward_depth]:
                 if p.compute_unit == UNIT_CUBE:
                     future_cube_ops.append({"name": p.name, "weight_bytes": p.weight_bytes})
 
@@ -140,7 +140,7 @@ class BackwardPrefetchPass(BasePass):
 
         # 在预取深度内预取后续 Cube 算子权重
         hbm_bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        prefetch_efficiency = self.config.prefetch_efficiency
+        prefetch_efficiency = self.config.prefetch.efficiency
 
         total_prefetched = 0
         total_saved = 0.0
@@ -166,7 +166,7 @@ class BackwardPrefetchPass(BasePass):
             remaining_time -= weight_load_time
 
         # 更新 breakdown
-        latency_breakdown.backward_prefetch_saved_us = total_saved
+        latency_breakdown.savings.backward_prefetch_us = total_saved
 
         # 填充结果
         result.latency_before_us = latency_before
@@ -175,7 +175,7 @@ class BackwardPrefetchPass(BasePass):
 
         result.details = {
             "available_time_us": available_time,
-            "prefetch_depth": self.config.backward_prefetch_depth,
+            "prefetch_depth": self.config.prefetch.backward_depth,
             "prefetch_efficiency": prefetch_efficiency,
             "total_prefetched_bytes": total_prefetched,
             "total_saved_us": total_saved,

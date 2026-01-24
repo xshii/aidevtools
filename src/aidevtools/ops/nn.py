@@ -108,6 +108,10 @@ class GELU(Op):
     def golden_python(self, x: np.ndarray) -> np.ndarray:
         return (0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))).astype(np.float32)
 
+    def cpu_golden(self, x: np.ndarray) -> np.ndarray:
+        """C++ Golden 未实现，使用 Python 实现"""
+        return self.golden_python(x)
+
     @fp32_reference
     def reference(self, x: np.ndarray) -> np.ndarray:
         return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))
@@ -756,7 +760,7 @@ class CrossEntropyLoss(Op):
         # 处理多维情况: [N, C, H, W] -> [N, C, H*W] -> [N*H*W, C]
         if input.ndim > 2:
             N, C = input.shape[:2]
-            spatial = input.shape[2:]
+            input.shape[2:]
             input = input.reshape(N, C, -1).transpose(0, 2, 1).reshape(-1, C)
             target = target.reshape(-1)
 

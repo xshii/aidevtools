@@ -1,5 +1,4 @@
 """Tests for VS Code integration in CLI."""
-import pytest
 from unittest.mock import patch, MagicMock
 
 from prettycli.cli import CLI

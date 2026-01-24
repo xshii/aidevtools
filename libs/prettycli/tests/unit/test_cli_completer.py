@@ -1,6 +1,6 @@
 """Tests for CLI command completion."""
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from prettycli.cli import CommandCompleter
 from prettycli.command import BaseCommand

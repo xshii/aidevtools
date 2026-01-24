@@ -82,52 +82,23 @@ def set_config(
     exact: ExactConfig = None,
     fuzzy: FuzzyConfig = None,
 ) -> GlobalConfig:
-    """
-    设置全局配置
-
-    Args:
-        golden_mode: "python" 或 "cpp"
-        precision: "pure" 或 "quant"
-        seed: 随机种子
-        compute_golden: 是否计算 golden
-        cpu_golden_dtype: CPU golden 默认 dtype (gfp4/gfp8/gfp16)
-        cpu_golden_dtype_matmul_a: matmul A 矩阵类型 (混合精度)
-        cpu_golden_dtype_matmul_b: matmul B 矩阵类型 (混合精度)
-        cpu_golden_dtype_matmul_out: matmul 输出类型 (混合精度)
-        exact: 精确比对配置
-        fuzzy: 模糊比对配置
-
-    Returns:
-        更新后的配置
-    """
+    """设置全局配置"""
     global _global_config
     with _config_lock:
         if _global_config is None:
             _global_config = GlobalConfig()
 
-        if golden_mode is not None:
-            _global_config.golden_mode = golden_mode
-        if precision is not None:
-            _global_config.precision = precision
-        if seed is not None:
-            _global_config.seed = seed
-        if compute_golden is not None:
-            _global_config.compute_golden = compute_golden
+        # 顶层配置映射
+        top_level = {"golden_mode": golden_mode, "precision": precision, "seed": seed, "compute_golden": compute_golden, "exact": exact, "fuzzy": fuzzy}
+        for key, value in top_level.items():
+            if value is not None:
+                setattr(_global_config, key, value)
 
-        # CPU Golden 配置
-        if cpu_golden_dtype is not None:
-            _global_config.cpu_golden.dtype = cpu_golden_dtype
-        if cpu_golden_dtype_matmul_a is not None:
-            _global_config.cpu_golden.dtype_matmul_a = cpu_golden_dtype_matmul_a
-        if cpu_golden_dtype_matmul_b is not None:
-            _global_config.cpu_golden.dtype_matmul_b = cpu_golden_dtype_matmul_b
-        if cpu_golden_dtype_matmul_out is not None:
-            _global_config.cpu_golden.dtype_matmul_out = cpu_golden_dtype_matmul_out
-
-        if exact is not None:
-            _global_config.exact = exact
-        if fuzzy is not None:
-            _global_config.fuzzy = fuzzy
+        # CPU Golden 子配置映射
+        cpu_golden_attrs = {"dtype": cpu_golden_dtype, "dtype_matmul_a": cpu_golden_dtype_matmul_a, "dtype_matmul_b": cpu_golden_dtype_matmul_b, "dtype_matmul_out": cpu_golden_dtype_matmul_out}
+        for key, value in cpu_golden_attrs.items():
+            if value is not None:
+                setattr(_global_config.cpu_golden, key, value)
 
         _global_config.validate()
         return _global_config

@@ -1,10 +1,10 @@
 """模糊比对支持"""
 import numpy as np
 from pathlib import Path
-from typing import Callable, Dict, Any, List
+from typing import Callable, Dict, Any
 
 from aidevtools.core.log import logger
-from aidevtools.formats.quantize import quantize, list_quantize
+from aidevtools.formats.quantize import quantize
 
 
 class FuzzyCase:

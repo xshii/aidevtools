@@ -5,7 +5,7 @@
 
 注意：算子定义现在集中在 ops/nn.py，使用 @register_op 装饰器。
 """
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 # 导入 nn 模块以触发算子注册
 from aidevtools.ops import nn as _nn  # noqa: F401
@@ -15,7 +15,6 @@ from aidevtools.ops.registry import (
     get_op_info,
     list_ops,
     validate_op,
-    get_all_ops,
 )
 
 # 额外的算子定义（不在 nn.py 中实现的）

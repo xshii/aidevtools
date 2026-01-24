@@ -123,7 +123,7 @@ class TestFuzzyCase:
         case.set_compute(lambda inputs, weights: np.matmul(inputs["x"], weights["w"]))
         case.compute_golden()
 
-        paths = case.export(qtype="test_int8")
+        case.export(qtype="test_int8")
 
         # 检查 meta 文件
         input_meta_path = tmp_path / "test_meta" / "input_x.meta"

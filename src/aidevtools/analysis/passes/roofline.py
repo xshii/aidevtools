@@ -81,15 +81,15 @@ class RooflinePass(BasePass):
         is_memory_bound = not is_compute_bound
 
         # 更新 latency_breakdown
-        latency_breakdown.compute_time_us = compute_time_us
-        latency_breakdown.memory_time_us = memory_time_us
-        latency_breakdown.roofline_time_us = roofline_time_us
+        latency_breakdown.timing.compute_us = compute_time_us
+        latency_breakdown.timing.memory_us = memory_time_us
+        latency_breakdown.timing.roofline_us = roofline_time_us
         latency_breakdown.bottleneck = BOTTLENECK_COMPUTE if is_compute_bound else BOTTLENECK_MEMORY
 
         # 计算最小带宽需求
         if compute_time_us > 0:
             min_bandwidth_gbps = total_bytes / (compute_time_us / S_TO_US) / GBPS_TO_BPS
-            latency_breakdown.min_bandwidth_gbps = min_bandwidth_gbps
+            latency_breakdown.bandwidth.min_gbps = min_bandwidth_gbps
 
         # 填充结果
         result.latency_before_us = 0
@@ -106,7 +106,7 @@ class RooflinePass(BasePass):
             "is_memory_bound": is_memory_bound,
             "peak_tflops": peak_tflops,
             "hbm_bandwidth_gbps": hbm_bandwidth_gbps,
-            "min_bandwidth_gbps": latency_breakdown.min_bandwidth_gbps,
+            "min_bandwidth_gbps": latency_breakdown.bandwidth.min_gbps,
         }
 
         # 添加建议

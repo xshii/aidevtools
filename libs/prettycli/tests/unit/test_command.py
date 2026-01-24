@@ -1,4 +1,3 @@
-import pytest
 
 from prettycli import BaseCommand, Context
 

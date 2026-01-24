@@ -1,7 +1,6 @@
 """格式模块测试"""
 import pytest
 import numpy as np
-from pathlib import Path
 
 from aidevtools.formats.base import load, save
 

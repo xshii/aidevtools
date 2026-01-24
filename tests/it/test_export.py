@@ -1,8 +1,6 @@
 """Export 集成测试"""
-import pytest
 import json
 import numpy as np
-from pathlib import Path
 
 
 class TestExportFailedCases:

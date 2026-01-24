@@ -1,5 +1,4 @@
 """测试 QuoteWidget"""
-from pathlib import Path
 
 from prettycli.subui.widget.quote import QuoteWidget
 
@@ -18,7 +17,7 @@ class TestQuoteWidget:
 
     def test_next_advances_index(self):
         widget = QuoteWidget()
-        first = widget.current()
+        widget.current()
         widget.next()
         # index should advance
         assert widget._index == 1

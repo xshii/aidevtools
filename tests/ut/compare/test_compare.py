@@ -1,7 +1,5 @@
 """Compare 模块测试"""
-import pytest
 import numpy as np
-from pathlib import Path
 
 from aidevtools.tools.compare.diff import compare_bit, compare_block, compare_full, calc_qsnr
 from aidevtools.tools.compare.report import gen_heatmap_svg

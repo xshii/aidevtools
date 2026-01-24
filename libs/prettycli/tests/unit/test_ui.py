@@ -1,5 +1,4 @@
-from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from rich.table import Table
 

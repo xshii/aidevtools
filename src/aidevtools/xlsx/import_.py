@@ -3,8 +3,8 @@
 从 xlsx 解析配置并生成 Python 代码。
 """
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
-from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, field
 
 try:
     from openpyxl import load_workbook
@@ -21,9 +21,87 @@ def _check_openpyxl():
         raise ImportError("xlsx 功能需要 openpyxl，请安装: pip install openpyxl")
 
 
+def _gen_linear(lines, indent, cfg, shape, dtype, depends, input_var):
+    """生成 linear 算子代码"""
+    if not depends:
+        lines.append(f'{indent}w_{cfg.id} = np.random.randn({shape[-1] if shape else 64}, 256).astype(np.{dtype})')
+        lines.append(f'{indent}out_{cfg.id} = nn.linear({input_var}, w_{cfg.id})')
+    else:
+        lines.append(f'{indent}w_{cfg.id} = np.random.randn({input_var}.shape[-1], 256).astype(np.{dtype})')
+        lines.append(f'{indent}out_{cfg.id} = nn.linear({input_var}, w_{cfg.id})')
+
+
+def _gen_matmul(lines, indent, cfg, shape, dtype, depends, input_var):
+    """生成 matmul 算子代码"""
+    if len(depends) >= 2:
+        keys = list(depends.keys())
+        lines.append(f'{indent}out_{cfg.id} = nn.matmul({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})')
+    else:
+        if not depends:
+            lines.append(f'{indent}b_{cfg.id} = np.random.randn({shape[-1] if shape else 64}, {shape[-1] if shape else 64}).astype(np.{dtype})')
+        else:
+            lines.append(f'{indent}b_{cfg.id} = np.random.randn({input_var}.shape[-1], {input_var}.shape[-1]).astype(np.{dtype})')
+        lines.append(f'{indent}out_{cfg.id} = nn.matmul({input_var}, b_{cfg.id})')
+
+
+def _gen_attention(lines, indent, cfg, depends, input_var):
+    """生成 attention 算子代码"""
+    if "q" in depends and "k" in depends and "v" in depends:
+        lines.append(f'{indent}out_{cfg.id} = nn.attention(q_{cfg.id}, k_{cfg.id}, v_{cfg.id})')
+    else:
+        lines.append(f'{indent}# attention 需要 q, k, v 三个输入')
+        lines.append(f'{indent}out_{cfg.id} = {input_var}  # placeholder')
+
+
+def _gen_binary_op(lines, indent, cfg, op_name, depends, input_var):
+    """生成二元算子代码 (add, mul)"""
+    if len(depends) >= 2:
+        keys = list(depends.keys())
+        lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})')
+    else:
+        lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({input_var}, {input_var})')
+
+
+def _gen_unary_op(lines, indent, cfg, op_name, input_var):
+    """生成一元算子代码 (relu, softmax 等)"""
+    lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({input_var})')
+
+
+def _generate_op_call(lines, indent, cfg, op_name, shape, dtype, depends, input_var):
+    """生成算子调用代码 - 使用字典分发替代 if-elif 链"""
+    # 一元算子
+    unary_ops = {"relu", "softmax", "gelu", "sigmoid", "tanh", "silu", "layernorm", "rmsNorm"}
+    # 二元算子
+    binary_ops = {"add", "mul", "div"}
+
+    if op_name == "linear":
+        _gen_linear(lines, indent, cfg, shape, dtype, depends, input_var)
+    elif op_name == "matmul":
+        _gen_matmul(lines, indent, cfg, shape, dtype, depends, input_var)
+    elif op_name == "attention":
+        _gen_attention(lines, indent, cfg, depends, input_var)
+    elif op_name in binary_ops:
+        _gen_binary_op(lines, indent, cfg, op_name, depends, input_var)
+    elif op_name in unary_ops:
+        _gen_unary_op(lines, indent, cfg, op_name, input_var)
+    else:
+        lines.append(f'{indent}# 未知算子: {op_name}')
+        lines.append(f'{indent}out_{cfg.id} = {input_var}  # placeholder')
+
+
+@dataclass
+class BinaryPaths:
+    """二进制文件路径配置"""
+    golden: str = ""   # golden 文件路径（留空=自动生成）
+    result: str = ""   # result 文件路径
+    input: str = ""    # input 文件路径
+    weight: str = ""   # weight 文件路径
+    sim_cmd: str = ""  # 仿真命令，支持占位符
+
+
 @dataclass
 class OpConfig:
-    """算子配置"""
+    """算子配置 (使用组合模式)"""
     id: int
     op_name: str
     shape: Tuple[int, ...]
@@ -32,12 +110,7 @@ class OpConfig:
     qtype: str
     skip: bool
     note: str
-    sim_cmd: str = ""  # 仿真命令，支持占位符: {golden_bin}, {result_bin}, {input_bin}, {weight_bin}, {id}, {op_name}
-    # binary 路径（留空=自动生成，填写=使用指定路径）
-    golden_bin: str = ""
-    result_bin: str = ""
-    input_bin: str = ""
-    weight_bin: str = ""
+    paths: BinaryPaths = field(default_factory=BinaryPaths)
 
     def parse_depends(self) -> Dict[str, List[int]]:
         """
@@ -93,6 +166,81 @@ class OpConfig:
         return result
 
 
+def _get_str(row_dict: Dict, key: str, default: str = "") -> str:
+    """安全获取字符串值"""
+    return str(row_dict.get(key, default) or default)
+
+
+def _parse_op_registry(wb) -> List[str]:
+    """解析 op_registry sheet，返回启用的算子列表"""
+    if "op_registry" not in wb.sheetnames:
+        return []
+
+    ws = wb["op_registry"]
+    headers = [cell.value for cell in ws[1]]
+    enabled_ops = []
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or not row[0]:
+            continue
+        row_dict = dict(zip(headers, row))
+        op_name = row_dict.get("op_name", "")
+        enabled = str(row_dict.get("enabled", "TRUE")).upper()
+        if op_name and enabled == "TRUE":
+            enabled_ops.append(op_name)
+
+    return enabled_ops
+
+
+def _row_to_opconfig(row_dict: Dict) -> OpConfig:
+    """将行数据转换为 OpConfig"""
+    shape_str = _get_str(row_dict, "shape")
+    shape = parse_shape(shape_str) or ()
+
+    skip_str = _get_str(row_dict, "skip", "FALSE").upper()
+    skip = skip_str in ("TRUE", "1", "YES")
+
+    return OpConfig(
+        id=int(row_dict.get("id", 0) or 0),
+        op_name=_get_str(row_dict, "op_name"),
+        shape=shape,
+        dtype=_get_str(row_dict, "dtype", "float32"),
+        depends=_get_str(row_dict, "depends"),
+        qtype=_get_str(row_dict, "qtype"),
+        skip=skip,
+        note=_get_str(row_dict, "note"),
+        paths=BinaryPaths(
+            golden=_get_str(row_dict, "golden_bin"),
+            result=_get_str(row_dict, "result_bin"),
+            input=_get_str(row_dict, "input_bin"),
+            weight=_get_str(row_dict, "weight_bin"),
+            sim_cmd=_get_str(row_dict, "sim_cmd"),
+        ),
+    )
+
+
+def _parse_ops_sheet(wb) -> List[OpConfig]:
+    """解析 ops sheet，返回算子配置列表"""
+    if "ops" not in wb.sheetnames:
+        return []
+
+    ws = wb["ops"]
+    headers = [cell.value for cell in ws[1]]
+    op_configs = []
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or row[0] is None:
+            continue
+        first_cell = str(row[0]).strip()
+        if first_cell.startswith("#"):
+            continue
+
+        row_dict = dict(zip(headers, row))
+        op_configs.append(_row_to_opconfig(row_dict))
+
+    return op_configs
+
+
 def parse_xlsx(xlsx_path: str) -> Tuple[List[str], List[OpConfig]]:
     """
     解析 xlsx 文件
@@ -108,65 +256,10 @@ def parse_xlsx(xlsx_path: str) -> Tuple[List[str], List[OpConfig]]:
     _check_openpyxl()
 
     wb = load_workbook(xlsx_path, data_only=True)
-
-    # 解析 op_registry sheet
-    enabled_ops = []
-    if "op_registry" in wb.sheetnames:
-        ws = wb["op_registry"]
-        headers = [cell.value for cell in ws[1]]
-        col_map = {h: i for i, h in enumerate(headers)}
-
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or not row[0]:
-                continue
-            row_dict = dict(zip(headers, row))
-            op_name = row_dict.get("op_name", "")
-            enabled = str(row_dict.get("enabled", "TRUE")).upper()
-            if op_name and enabled == "TRUE":
-                enabled_ops.append(op_name)
-
-    # 解析 ops sheet
-    op_configs = []
-    if "ops" in wb.sheetnames:
-        ws = wb["ops"]
-        headers = [cell.value for cell in ws[1]]
-
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or row[0] is None:
-                continue
-            # 跳过注释行
-            first_cell = str(row[0]).strip()
-            if first_cell.startswith("#"):
-                continue
-
-            row_dict = dict(zip(headers, row))
-
-            # 解析 shape
-            shape_str = str(row_dict.get("shape", "") or "")
-            shape = parse_shape(shape_str) or ()
-
-            # 解析 skip
-            skip_str = str(row_dict.get("skip", "FALSE") or "FALSE").upper()
-            skip = skip_str in ("TRUE", "1", "YES")
-
-            config = OpConfig(
-                id=int(row_dict.get("id", 0) or 0),
-                op_name=str(row_dict.get("op_name", "") or ""),
-                shape=shape,
-                dtype=str(row_dict.get("dtype", "float32") or "float32"),
-                depends=str(row_dict.get("depends", "") or ""),
-                qtype=str(row_dict.get("qtype", "") or ""),
-                skip=skip,
-                note=str(row_dict.get("note", "") or ""),
-                sim_cmd=str(row_dict.get("sim_cmd", "") or ""),
-                golden_bin=str(row_dict.get("golden_bin", "") or ""),
-                result_bin=str(row_dict.get("result_bin", "") or ""),
-                input_bin=str(row_dict.get("input_bin", "") or ""),
-                weight_bin=str(row_dict.get("weight_bin", "") or ""),
-            )
-            op_configs.append(config)
-
+    enabled_ops = _parse_op_registry(wb)
+    op_configs = _parse_ops_sheet(wb)
     wb.close()
+
     return enabled_ops, op_configs
 
 
@@ -186,7 +279,7 @@ def import_xlsx(xlsx_path: str, output_py: Optional[str] = None) -> str:
     # 生成代码
     lines = [
         '"""自动生成的算子测试代码',
-        f'',
+        '',
         f'从 xlsx 配置生成: {Path(xlsx_path).name}',
         '"""',
         'import numpy as np',
@@ -233,52 +326,8 @@ def import_xlsx(xlsx_path: str, output_py: Optional[str] = None) -> str:
                     input_vars.append(f"{name}_{config.id}")
             input_var = ", ".join(input_vars) if len(input_vars) > 1 else input_vars[0] if input_vars else f"x_{config.id}"
 
-        # 生成算子调用
-        if op_name == "linear":
-            if not depends:
-                shape_str = ", ".join(str(d) for d in shape) if shape else "64, 128"
-                lines.append(f'{indent}w_{config.id} = np.random.randn({shape[-1] if shape else 64}, 256).astype(np.{dtype})')
-                lines.append(f'{indent}out_{config.id} = nn.linear({input_var}, w_{config.id})')
-            else:
-                lines.append(f'{indent}w_{config.id} = np.random.randn({input_var}.shape[-1], 256).astype(np.{dtype})')
-                lines.append(f'{indent}out_{config.id} = nn.linear({input_var}, w_{config.id})')
-        elif op_name == "matmul":
-            if len(depends) >= 2:
-                keys = list(depends.keys())
-                lines.append(f'{indent}out_{config.id} = nn.matmul({keys[0]}_{config.id}, {keys[1]}_{config.id})')
-            else:
-                if not depends:
-                    shape_str = ", ".join(str(d) for d in shape) if shape else "64, 64"
-                    lines.append(f'{indent}b_{config.id} = np.random.randn({shape[-1] if shape else 64}, {shape[-1] if shape else 64}).astype(np.{dtype})')
-                else:
-                    lines.append(f'{indent}b_{config.id} = np.random.randn({input_var}.shape[-1], {input_var}.shape[-1]).astype(np.{dtype})')
-                lines.append(f'{indent}out_{config.id} = nn.matmul({input_var}, b_{config.id})')
-        elif op_name == "relu":
-            lines.append(f'{indent}out_{config.id} = nn.relu({input_var})')
-        elif op_name == "softmax":
-            lines.append(f'{indent}out_{config.id} = nn.softmax({input_var})')
-        elif op_name == "attention":
-            if "q" in depends and "k" in depends and "v" in depends:
-                lines.append(f'{indent}out_{config.id} = nn.attention(q_{config.id}, k_{config.id}, v_{config.id})')
-            else:
-                lines.append(f'{indent}# attention 需要 q, k, v 三个输入')
-                lines.append(f'{indent}out_{config.id} = {input_var}  # placeholder')
-        elif op_name == "add":
-            if len(depends) >= 2:
-                keys = list(depends.keys())
-                lines.append(f'{indent}out_{config.id} = nn.add({keys[0]}_{config.id}, {keys[1]}_{config.id})')
-            else:
-                lines.append(f'{indent}out_{config.id} = nn.add({input_var}, {input_var})')
-        elif op_name == "mul":
-            if len(depends) >= 2:
-                keys = list(depends.keys())
-                lines.append(f'{indent}out_{config.id} = nn.mul({keys[0]}_{config.id}, {keys[1]}_{config.id})')
-            else:
-                lines.append(f'{indent}out_{config.id} = nn.mul({input_var}, {input_var})')
-        else:
-            # 默认：尝试调用 nn 模块的同名函数
-            lines.append(f'{indent}# 未知算子: {op_name}')
-            lines.append(f'{indent}out_{config.id} = {input_var}  # placeholder')
+            # 生成算子调用
+        _generate_op_call(lines, indent, config, op_name, shape, dtype, depends, input_var)
 
         # 保存输出
         lines.append(f'{indent}outputs[{config.id}] = out_{config.id}')

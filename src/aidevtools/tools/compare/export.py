@@ -25,7 +25,7 @@ def export_failed_cases(golden: np.ndarray, result: np.ndarray,
     path.mkdir(parents=True, exist_ok=True)
 
     g_flat = golden.flatten()
-    r_flat = result.flatten()
+    result.flatten()
     dtype = golden.dtype
     itemsize = dtype.itemsize
 

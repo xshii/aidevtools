@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, Any
-import numpy as np
 
 
 # dtype 字节数映射

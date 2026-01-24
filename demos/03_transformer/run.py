@@ -122,14 +122,14 @@ def main():
         print(f"  {r['name']}: {r['golden'].shape}")
 
     # 2. 生成假 DUT
-    print(f"\n[2] 生成假的 DUT 数据")
+    print("\n[2] 生成假的 DUT 数据")
     print("-" * 50)
     print("流程: reference -> bfp8 量化/反量化 -> 加小噪声")
     np.random.seed(123)
     dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001) for r in records]
 
     # 3. 比对
-    print(f"\n[3] 三列比对")
+    print("\n[3] 三列比对")
     print("-" * 50)
     results = []
     for i, r in enumerate(records):
@@ -145,7 +145,7 @@ def main():
     print_compare_table(results)
 
     # 4. 导出
-    print(f"\n[4] 导出 bin 文件")
+    print("\n[4] 导出 bin 文件")
     print("-" * 50)
     output_dir = Path(__file__).parent / "workspace"
     ops.dump(str(output_dir))

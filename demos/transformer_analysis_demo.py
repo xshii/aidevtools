@@ -154,7 +154,7 @@ def main():
         "ffn_hidden": 3072,
     }
 
-    print(f"\nModel Configuration:")
+    print("\nModel Configuration:")
     for k, v in model_config.items():
         print(f"  {k}: {v}")
 
@@ -212,8 +212,8 @@ def main():
 
     for bd in result.breakdowns:
         print(f"{bd.profile.name:20s} | {bd.profile.compute_unit:6s} | "
-              f"{bd.compute_time_us:10.2f} | {bd.memory_time_us:10.2f} | "
-              f"{bd.roofline_time_us:10.2f} | {bd.total_time_us:10.2f} | "
+              f"{bd.timing.compute_us:10.2f} | {bd.timing.memory_us:10.2f} | "
+              f"{bd.timing.roofline_us:10.2f} | {bd.timing.total_us:10.2f} | "
               f"{bd.bottleneck:10s}")
 
     print("=" * 80)

@@ -1,9 +1,8 @@
 """比对核心逻辑"""
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 from dataclasses import dataclass
 
-from aidevtools.core.log import logger
 
 
 @dataclass
@@ -299,15 +298,15 @@ def print_isclose_result(result: IsCloseResult, name: str = ""):
 
     print(f"\n{name_str}IsClose 比对结果: {status}")
     print("-" * 50)
-    print(f"  参数:")
+    print("  参数:")
     print(f"    atol (绝对门限):     {result.atol:.2e}")
     print(f"    rtol (相对门限):     {result.rtol:.2e}")
     print(f"    max_exceed_ratio:    {result.max_exceed_ratio:.2%}")
-    print(f"  统计:")
+    print("  统计:")
     print(f"    总元素数:            {result.total_elements:,}")
     print(f"    超限元素数:          {result.exceed_count:,}")
     print(f"    超限比例:            {result.exceed_ratio:.4%}")
-    print(f"  误差:")
+    print("  误差:")
     print(f"    最大绝对误差:        {result.max_abs_error:.6e}")
     print(f"    平均绝对误差:        {result.mean_abs_error:.6e}")
     print(f"    最大相对误差:        {result.max_rel_error:.6e}")
@@ -392,36 +391,34 @@ def compare_3col(
     )
 
 
+def _format_result_row(r: FullCompareResult) -> str:
+    """格式化单行结果"""
+    marks = ("✓" if r.exact.passed else "✗", "✓" if r.fuzzy_pure.passed else "✗", "✓" if r.fuzzy_qnt.passed else "✗")
+    max_abs = f"{r.fuzzy_qnt.max_abs:.2e}"
+    qsnr = f"{r.fuzzy_qnt.qsnr:.1f}" if r.fuzzy_qnt.qsnr != float('inf') else "inf"
+    cosine = f"{r.fuzzy_qnt.cosine:.6f}"
+    name = f"{r.op_name}_{r.op_id}"
+    return f"{name:<15} {marks[0]:^7} {marks[1]:^7} {marks[2]:^7} {max_abs:>10} {qsnr:>8} {cosine:>8} {r.status:^12}"
+
+
 def print_compare_table(results: List[FullCompareResult]):
     """打印比对结果表格"""
-    # 表头
     print()
     print("=" * 100)
     print(f"{'op_name':<15} {'exact':^7} {'f_pure':^7} {'f_qnt':^7} {'max_abs':>10} {'qsnr':>8} {'cosine':>8} {'status':^12}")
     print("-" * 100)
 
-    # 数据行
     for r in results:
-        exact_mark = "✓" if r.exact.passed else "✗"
-        pure_mark = "✓" if r.fuzzy_pure.passed else "✗"
-        qnt_mark = "✓" if r.fuzzy_qnt.passed else "✗"
-
-        # 使用 fuzzy_qnt 的指标
-        max_abs = f"{r.fuzzy_qnt.max_abs:.2e}"
-        qsnr = f"{r.fuzzy_qnt.qsnr:.1f}" if r.fuzzy_qnt.qsnr != float('inf') else "inf"
-        cosine = f"{r.fuzzy_qnt.cosine:.6f}"
-
-        name = f"{r.op_name}_{r.op_id}"
-        print(f"{name:<15} {exact_mark:^7} {pure_mark:^7} {qnt_mark:^7} {max_abs:>10} {qsnr:>8} {cosine:>8} {r.status:^12}")
+        print(_format_result_row(r))
 
     print("=" * 100)
 
-    # 汇总
-    total = len(results)
-    perfect = sum(1 for r in results if r.status == "PERFECT")
-    passed = sum(1 for r in results if r.status == "PASS")
-    quant_issue = sum(1 for r in results if r.status == "QUANT_ISSUE")
-    failed = sum(1 for r in results if r.status == "FAIL")
+    # 汇总统计
+    status_counts = {"PERFECT": 0, "PASS": 0, "QUANT_ISSUE": 0, "FAIL": 0}
+    for r in results:
+        if r.status in status_counts:
+            status_counts[r.status] += 1
 
-    print(f"\nSummary: {perfect} PERFECT, {passed} PASS, {quant_issue} QUANT_ISSUE, {failed} FAIL (total: {total})")
+    print(f"\nSummary: {status_counts['PERFECT']} PERFECT, {status_counts['PASS']} PASS, "
+          f"{status_counts['QUANT_ISSUE']} QUANT_ISSUE, {status_counts['FAIL']} FAIL (total: {len(results)})")
     print()

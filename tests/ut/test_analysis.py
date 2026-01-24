@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 
 from aidevtools import ops
-from aidevtools.ops.nn import matmul, layernorm, gelu, softmax, attention, add, transpose
+from aidevtools.ops.nn import matmul, layernorm, gelu, attention, transpose
 
 
 def _profile(op_fn, *args, **kwargs):
@@ -34,7 +34,6 @@ class TestOpProfile:
 
     def test_matmul_profile(self):
         """测试 MatMul profile"""
-        from aidevtools.analysis.profile import OpProfile
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
@@ -101,7 +100,7 @@ class TestChipSpec:
 
     def test_load_builtin_chips(self):
         """测试加载内置芯片配置"""
-        from aidevtools.analysis.chip import load_chip_spec, list_chips
+        from aidevtools.analysis.chip import list_chips
 
         chips = list_chips()
         assert "npu_310" in chips
@@ -150,12 +149,12 @@ class TestPasses:
         minimal = PassConfig.from_preset(PassPreset.MINIMAL)
         assert minimal.roofline_enabled is True
         assert minimal.memory_efficiency_enabled is False
-        assert minimal.forward_prefetch_enabled is False
+        assert minimal.prefetch.forward_enabled is False
 
         standard = PassConfig.from_preset(PassPreset.STANDARD)
         assert standard.roofline_enabled is True
         assert standard.memory_efficiency_enabled is True
-        assert standard.forward_prefetch_enabled is True
+        assert standard.prefetch.forward_enabled is True
 
     def test_roofline_pass(self):
         """测试 Roofline Pass"""
@@ -183,10 +182,10 @@ class TestPasses:
         result = roofline.run(breakdown, chip)
 
         assert result.enabled is True
-        assert breakdown.compute_time_us > 0
-        assert breakdown.memory_time_us > 0
-        assert breakdown.roofline_time_us == max(
-            breakdown.compute_time_us, breakdown.memory_time_us
+        assert breakdown.timing.compute_us > 0
+        assert breakdown.timing.memory_us > 0
+        assert breakdown.timing.roofline_us == max(
+            breakdown.timing.compute_us, breakdown.timing.memory_us
         )
 
     def test_memory_efficiency_pass(self):
@@ -210,14 +209,14 @@ class TestPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.memory_time_us = 100.0
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.memory_us = 100.0
+        breakdown.timing.roofline_us = 100.0
 
         mem_pass = MemoryEfficiencyPass(config)
-        result = mem_pass.run(breakdown, chip)
+        mem_pass.run(breakdown, chip)
 
         # Strided 模式效率较低，应该增加访存时间
-        assert breakdown.memory_time_us > 100.0
+        assert breakdown.timing.memory_us > 100.0
 
 
 class TestPaperAnalyzer:
@@ -240,7 +239,7 @@ class TestPaperAnalyzer:
 
         assert len(result.breakdowns) == 1
         assert result.summary is not None
-        assert result.summary.total_latency_us > 0
+        assert result.summary.totals.latency_us > 0
 
     def test_analyzer_multiple_ops(self):
         """测试多算子分析"""
@@ -267,7 +266,7 @@ class TestPaperAnalyzer:
         result = analyzer.analyze()
 
         assert len(result.breakdowns) == 3
-        assert result.summary.compute_bound_ops + result.summary.memory_bound_ops == 3
+        assert result.summary.bottleneck.compute_bound_ops + result.summary.bottleneck.memory_bound_ops == 3
 
     def test_gantt_data(self):
         """测试 Gantt 数据生成"""
@@ -430,8 +429,8 @@ class TestIntegration:
 
         # 验证结果
         assert len(result.breakdowns) == len(profiles)
-        assert result.summary.total_latency_us > 0
-        assert result.summary.achieved_tflops > 0
+        assert result.summary.totals.latency_us > 0
+        assert result.summary.throughput.achieved_tflops > 0
 
         # 检查 matmul 为 compute bound
         for bd in result.breakdowns:
@@ -452,8 +451,8 @@ class TestPrefetchPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.forward_prefetch_enabled = True
-        config.prefetch_efficiency = 0.8
+        config.prefetch.forward_enabled = True
+        config.prefetch.efficiency = 0.8
 
         # 当前 Cube 算子 (compute bound, 有空闲 DMA 时间)
         current_profile = OpProfile(
@@ -477,9 +476,9 @@ class TestPrefetchPasses:
         )
 
         breakdown = LatencyBreakdown(profile=current_profile)
-        breakdown.compute_time_us = 100.0  # 计算时间
-        breakdown.memory_time_us = 50.0    # 访存时间
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.compute_us = 100.0  # 计算时间
+        breakdown.timing.memory_us = 50.0    # 访存时间
+        breakdown.timing.roofline_us = 100.0
 
         context = PassContext(next_profile=next_profile)
 
@@ -487,7 +486,7 @@ class TestPrefetchPasses:
         result = prefetch_pass.run(breakdown, chip, context)
 
         # 应该有预取节省
-        assert breakdown.prefetch_saved_us > 0
+        assert breakdown.savings.prefetch_us > 0
         assert result.details["idle_time_us"] == 50.0  # compute - memory
         assert result.details["prefetch_efficiency"] == 0.8
 
@@ -500,7 +499,7 @@ class TestPrefetchPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.forward_prefetch_enabled = True
+        config.prefetch.forward_enabled = True
 
         # Vector 算子不能执行前向预取
         profile = OpProfile(
@@ -511,13 +510,13 @@ class TestPrefetchPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 50.0
+        breakdown.timing.roofline_us = 50.0
 
         prefetch_pass = ForwardPrefetchPass(config)
         result = prefetch_pass.run(breakdown, chip)
 
         # 应该跳过
-        assert breakdown.prefetch_saved_us == 0
+        assert breakdown.savings.prefetch_us == 0
         assert "非 Cube 算子" in result.details.get("reason", "")
 
     def test_backward_prefetch_vector_op(self):
@@ -529,9 +528,9 @@ class TestPrefetchPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.backward_prefetch_enabled = True
-        config.backward_prefetch_depth = 2
-        config.prefetch_efficiency = 0.8
+        config.prefetch.backward_enabled = True
+        config.prefetch.backward_depth = 2
+        config.prefetch.efficiency = 0.8
 
         # 当前 Vector 算子
         current_profile = OpProfile(
@@ -548,7 +547,7 @@ class TestPrefetchPasses:
         ]
 
         breakdown = LatencyBreakdown(profile=current_profile)
-        breakdown.roofline_time_us = 20.0  # Vector 执行时间
+        breakdown.timing.roofline_us = 20.0  # Vector 执行时间
 
         context = PassContext(future_profiles=future_profiles)
 
@@ -556,7 +555,7 @@ class TestPrefetchPasses:
         result = prefetch_pass.run(breakdown, chip, context)
 
         # 应该有后向预取节省
-        assert breakdown.backward_prefetch_saved_us > 0
+        assert breakdown.savings.backward_prefetch_us > 0
         assert result.details["prefetch_depth"] == 2
         assert len(result.details["prefetch_details"]) > 0
 
@@ -569,7 +568,7 @@ class TestPrefetchPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.backward_prefetch_enabled = True
+        config.prefetch.backward_enabled = True
 
         # Cube 算子不能执行后向预取
         profile = OpProfile(
@@ -580,13 +579,13 @@ class TestPrefetchPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.roofline_us = 100.0
 
         prefetch_pass = BackwardPrefetchPass(config)
         result = prefetch_pass.run(breakdown, chip)
 
         # 应该跳过
-        assert breakdown.backward_prefetch_saved_us == 0
+        assert breakdown.savings.backward_prefetch_us == 0
         assert "非 Vector 算子" in result.details.get("reason", "")
 
 
@@ -602,12 +601,12 @@ class TestOverheadPass:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.overhead_enabled = True
-        config.kernel_launch_us = 5.0
-        config.sync_overhead_us = 2.0
-        config.context_switch_us = 1.0
-        config.tiling_overhead_us = 0.5
-        config.tiling_count = 1  # 无 tiling
+        config.overhead.enabled = True
+        config.overhead.kernel_launch_us = 5.0
+        config.overhead.sync_us = 2.0
+        config.overhead.context_switch_us = 1.0
+        config.overhead.tiling_us = 0.5
+        config.overhead.tiling_count = 1  # 无 tiling
 
         profile = OpProfile(
             name="matmul",
@@ -617,18 +616,18 @@ class TestOverheadPass:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 100.0
-        breakdown.prefetch_saved_us = 0
-        breakdown.backward_prefetch_saved_us = 0
-        breakdown.parallel_saved_us = 0
+        breakdown.timing.roofline_us = 100.0
+        breakdown.savings.prefetch_us = 0
+        breakdown.savings.backward_prefetch_us = 0
+        breakdown.savings.parallel_us = 0
 
         overhead_pass = OverheadPass(config)
-        result = overhead_pass.run(breakdown, chip)
+        overhead_pass.run(breakdown, chip)
 
         # 总开销 = 5 + 2 + 1 + 0.5*1 = 8.5us
         expected_overhead = 5.0 + 2.0 + 1.0 + 0.5
-        assert breakdown.overhead_us == expected_overhead
-        assert breakdown.total_time_us == 100.0 + expected_overhead
+        assert breakdown.timing.overhead_us == expected_overhead
+        assert breakdown.timing.total_us == 100.0 + expected_overhead
 
     def test_overhead_with_tiling(self):
         """测试带 tiling 的开销计算"""
@@ -639,12 +638,12 @@ class TestOverheadPass:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.overhead_enabled = True
-        config.kernel_launch_us = 5.0
-        config.sync_overhead_us = 2.0
-        config.context_switch_us = 1.0
-        config.tiling_overhead_us = 0.5
-        config.tiling_count = 4  # 4 tiles (2x2)
+        config.overhead.enabled = True
+        config.overhead.kernel_launch_us = 5.0
+        config.overhead.sync_us = 2.0
+        config.overhead.context_switch_us = 1.0
+        config.overhead.tiling_us = 0.5
+        config.overhead.tiling_count = 4  # 4 tiles (2x2)
 
         profile = OpProfile(
             name="matmul",
@@ -654,17 +653,17 @@ class TestOverheadPass:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 100.0
-        breakdown.prefetch_saved_us = 0
-        breakdown.backward_prefetch_saved_us = 0
-        breakdown.parallel_saved_us = 0
+        breakdown.timing.roofline_us = 100.0
+        breakdown.savings.prefetch_us = 0
+        breakdown.savings.backward_prefetch_us = 0
+        breakdown.savings.parallel_us = 0
 
         overhead_pass = OverheadPass(config)
         result = overhead_pass.run(breakdown, chip)
 
         # 总开销 = 5 + 2 + 1 + 0.5*4 = 10us
         expected_overhead = 5.0 + 2.0 + 1.0 + 0.5 * 4
-        assert breakdown.overhead_us == expected_overhead
+        assert breakdown.timing.overhead_us == expected_overhead
         assert result.details["tiling_count"] == 4
         assert result.details["tiling_total_us"] == 2.0
 
@@ -677,11 +676,11 @@ class TestOverheadPass:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.overhead_enabled = True
-        config.kernel_launch_us = 5.0
-        config.sync_overhead_us = 2.0
-        config.context_switch_us = 1.0
-        config.tiling_overhead_us = 0.0
+        config.overhead.enabled = True
+        config.overhead.kernel_launch_us = 5.0
+        config.overhead.sync_us = 2.0
+        config.overhead.context_switch_us = 1.0
+        config.overhead.tiling_us = 0.0
 
         profile = OpProfile(
             name="matmul",
@@ -691,18 +690,18 @@ class TestOverheadPass:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 100.0
-        breakdown.prefetch_saved_us = 10.0  # 预取节省
-        breakdown.backward_prefetch_saved_us = 5.0
-        breakdown.parallel_saved_us = 3.0
+        breakdown.timing.roofline_us = 100.0
+        breakdown.savings.prefetch_us = 10.0  # 预取节省
+        breakdown.savings.backward_prefetch_us = 5.0
+        breakdown.savings.parallel_us = 3.0
 
         overhead_pass = OverheadPass(config)
-        result = overhead_pass.run(breakdown, chip)
+        overhead_pass.run(breakdown, chip)
 
         # final = roofline + overhead - prefetch - backward - parallel
         # final = 100 + 8 - 10 - 5 - 3 = 90us
         expected_total = 100.0 + 8.0 - 10.0 - 5.0 - 3.0
-        assert breakdown.total_time_us == expected_total
+        assert breakdown.timing.total_us == expected_total
 
     def test_overhead_auto_tiling_estimation(self):
         """测试自动 tiling count 估算"""
@@ -713,8 +712,8 @@ class TestOverheadPass:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.overhead_enabled = True
-        config.tiling_count = 1  # 使用自动估算
+        config.overhead.enabled = True
+        config.overhead.tiling_count = 1  # 使用自动估算
 
         # 大矩阵应该触发 tiling
         profile = OpProfile(
@@ -726,7 +725,7 @@ class TestOverheadPass:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.roofline_us = 100.0
 
         overhead_pass = OverheadPass(config)
         result = overhead_pass.run(breakdown, chip)
@@ -766,7 +765,7 @@ class TestCubeVectorParallelPass:
         )
 
         breakdown = LatencyBreakdown(profile=current_profile)
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.roofline_us = 100.0
 
         context = PassContext(next_profile=next_profile)
 
@@ -789,8 +788,8 @@ class TestBandwidthPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.bandwidth_constraint_enabled = True
-        config.concurrent_streams = 1  # 单流
+        config.bandwidth.enabled = True
+        config.bandwidth.concurrent_streams = 1  # 单流
 
         profile = OpProfile(
             name="test_matmul",
@@ -804,14 +803,14 @@ class TestBandwidthPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.memory_time_us = 100.0
-        breakdown.roofline_time_us = 100.0
+        breakdown.timing.memory_us = 100.0
+        breakdown.timing.roofline_us = 100.0
 
         bw_pass = BandwidthConstraintPass(config)
         result = bw_pass.run(breakdown, chip)
 
         # 单流无约束，时延不变
-        assert breakdown.memory_time_us == 100.0
+        assert breakdown.timing.memory_us == 100.0
         assert result.details.get("reason") == "单流执行，无带宽竞争"
 
     def test_bandwidth_constraint_pass_multi_stream(self):
@@ -823,9 +822,9 @@ class TestBandwidthPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.bandwidth_constraint_enabled = True
-        config.concurrent_streams = 4  # 4 流并发
-        config.bandwidth_contention_model = "linear"
+        config.bandwidth.enabled = True
+        config.bandwidth.concurrent_streams = 4  # 4 流并发
+        config.bandwidth.contention_model = "linear"
 
         profile = OpProfile(
             name="test_matmul",
@@ -839,15 +838,15 @@ class TestBandwidthPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.memory_time_us = 100.0
-        breakdown.roofline_time_us = 100.0
-        breakdown.compute_time_us = 50.0
+        breakdown.timing.memory_us = 100.0
+        breakdown.timing.roofline_us = 100.0
+        breakdown.timing.compute_us = 50.0
 
         bw_pass = BandwidthConstraintPass(config)
         result = bw_pass.run(breakdown, chip)
 
         # 4 流 linear 模型，带宽 /4，时延 x4
-        assert breakdown.memory_time_us == 400.0
+        assert breakdown.timing.memory_us == 400.0
         assert result.details["contention_factor"] == 4.0
         assert len(result.warnings) > 0
 
@@ -860,9 +859,9 @@ class TestBandwidthPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.min_traffic_mode_enabled = True
-        config.l2_reuse_factor = 0.5   # 权重复用 50%
-        config.tiling_efficiency = 0.8  # Tiling 减少 20%
+        config.min_traffic.enabled = True
+        config.min_traffic.l2_reuse_factor = 0.5   # 权重复用 50%
+        config.min_traffic.tiling_efficiency = 0.8  # Tiling 减少 20%
 
         profile = OpProfile(
             name="test_matmul",
@@ -876,9 +875,9 @@ class TestBandwidthPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.memory_time_us = 100.0
-        breakdown.roofline_time_us = 100.0
-        breakdown.compute_time_us = 50.0
+        breakdown.timing.memory_us = 100.0
+        breakdown.timing.roofline_us = 100.0
+        breakdown.timing.compute_us = 50.0
 
         min_pass = MinTrafficPass(config)
         result = min_pass.run(breakdown, chip)
@@ -896,9 +895,9 @@ class TestBandwidthPasses:
 
         chip = load_chip_spec("npu_910")
         config = PassConfig()
-        config.traffic_constraint_enabled = True
-        config.max_traffic_bytes = int(1e6)  # 1MB 限制
-        config.traffic_budget_mode = "strict"
+        config.traffic.enabled = True
+        config.traffic.max_bytes = int(1e6)  # 1MB 限制
+        config.traffic.budget_mode = "strict"
 
         profile = OpProfile(
             name="test_matmul",
@@ -912,7 +911,7 @@ class TestBandwidthPasses:
         )
 
         breakdown = LatencyBreakdown(profile=profile)
-        breakdown.total_time_us = 100.0
+        breakdown.timing.total_us = 100.0
 
         traffic_pass = TrafficConstraintPass(config)
         result = traffic_pass.run(breakdown, chip)
@@ -927,9 +926,9 @@ class TestBandwidthPasses:
         from aidevtools.analysis import PaperAnalyzer, PassConfig
 
         config = PassConfig()
-        config.bandwidth_constraint_enabled = True
-        config.concurrent_streams = 2  # 2 流并发
-        config.bandwidth_contention_model = "sqrt"
+        config.bandwidth.enabled = True
+        config.bandwidth.concurrent_streams = 2  # 2 流并发
+        config.bandwidth.contention_model = "sqrt"
 
         analyzer = PaperAnalyzer(chip="npu_910", pass_config=config)
 
@@ -963,5 +962,5 @@ class TestBandwidthPasses:
         result = analyzer.analyze()
 
         # 验证流量统计
-        assert result.summary.total_original_traffic_bytes > 0
-        assert result.summary.total_optimized_traffic_bytes > 0
+        assert result.summary.traffic.original_bytes > 0
+        assert result.summary.traffic.optimized_bytes > 0

@@ -2,7 +2,7 @@
 import time
 import traceback
 from pathlib import Path
-from typing import List, Callable, Optional, Dict, Any
+from typing import List, Callable, Optional
 from dataclasses import dataclass, field
 
 from prettycli import ui

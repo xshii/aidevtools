@@ -6,7 +6,6 @@ from tests.framework import (
     mock_prompt,
     assert_contains,
     TestRunner,
-    InteractiveSession,
 )
 
 

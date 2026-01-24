@@ -1,6 +1,5 @@
 """Tests for the function-based command API."""
 import pytest
-from unittest.mock import patch
 
 from prettycli.command import (
     command,

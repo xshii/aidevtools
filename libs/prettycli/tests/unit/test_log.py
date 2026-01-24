@@ -1,7 +1,7 @@
 """Tests for the logging integration."""
 import logging
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from prettycli import log
 

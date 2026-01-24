@@ -11,7 +11,6 @@
     cd demos/05_xlsx_transformer
     python run.py
 """
-import numpy as np
 import sys
 from pathlib import Path
 
@@ -84,7 +83,7 @@ def create_transformer_xlsx(xlsx_path: str):
     wb.save(xlsx_path)
     print(f"    Transformer 配置已写入: {xlsx_path}")
     print(f"    共 {len(transformer_ops)} 个算子")
-    print(f"    使用 cpp golden (gfp16) + bfp8 量化")
+    print("    使用 cpp golden (gfp16) + bfp8 量化")
 
     return transformer_ops
 
@@ -204,7 +203,7 @@ def main():
     # Step 1: 创建 Transformer xlsx 配置
     print("[Step 1] 创建 Transformer xlsx 配置")
     print("-" * 50)
-    ops = create_transformer_xlsx(str(xlsx_path))
+    create_transformer_xlsx(str(xlsx_path))
 
     # Step 2: 显示 xlsx 内容
     print("\n[Step 2] xlsx 内容")
@@ -219,7 +218,7 @@ def main():
     # Step 4: 运行 Transformer
     print("\n[Step 4] 运行 Transformer 并比对")
     print("-" * 50)
-    results = run_transformer_xlsx(str(xlsx_path), str(output_dir))
+    run_transformer_xlsx(str(xlsx_path), str(output_dir))
 
     # 总结
     print("\n" + "=" * 70)

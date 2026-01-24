@@ -405,7 +405,7 @@ class CLI:
         else:
             ui.print(self._last_output.strip())
             if len(lines) > self._max_collapsed_lines:
-                ui.print(f"[dim](Ctrl+O to collapse)[/]")
+                ui.print("[dim](Ctrl+O to collapse)[/]")
 
     def run(self):  # pragma: no cover
         """

@@ -1,7 +1,7 @@
 """芯片规格定义与加载"""
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Any
+from typing import Dict
 from pathlib import Path
 import yaml
 

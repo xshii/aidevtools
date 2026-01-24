@@ -44,7 +44,7 @@ class MemoryEfficiencyPass(BasePass):
                 context: PassContext = None) -> PassResult:
         """执行访存效率修正"""
         profile = latency_breakdown.profile
-        latency_before = latency_breakdown.roofline_time_us
+        latency_before = latency_breakdown.timing.roofline_us
 
         # 获取访存效率
         pattern = profile.memory_pattern
@@ -62,14 +62,14 @@ class MemoryEfficiencyPass(BasePass):
             efficiency = efficiency * hbm_eff_value
 
         # 修正访存时间
-        original_memory_time = latency_breakdown.memory_time_us
+        original_memory_time = latency_breakdown.timing.memory_us
         adjusted_memory_time = original_memory_time / efficiency
 
         # 重新计算 roofline 时延
-        new_roofline_time = max(latency_breakdown.compute_time_us, adjusted_memory_time)
+        new_roofline_time = max(latency_breakdown.timing.compute_us, adjusted_memory_time)
 
         # 更新瓶颈判断
-        if adjusted_memory_time > latency_breakdown.compute_time_us:
+        if adjusted_memory_time > latency_breakdown.timing.compute_us:
             latency_breakdown.bottleneck = BOTTLENECK_MEMORY
         else:
             latency_breakdown.bottleneck = BOTTLENECK_COMPUTE
@@ -78,8 +78,8 @@ class MemoryEfficiencyPass(BasePass):
         latency_delta = new_roofline_time - latency_before
 
         # 更新 breakdown
-        latency_breakdown.memory_time_us = adjusted_memory_time
-        latency_breakdown.roofline_time_us = new_roofline_time
+        latency_breakdown.timing.memory_us = adjusted_memory_time
+        latency_breakdown.timing.roofline_us = new_roofline_time
 
         # 填充结果
         result.latency_before_us = latency_before

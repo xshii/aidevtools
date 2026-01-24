@@ -6,7 +6,7 @@ import threading
 import uuid
 import base64
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Union
+from typing import Optional, Any, Dict, List
 
 try:
     from websocket import create_connection, WebSocket

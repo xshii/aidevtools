@@ -1,6 +1,6 @@
 """格式基类和注册机制"""
 import numpy as np
-from typing import Dict, Any
+from typing import Dict
 
 _registry: Dict[str, "FormatBase"] = {}
 
@@ -38,4 +38,5 @@ def save(path: str, data: np.ndarray, format: str = "raw", **kwargs):
     get(format).save(path, data, **kwargs)
 
 # 导入内置格式以触发注册
-from aidevtools.formats import raw, numpy_fmt
+from aidevtools.formats import raw  # noqa: F401
+from aidevtools.formats import numpy_fmt  # noqa: F401
