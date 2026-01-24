@@ -22,8 +22,8 @@ Example - Backward Prefetch:
     total_saved = min(8, 3.33+3.33) * 0.8 = 5.33us
 """
 
-from .base import BasePass, PassResult, PassContext
-from ..constants import UNIT_CUBE, UNIT_VECTOR, GBPS_TO_BPS, S_TO_US, MB_TO_BYTES
+from ..constants import GBPS_TO_BPS, MB_TO_BYTES, S_TO_US, UNIT_CUBE, UNIT_VECTOR
+from .base import BasePass, PassContext, PassResult
 
 
 class ForwardPrefetchPass(BasePass):

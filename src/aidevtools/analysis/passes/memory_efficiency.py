@@ -17,12 +17,14 @@ Example:
     说明: 跨步访问导致实际带宽利用率下降，时延增加
 """
 
-from .base import BasePass, PassResult, PassContext
 from ..constants import (
-    PATTERN_SEQUENTIAL, PATTERN_STRIDED, PATTERN_RANDOM,
-    BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY,
+    BOTTLENECK_COMPUTE,
+    BOTTLENECK_MEMORY,
+    PATTERN_RANDOM,
+    PATTERN_SEQUENTIAL,
+    PATTERN_STRIDED,
 )
-
+from .base import BasePass, PassContext, PassResult
 
 # 访存模式效率
 MEMORY_PATTERN_EFFICIENCY = {

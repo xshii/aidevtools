@@ -1,14 +1,14 @@
 """时延计算结果数据结构"""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .profile import OpProfile
 
 if TYPE_CHECKING:
+    from .analyzer import AnalysisSummary
     from .chip import ChipSpec
     from .passes.base import PassConfig, PassResult
-    from .analyzer import AnalysisSummary
 
 
 @dataclass

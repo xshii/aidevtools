@@ -10,13 +10,13 @@ from typing import List, Optional
 
 try:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
 
-from aidevtools.xlsx.op_registry import get_default_ops, get_op_info
 from aidevtools.core.log import logger
+from aidevtools.xlsx.op_registry import get_default_ops, get_op_info
 
 
 def _check_openpyxl():

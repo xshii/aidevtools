@@ -10,23 +10,23 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .profile import OpProfile
 from .chip import ChipSpec, load_chip_spec
-from .latency import LatencyBreakdown, LatencyResult, GanttItem, GanttData
+from .latency import GanttData, GanttItem, LatencyBreakdown, LatencyResult
 from .passes import (
-    PassConfig,
-    PassPreset,
-    PassContext,
-    RooflinePass,
-    MinTrafficPass,
-    MemoryEfficiencyPass,
-    BandwidthConstraintPass,
-    ForwardPrefetchPass,
     BackwardPrefetchPass,
+    BandwidthConstraintPass,
     CubeVectorParallelPass,
+    ForwardPrefetchPass,
+    MemoryEfficiencyPass,
+    MinTrafficPass,
     OverheadPass,
+    PassConfig,
+    PassContext,
+    PassPreset,
+    RooflinePass,
     TrafficConstraintPass,
 )
+from .profile import OpProfile
 
 
 @dataclass

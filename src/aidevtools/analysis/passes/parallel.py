@@ -17,8 +17,8 @@ Example:
     3. 无数据依赖阻塞
 """
 
-from .base import BasePass, PassResult, PassContext
-from ..constants import UNIT_CUBE, TFLOPS_TO_FLOPS, GBPS_TO_BPS, S_TO_US
+from ..constants import GBPS_TO_BPS, S_TO_US, TFLOPS_TO_FLOPS, UNIT_CUBE
+from .base import BasePass, PassContext, PassResult
 
 
 class CubeVectorParallelPass(BasePass):

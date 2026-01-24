@@ -3,11 +3,11 @@
 从 trace 记录导出到 xlsx，保留已有的结果列。
 """
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 try:
     from openpyxl import load_workbook
-    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.styles import Border, Font, PatternFill, Side
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False

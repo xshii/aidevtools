@@ -2,9 +2,10 @@
 
 必须加载 C++ 实现，失败时报错。
 """
-import numpy as np
 from pathlib import Path
 from typing import Tuple
+
+import numpy as np
 
 from aidevtools.core.log import logger
 from aidevtools.formats.custom.cpp_loader import CppExtensionLoader

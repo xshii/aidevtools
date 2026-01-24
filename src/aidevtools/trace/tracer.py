@@ -1,7 +1,8 @@
 """Trace 装饰器"""
-from pathlib import Path
 from functools import wraps
-from typing import List, Dict, Any
+from pathlib import Path
+from typing import Any, Dict, List
+
 import numpy as np
 
 from aidevtools.core.log import logger

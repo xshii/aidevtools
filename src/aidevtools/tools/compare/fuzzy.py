@@ -1,7 +1,8 @@
 """模糊比对支持"""
-import numpy as np
 from pathlib import Path
-from typing import Callable, Dict, Any
+from typing import Any, Callable, Dict
+
+import numpy as np
 
 from aidevtools.core.log import logger
 from aidevtools.formats.quantize import quantize

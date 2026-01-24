@@ -2,9 +2,9 @@
 
 从 xlsx 解析配置并生成 Python 代码。
 """
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 try:
     from openpyxl import load_workbook
@@ -13,7 +13,7 @@ except ImportError:
     HAS_OPENPYXL = False
 
 from aidevtools.core.log import logger
-from aidevtools.core.utils import parse_shape, parse_list
+from aidevtools.core.utils import parse_list, parse_shape
 
 
 def _check_openpyxl():

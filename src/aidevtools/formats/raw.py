@@ -1,6 +1,8 @@
 """Raw 二进制格式"""
 import numpy as np
+
 from .base import FormatBase
+
 
 class RawFormat(FormatBase):
     name = "raw"

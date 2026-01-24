@@ -1,8 +1,7 @@
 """算子 Profile 数据结构"""
 
 from dataclasses import dataclass, field
-from typing import Dict, Any
-
+from typing import Any, Dict
 
 # dtype 字节数映射
 _DTYPE_BYTES = {

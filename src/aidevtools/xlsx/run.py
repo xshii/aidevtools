@@ -4,7 +4,8 @@
 """
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 
 try:
@@ -14,8 +15,8 @@ except ImportError:
     HAS_OPENPYXL = False
 
 from aidevtools.core.log import logger
-from aidevtools.xlsx.import_ import parse_xlsx, OpConfig
 from aidevtools.xlsx.export import update_compare_results
+from aidevtools.xlsx.import_ import OpConfig, parse_xlsx
 
 
 def _run_sim_cmd(

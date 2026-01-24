@@ -8,8 +8,7 @@
 
 from pathlib import Path
 
-from .latency import LatencyResult, GanttData
-
+from .latency import GanttData, LatencyResult
 
 # Gantt 图颜色映射
 GANTT_COLORS = {
@@ -38,11 +37,11 @@ def export_xlsx(result: LatencyResult,
     """
     try:
         import openpyxl
-        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-        from openpyxl.utils import get_column_letter
         from openpyxl.chart import BarChart, Reference
         from openpyxl.chart.series import DataPoint
-        from openpyxl.drawing.fill import PatternFillProperties, ColorChoice
+        from openpyxl.drawing.fill import ColorChoice, PatternFillProperties
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
     except ImportError:
         raise ImportError("openpyxl is required for xlsx export. Install with: pip install openpyxl")
 
@@ -96,8 +95,8 @@ def export_xlsx(result: LatencyResult,
 
 def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, border):
     """写入主分析结果页签"""
-    from openpyxl.utils import get_column_letter
     from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
 
     # 表头
     headers = [
@@ -254,7 +253,7 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
 
 def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     """写入 Pass 配置页签"""
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Alignment, Font, PatternFill
 
     # 标题
     ws.cell(row=1, column=1, value="Pass Configuration").font = Font(bold=True, size=14)
@@ -389,7 +388,8 @@ def _write_chip_params_section(ws, chip, border, start_row: int) -> int:
 
 def _write_operator_details_section(ws, result: LatencyResult, header_font, header_fill, border, start_row: int) -> int:
     """写入算子详情部分"""
-    from openpyxl.styles import Font, Alignment
+    from openpyxl.styles import Alignment, Font
+
     from .profile import dtype_bytes
 
     row = start_row + 2
@@ -544,7 +544,7 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, bord
 
     使用条件格式和单元格着色模拟 Gantt 图
     """
-    from openpyxl.styles import PatternFill, Font
+    from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     # 标题

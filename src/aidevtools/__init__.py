@@ -20,10 +20,10 @@ __version__ = "0.1.0"
 # 模块级导入
 from aidevtools import ops
 
+# 便捷导出工具函数
+from aidevtools.ops import clear, dump, seed
+
 # PyTorch 风格 API: from aidevtools import F
 from aidevtools.ops import functional as F
-
-# 便捷导出工具函数
-from aidevtools.ops import seed, clear, dump
 
 __all__ = ["ops", "F", "seed", "clear", "dump"]

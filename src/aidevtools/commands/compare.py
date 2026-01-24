@@ -2,12 +2,14 @@
 import numpy as np
 from prettycli import command
 
-from aidevtools.tools.compare.diff import compare_full
-from aidevtools.formats.quantize import list_quantize
-from aidevtools.formats.base import load
 from aidevtools.core.log import logger
-from aidevtools.core.utils import parse_shape, parse_dtype, parse_list
-from aidevtools.ops.base import get_records, dump as do_dump, clear as do_clear
+from aidevtools.core.utils import parse_dtype, parse_list, parse_shape
+from aidevtools.formats.base import load
+from aidevtools.formats.quantize import list_quantize
+from aidevtools.ops.base import clear as do_clear
+from aidevtools.ops.base import dump as do_dump
+from aidevtools.ops.base import get_records
+from aidevtools.tools.compare.diff import compare_full
 
 
 def _action_dump(output, **kwargs):

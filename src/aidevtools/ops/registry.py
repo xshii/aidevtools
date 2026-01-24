@@ -33,10 +33,9 @@ auto_gen 策略说明:
     - "same:param": 与另一个参数相同 shape
 """
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Type, Callable
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from aidevtools.core.log import logger
-
 
 # ============================================================
 # 算子元信息

@@ -29,7 +29,7 @@ Tiling Count 计算:
     如果 overhead/final > 10%，建议算子融合减少 kernel 数
 """
 
-from .base import BasePass, PassResult, PassContext
+from .base import BasePass, PassContext, PassResult
 
 
 class OverheadPass(BasePass):

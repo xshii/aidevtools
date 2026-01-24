@@ -18,11 +18,15 @@ Example:
 
 from dataclasses import dataclass
 
-from .base import BasePass, PassResult, PassContext
 from ..constants import (
-    TFLOPS_TO_FLOPS, GBPS_TO_BPS, S_TO_US,
-    UNIT_CUBE, BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY,
+    BOTTLENECK_COMPUTE,
+    BOTTLENECK_MEMORY,
+    GBPS_TO_BPS,
+    S_TO_US,
+    TFLOPS_TO_FLOPS,
+    UNIT_CUBE,
 )
+from .base import BasePass, PassContext, PassResult
 
 
 @dataclass

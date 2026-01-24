@@ -16,12 +16,12 @@ Pass 执行顺序 (order):
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from ..latency import LatencyBreakdown
     from ..chip import ChipSpec
+    from ..latency import LatencyBreakdown
     from ..profile import OpProfile
 
 

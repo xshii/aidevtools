@@ -1,11 +1,15 @@
 """全局配置模块"""
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
-import threading
 
 from aidevtools.core.constants import (
-    DEFAULT_ATOL, DEFAULT_RTOL, DEFAULT_MIN_QSNR, DEFAULT_MIN_COSINE,
-    DEFAULT_GFLOAT_TYPE, GFLOAT_TYPES,
+    DEFAULT_ATOL,
+    DEFAULT_GFLOAT_TYPE,
+    DEFAULT_MIN_COSINE,
+    DEFAULT_MIN_QSNR,
+    DEFAULT_RTOL,
+    GFLOAT_TYPES,
 )
 
 

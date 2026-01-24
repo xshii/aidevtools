@@ -2,8 +2,9 @@
 
 提供 shape、dtype 等常用解析函数，消除代码重复。
 """
+from typing import Optional, Tuple
+
 import numpy as np
-from typing import Tuple, Optional
 
 
 def parse_shape(shape_str: str) -> Optional[Tuple[int, ...]]:

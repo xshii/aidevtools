@@ -3,6 +3,7 @@ import sys
 from datetime import datetime
 from enum import IntEnum
 
+
 class Level(IntEnum):
     DEBUG = 10
     INFO = 20

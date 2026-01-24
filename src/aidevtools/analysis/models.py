@@ -18,6 +18,7 @@ Usage:
 """
 
 from typing import List
+
 import numpy as np
 
 
@@ -57,7 +58,7 @@ def transformer_layer(
     Example:
         profiles = transformer_layer(batch=4, seq=512, hidden=768, num_heads=12)
     """
-    from aidevtools.ops.nn import linear, layernorm, gelu, silu, add, attention
+    from aidevtools.ops.nn import add, attention, gelu, layernorm, linear, silu
     from aidevtools.ops.nn import relu as relu_op
 
     ffn_h = ffn_hidden or hidden * 4
@@ -131,7 +132,7 @@ def llama_layer(
     Returns:
         List[OpProfile]
     """
-    from aidevtools.ops.nn import linear, rmsnorm, silu, mul, add, attention
+    from aidevtools.ops.nn import add, attention, linear, mul, rmsnorm, silu
 
     ffn_h = ffn_hidden or int(hidden * 8 / 3 / 256) * 256
     kv_heads = num_kv_heads or num_heads

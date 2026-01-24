@@ -12,13 +12,14 @@
 
 - reference 始终执行，用于 fuzzy 比对
 """
-import numpy as np
 from functools import wraps
-from typing import Callable, Dict, Any, List, Optional
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-from aidevtools.core.log import logger
+import numpy as np
+
 from aidevtools.core.config import get_config, set_config
+from aidevtools.core.log import logger
 
 
 def fp32_reference(func: Callable) -> Callable:

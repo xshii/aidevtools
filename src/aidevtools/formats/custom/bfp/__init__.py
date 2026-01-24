@@ -12,6 +12,6 @@
     mantissas, exps = wrapper.fp32_to_bfp(data)
 """
 from aidevtools.formats.custom.bfp import golden
-from aidevtools.formats.custom.bfp.wrapper import register_bfp_golden, is_cpp_available
+from aidevtools.formats.custom.bfp.wrapper import is_cpp_available, register_bfp_golden
 
 __all__ = ["golden", "register_bfp_golden", "is_cpp_available"]

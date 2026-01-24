@@ -28,9 +28,10 @@
 """
 import subprocess
 import tempfile
-import numpy as np
 from pathlib import Path
-from typing import Optional, Literal, List, Dict, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
+
+import numpy as np
 
 # CPU Golden 可执行文件路径 (在 golden 目录)
 _GOLDEN_DIR = Path(__file__).parent.parent / "golden"

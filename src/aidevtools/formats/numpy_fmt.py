@@ -1,6 +1,8 @@
 """Numpy 格式 (npy/npz)"""
 import numpy as np
+
 from .base import FormatBase
+
 
 class NumpyFormat(FormatBase):
     name = "numpy"

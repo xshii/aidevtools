@@ -1,6 +1,7 @@
 """量化类型支持"""
-import numpy as np
 from typing import Callable, Dict
+
+import numpy as np
 
 # 量化类型注册表
 _quantize_registry: Dict[str, Callable] = {}
@@ -124,7 +125,11 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
         return bfp_to_fp32(mantissas, shared_exps, block_size, mantissa_bits, original_shape)
 
     if qtype in ("gfloat16", "gfloat8", "gfloat4"):
-        from aidevtools.formats.custom.gfloat.golden import from_gfloat16, from_gfloat8, from_gfloat4
+        from aidevtools.formats.custom.gfloat.golden import (
+            from_gfloat4,
+            from_gfloat8,
+            from_gfloat16,
+        )
         if qtype == "gfloat16":
             return from_gfloat16(data, meta.get("original_shape"))
         if qtype == "gfloat8":
@@ -194,5 +199,5 @@ def generate_fake_dut(
 
 
 # 导入自定义格式以触发注册
-from aidevtools.formats.custom.bfp import golden as _bfp_golden  # noqa: F401
 from aidevtools.formats.custom import gfloat as _gfloat  # noqa: F401
+from aidevtools.formats.custom.bfp import golden as _bfp_golden  # noqa: F401

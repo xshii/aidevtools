@@ -1,11 +1,13 @@
 """导出失败用例"""
 import json
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
+
 import numpy as np
 
 from aidevtools.core.log import logger
 from aidevtools.formats.base import save
+
 
 def export_failed_cases(golden: np.ndarray, result: np.ndarray,
                         blocks: List[Dict], output_dir: str,

@@ -28,11 +28,11 @@
 Note:
     所有函数同时执行 golden + reference + profile 记录。
 """
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
-from typing import Optional, Tuple, Union, List
 
 from aidevtools.ops import nn as _nn
-
 
 # ============================================================
 # 线性变换

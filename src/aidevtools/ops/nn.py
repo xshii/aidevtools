@@ -12,12 +12,12 @@
 import numpy as np
 
 from aidevtools.ops.base import Op, fp32_reference
-from aidevtools.ops.registry import register_op
 from aidevtools.ops.cpu_golden import (
-    run_cpu_golden,
     get_cpu_golden_dtype,
     get_matmul_dtypes,
+    run_cpu_golden,
 )
+from aidevtools.ops.registry import register_op
 
 
 @register_op(

@@ -1,9 +1,10 @@
 """报告生成"""
 import json
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 
 from aidevtools.core.log import logger
+
 
 def gen_report(op_name: str, diff_result, blocks: List[Dict],
                output_dir: str) -> str:

@@ -24,34 +24,31 @@ PyTorch 风格 functional API:
     profiles = get_profiles()  # 获取性能数据
 """
 # 基础 API
-from aidevtools.ops.base import (
-    Op,
-    register_golden_cpp,
-    has_golden_cpp,
-    get_records,
-    clear,
-    dump,
-    set_golden_mode,
-    get_golden_mode,
-    set_compute_golden,
-    get_compute_golden,
-    # Profile API
-    get_profiles,
-    set_profile_enabled,
-    get_profile_enabled,
-    set_profile_only,
-    get_profile_only,
-    profile_only,
-)
+# PyTorch 风格 functional API
+# 导入 nn 以触发算子注册
+from aidevtools.ops import functional, nn
 
 # 工具函数
-from aidevtools.ops.auto import seed, get_seed
-
-# PyTorch 风格 functional API
-from aidevtools.ops import functional
-
-# 导入 nn 以触发算子注册
-from aidevtools.ops import nn
+from aidevtools.ops.auto import get_seed, seed
+from aidevtools.ops.base import (
+    Op,
+    clear,
+    dump,
+    get_compute_golden,
+    get_golden_mode,
+    get_profile_enabled,
+    get_profile_only,
+    # Profile API
+    get_profiles,
+    get_records,
+    has_golden_cpp,
+    profile_only,
+    register_golden_cpp,
+    set_compute_golden,
+    set_golden_mode,
+    set_profile_enabled,
+    set_profile_only,
+)
 
 __all__ = [
     # 工具函数

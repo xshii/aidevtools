@@ -1,8 +1,8 @@
 """比对核心逻辑"""
-import numpy as np
-from typing import Dict, List
 from dataclasses import dataclass
+from typing import Dict, List
 
+import numpy as np
 
 
 @dataclass

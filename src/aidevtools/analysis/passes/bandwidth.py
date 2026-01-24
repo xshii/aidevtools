@@ -34,8 +34,9 @@ Example - 最低流量模式:
 """
 
 import math
-from .base import BasePass, PassResult, PassContext
-from ..constants import GBPS_TO_BPS, S_TO_US, MB_TO_BYTES, BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY
+
+from ..constants import BOTTLENECK_COMPUTE, BOTTLENECK_MEMORY, GBPS_TO_BPS, MB_TO_BYTES, S_TO_US
+from .base import BasePass, PassContext, PassResult
 
 
 class BandwidthConstraintPass(BasePass):

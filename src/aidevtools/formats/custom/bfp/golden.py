@@ -6,8 +6,9 @@ BFP 将数据分块，每块共享一个指数，每个元素只存尾数。
 - AMD Quark BFP16: https://quark.docs.amd.com/latest/onnx/tutorial_bfp16_quantization.html
 - Static BFP CNN: https://github.com/os-hxfan/Static_BFP_CNN
 """
-import numpy as np
 from typing import Tuple
+
+import numpy as np
 
 from aidevtools.formats.quantize import register_quantize
 
