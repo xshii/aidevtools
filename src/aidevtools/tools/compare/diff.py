@@ -49,6 +49,19 @@ class IsCloseResult:
 
 
 @dataclass
+class CompareThresholds:
+    """比对阈值配置"""
+    # 精确比对
+    exact_max_abs: float = 0.0
+    exact_max_count: int = 0
+    # 模糊比对
+    fuzzy_atol: float = 1e-5
+    fuzzy_rtol: float = 1e-3
+    fuzzy_min_qsnr: float = 30.0
+    fuzzy_min_cosine: float = 0.999
+
+
+@dataclass
 class FullCompareResult:
     """
     完整比对结果 (3 列)
@@ -313,18 +326,32 @@ def print_isclose_result(result: IsCloseResult, name: str = ""):
     print("-" * 50)
 
 
+def _apply_fuzzy_thresholds(diff: DiffResult, thresholds: CompareThresholds) -> DiffResult:
+    """应用模糊比对阈值，返回新的 DiffResult"""
+    passed = (
+        diff.passed and
+        diff.qsnr >= thresholds.fuzzy_min_qsnr and
+        diff.cosine >= thresholds.fuzzy_min_cosine
+    )
+    return DiffResult(
+        passed=passed,
+        max_abs=diff.max_abs,
+        mean_abs=diff.mean_abs,
+        max_rel=diff.max_rel,
+        qsnr=diff.qsnr,
+        cosine=diff.cosine,
+        total_elements=diff.total_elements,
+        exceed_count=diff.exceed_count,
+    )
+
+
 def compare_3col(
     op_name: str,
     op_id: int,
     result: np.ndarray,
     golden_pure: np.ndarray,
     golden_qnt: np.ndarray,
-    exact_max_abs: float = 0.0,
-    exact_max_count: int = 0,
-    fuzzy_atol: float = 1e-5,
-    fuzzy_rtol: float = 1e-3,
-    fuzzy_min_qsnr: float = 30.0,
-    fuzzy_min_cosine: float = 0.999,
+    thresholds: CompareThresholds = None,
 ) -> FullCompareResult:
     """
     三列比对
@@ -335,51 +362,24 @@ def compare_3col(
         result: DUT 输出
         golden_pure: 纯 fp32 golden
         golden_qnt: 量化感知 golden
-        exact_*: 精确比对阈值
-        fuzzy_*: 模糊比对阈值
+        thresholds: 比对阈值配置
 
     Returns:
         FullCompareResult
     """
+    if thresholds is None:
+        thresholds = CompareThresholds()
+
     # 1. 精确比对 (result vs golden_pure)
-    exact = compare_exact(golden_pure, result, exact_max_abs, exact_max_count)
+    exact = compare_exact(golden_pure, result, thresholds.exact_max_abs, thresholds.exact_max_count)
 
     # 2. 模糊比对 - 纯 fp32 (result vs golden_pure)
-    fuzzy_pure = compare_full(golden_pure, result, fuzzy_atol, fuzzy_rtol)
-    # 检查额外阈值
-    fuzzy_pure_passed = (
-        fuzzy_pure.passed and
-        fuzzy_pure.qsnr >= fuzzy_min_qsnr and
-        fuzzy_pure.cosine >= fuzzy_min_cosine
-    )
-    fuzzy_pure = DiffResult(
-        passed=fuzzy_pure_passed,
-        max_abs=fuzzy_pure.max_abs,
-        mean_abs=fuzzy_pure.mean_abs,
-        max_rel=fuzzy_pure.max_rel,
-        qsnr=fuzzy_pure.qsnr,
-        cosine=fuzzy_pure.cosine,
-        total_elements=fuzzy_pure.total_elements,
-        exceed_count=fuzzy_pure.exceed_count,
-    )
+    fuzzy_pure = compare_full(golden_pure, result, thresholds.fuzzy_atol, thresholds.fuzzy_rtol)
+    fuzzy_pure = _apply_fuzzy_thresholds(fuzzy_pure, thresholds)
 
     # 3. 模糊比对 - 量化感知 (result vs golden_qnt)
-    fuzzy_qnt = compare_full(golden_qnt, result, fuzzy_atol, fuzzy_rtol)
-    fuzzy_qnt_passed = (
-        fuzzy_qnt.passed and
-        fuzzy_qnt.qsnr >= fuzzy_min_qsnr and
-        fuzzy_qnt.cosine >= fuzzy_min_cosine
-    )
-    fuzzy_qnt = DiffResult(
-        passed=fuzzy_qnt_passed,
-        max_abs=fuzzy_qnt.max_abs,
-        mean_abs=fuzzy_qnt.mean_abs,
-        max_rel=fuzzy_qnt.max_rel,
-        qsnr=fuzzy_qnt.qsnr,
-        cosine=fuzzy_qnt.cosine,
-        total_elements=fuzzy_qnt.total_elements,
-        exceed_count=fuzzy_qnt.exceed_count,
-    )
+    fuzzy_qnt = compare_full(golden_qnt, result, thresholds.fuzzy_atol, thresholds.fuzzy_rtol)
+    fuzzy_qnt = _apply_fuzzy_thresholds(fuzzy_qnt, thresholds)
 
     return FullCompareResult(
         op_name=op_name,

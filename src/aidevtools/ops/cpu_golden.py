@@ -74,14 +74,15 @@ def set_cpu_golden_dtype(
             dtype_matmul_out="gfp16"
         )
 
-    注意: 也可使用 set_config(cpu_golden_dtype=...) 统一设置
+    注意: 也可使用 set_config(cpu_golden=CpuGoldenConfig(...)) 统一设置
     """
-    set_config(
-        cpu_golden_dtype=dtype,
-        cpu_golden_dtype_matmul_a=dtype_matmul_a,
-        cpu_golden_dtype_matmul_b=dtype_matmul_b,
-        cpu_golden_dtype_matmul_out=dtype_matmul_out,
-    )
+    from aidevtools.core.config import CpuGoldenConfig
+    set_config(cpu_golden=CpuGoldenConfig(
+        dtype=dtype,
+        dtype_matmul_a=dtype_matmul_a,
+        dtype_matmul_b=dtype_matmul_b,
+        dtype_matmul_out=dtype_matmul_out,
+    ))
 
 
 def get_cpu_golden_dtype() -> GFloatType:

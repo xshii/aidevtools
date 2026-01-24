@@ -79,30 +79,44 @@ def set_config(
     precision: str = None,
     seed: int = None,
     compute_golden: bool = None,
-    cpu_golden_dtype: str = None,
-    cpu_golden_dtype_matmul_a: str = None,
-    cpu_golden_dtype_matmul_b: str = None,
-    cpu_golden_dtype_matmul_out: str = None,
+    cpu_golden: CpuGoldenConfig = None,
     exact: ExactConfig = None,
     fuzzy: FuzzyConfig = None,
 ) -> GlobalConfig:
-    """设置全局配置"""
+    """
+    设置全局配置
+
+    Args:
+        golden_mode: "python" | "cpp"
+        precision: "pure" | "quant"
+        seed: 随机种子
+        compute_golden: 是否计算 golden
+        cpu_golden: CPU Golden 配置 (CpuGoldenConfig)
+        exact: 精确比对配置 (ExactConfig)
+        fuzzy: 模糊比对配置 (FuzzyConfig)
+
+    Example:
+        set_config(golden_mode="cpp", seed=123)
+        set_config(cpu_golden=CpuGoldenConfig(dtype="gfp8"))
+    """
     global _global_config  # pylint: disable=global-statement
     with _config_lock:
         if _global_config is None:
             _global_config = GlobalConfig()
 
-        # 顶层配置映射
-        top_level = {"golden_mode": golden_mode, "precision": precision, "seed": seed, "compute_golden": compute_golden, "exact": exact, "fuzzy": fuzzy}
-        for key, value in top_level.items():
+        # 更新非 None 的配置项
+        updates = {
+            "golden_mode": golden_mode,
+            "precision": precision,
+            "seed": seed,
+            "compute_golden": compute_golden,
+            "cpu_golden": cpu_golden,
+            "exact": exact,
+            "fuzzy": fuzzy,
+        }
+        for key, value in updates.items():
             if value is not None:
                 setattr(_global_config, key, value)
-
-        # CPU Golden 子配置映射
-        cpu_golden_attrs = {"dtype": cpu_golden_dtype, "dtype_matmul_a": cpu_golden_dtype_matmul_a, "dtype_matmul_b": cpu_golden_dtype_matmul_b, "dtype_matmul_out": cpu_golden_dtype_matmul_out}
-        for key, value in cpu_golden_attrs.items():
-            if value is not None:
-                setattr(_global_config.cpu_golden, key, value)
 
         _global_config.validate()
         return _global_config
