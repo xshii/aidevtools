@@ -279,10 +279,9 @@ def from_preset(
 
     if model_name.startswith("llama"):
         return llama_layer(batch=batch, dtype=dtype, **config)
-    elif model_name.startswith("vit"):
+    if model_name.startswith("vit"):
         return vit_layer(batch=batch, dtype=dtype, **config)
-    else:
-        return transformer_layer(batch=batch, dtype=dtype, **config)
+    return transformer_layer(batch=batch, dtype=dtype, **config)
 
 
 def list_presets() -> List[str]:

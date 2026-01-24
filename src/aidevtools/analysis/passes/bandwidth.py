@@ -128,14 +128,11 @@ class BandwidthConstraintPass(BasePass):
         """计算带宽竞争因子"""
         if model == "none" or streams <= 1:
             return 1.0
-        elif model == "linear":
-            # 线性模型: 带宽平分
+        if model == "linear":
             return float(streams)
-        elif model == "sqrt":
-            # 平方根模型: 部分共享 (更现实)
+        if model == "sqrt":
             return math.sqrt(streams)
-        else:
-            return float(streams)
+        return float(streams)
 
 
 class TrafficConstraintPass(BasePass):

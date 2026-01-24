@@ -127,10 +127,9 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
         from aidevtools.formats.custom.gfloat.golden import from_gfloat16, from_gfloat8, from_gfloat4
         if qtype == "gfloat16":
             return from_gfloat16(data, meta.get("original_shape"))
-        elif qtype == "gfloat8":
+        if qtype == "gfloat8":
             return from_gfloat8(data, meta.get("original_shape"))
-        else:
-            return from_gfloat4(data, meta.get("original_shape"))
+        return from_gfloat4(data, meta.get("original_shape"))
 
     if qtype in _dequantize_registry:
         return _dequantize_registry[qtype](data, meta)

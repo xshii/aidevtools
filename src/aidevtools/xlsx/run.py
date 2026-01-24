@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 
 try:
-    from openpyxl import load_workbook
+    import openpyxl  # noqa: F401  # pylint: disable=unused-import
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -88,14 +88,12 @@ def _run_sim_cmd(
         # 检查 result_bin 是否存在
         result_path = Path(result_bin)
         if result_path.exists():
-            # 读取结果
             from aidevtools.formats.base import load as load_data
             data = load_data(result_bin)
             logger.info(f"仿真结果: {result_bin}, shape={data.shape}")
             return data
-        else:
-            logger.warning(f"仿真命令执行完成，但未生成 result 文件: {result_bin}")
-            return None
+        logger.warning(f"仿真命令执行完成，但未生成 result 文件: {result_bin}")
+        return None
 
     except subprocess.TimeoutExpired:
         logger.error(f"仿真命令超时 (>300s): {cmd}")

@@ -77,12 +77,11 @@ class FullCompareResult:
         """
         if self.exact.passed:
             return "PERFECT"
-        elif self.fuzzy_qnt.passed:
+        if self.fuzzy_qnt.passed:
             return "PASS"
-        elif self.fuzzy_pure.passed and not self.fuzzy_qnt.passed:
+        if self.fuzzy_pure.passed and not self.fuzzy_qnt.passed:
             return "QUANT_ISSUE"
-        else:
-            return "FAIL"
+        return "FAIL"
 
 
 def compare_exact(golden: np.ndarray, result: np.ndarray,

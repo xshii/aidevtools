@@ -27,13 +27,13 @@ class ComputeUnitSpec:
         dtype = dtype.lower()
         if dtype in ("fp32", "float32"):
             return self.fp32_tflops
-        elif dtype in ("fp16", "float16"):
+        if dtype in ("fp16", "float16"):
             return self.fp16_tflops
-        elif dtype in ("bf16", "bfloat16"):
+        if dtype in ("bf16", "bfloat16"):
             return self.bf16_tflops or self.fp16_tflops
-        elif dtype == "int8":
+        if dtype == "int8":
             return self.int8_tops
-        elif dtype == "int4":
+        if dtype == "int4":
             return self.int4_tops
         return self.fp16_tflops
 
@@ -415,9 +415,9 @@ def _parse_size(value) -> int:
         value = value.upper().strip()
         if value.endswith("KB"):
             return int(float(value[:-2]) * 1024)
-        elif value.endswith("MB"):
+        if value.endswith("MB"):
             return int(float(value[:-2]) * 1024 * 1024)
-        elif value.endswith("GB"):
+        if value.endswith("GB"):
             return int(float(value[:-2]) * 1024 * 1024 * 1024)
         return int(value)
     return 0

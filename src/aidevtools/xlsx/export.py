@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 try:
-    from openpyxl import Workbook, load_workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font, PatternFill, Border, Side
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False

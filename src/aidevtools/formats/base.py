@@ -38,5 +38,5 @@ def save(path: str, data: np.ndarray, format: str = "raw", **kwargs):
     get(format).save(path, data, **kwargs)
 
 # 导入内置格式以触发注册
-from aidevtools.formats import raw  # noqa: F401
-from aidevtools.formats import numpy_fmt  # noqa: F401
+from aidevtools.formats import raw  # noqa: F401  # pylint: disable=unused-import
+from aidevtools.formats import numpy_fmt  # noqa: F401  # pylint: disable=unused-import

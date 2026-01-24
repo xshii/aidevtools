@@ -503,16 +503,15 @@ class MatMul(Op):
                 output_size=M * N,
                 output_shape=(M, N),
             )
-        else:
-            return run_cpu_golden(
-                op_name="matmul",
-                cmd_args=["matmul", dtype_a, "@a.bin", "@b.bin", "@output", str(M), str(K), str(N)],
-                inputs={"a.bin": (a, dtype_a), "b.bin": (b, dtype_a)},
-                output_name="c.bin",
-                output_dtype=dtype_a,
-                output_size=M * N,
-                output_shape=(M, N),
-            )
+        return run_cpu_golden(
+            op_name="matmul",
+            cmd_args=["matmul", dtype_a, "@a.bin", "@b.bin", "@output", str(M), str(K), str(N)],
+            inputs={"a.bin": (a, dtype_a), "b.bin": (b, dtype_a)},
+            output_name="c.bin",
+            output_dtype=dtype_a,
+            output_size=M * N,
+            output_shape=(M, N),
+        )
 
     @fp32_reference
     def reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -788,9 +787,9 @@ class CrossEntropyLoss(Op):
         # reduction
         if reduction == "none":
             return loss.astype(np.float32)
-        elif reduction == "sum":
+        if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
-        else:  # mean
+        # mean
             if weight is not None:
                 return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
             return np.array(np.mean(loss), dtype=np.float32)
@@ -844,9 +843,9 @@ class MSELoss(Op):
 
         if reduction == "none":
             return loss.astype(np.float32)
-        elif reduction == "sum":
+        if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
-        else:  # mean
+        # mean
             return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
@@ -889,9 +888,9 @@ class L1Loss(Op):
 
         if reduction == "none":
             return loss.astype(np.float32)
-        elif reduction == "sum":
+        if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
-        else:  # mean
+        # mean
             return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
@@ -940,9 +939,9 @@ class SmoothL1Loss(Op):
 
         if reduction == "none":
             return loss.astype(np.float32)
-        elif reduction == "sum":
+        if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
-        else:  # mean
+        # mean
             return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference
@@ -997,9 +996,9 @@ class BCEWithLogitsLoss(Op):
 
         if reduction == "none":
             return loss.astype(np.float32)
-        elif reduction == "sum":
+        if reduction == "sum":
             return np.array(np.sum(loss), dtype=np.float32)
-        else:  # mean
+        # mean
             return np.array(np.mean(loss), dtype=np.float32)
 
     @fp32_reference

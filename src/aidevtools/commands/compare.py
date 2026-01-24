@@ -191,12 +191,11 @@ def cmd_compare(
             output=output, format=format, golden=golden, result=result,
             dtype=dtype, shape=shape, target_dtype=target_dtype
         )
-    elif action == "xlsx":
+    if action == "xlsx":
         return _handle_xlsx(subaction, xlsx, output, model, format, ops)
-    else:
-        logger.error(f"未知子命令: {action}")
-        print("可用子命令: dump, clear, single, fuzzy, convert, qtypes, xlsx")
-        return 1
+    logger.error(f"未知子命令: {action}")
+    print("可用子命令: dump, clear, single, fuzzy, convert, qtypes, xlsx")
+    return 1
 
 
 # xlsx 子命令处理函数

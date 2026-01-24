@@ -9,15 +9,22 @@
         "-c",
         "echo '=== 编译 CPU Golden ===' && cd ${workspaceFolder}/src/aidevtools/golden/cpp && ./build.sh && echo '=== 编译 BFP Golden ===' && cd ${workspaceFolder}/src/aidevtools/formats/custom/bfp/cpp && PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES bfp.cpp bfp_pybind.cpp -o ../bfp_golden$SUFFIX && echo '=== 编译完成 ==='"
       ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "presentation": {
-        "reveal": "always",
-        "panel": "new"
-      },
+      "group": { "kind": "build", "isDefault": true },
       "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Pylint",
+      "type": "shell",
+      "command": ".venv/bin/pylint",
+      "args": ["src/aidevtools"],
+      "group": "test"
+    },
+    {
+      "label": "Ruff",
+      "type": "shell",
+      "command": ".venv/bin/ruff",
+      "args": ["check", "src/aidevtools"],
+      "group": "test"
     }
   ]
 }

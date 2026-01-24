@@ -114,8 +114,7 @@ class PassConfig:
                 prefetch=PrefetchConfig(forward_enabled=False, backward_enabled=False),
                 overhead=OverheadConfig(enabled=False),
             )
-
-        elif preset == PassPreset.STANDARD:
+        if preset == PassPreset.STANDARD:
             return cls(
                 preset=preset,
                 roofline_enabled=True,
@@ -124,8 +123,7 @@ class PassConfig:
                 prefetch=PrefetchConfig(forward_enabled=True, backward_enabled=False),
                 overhead=OverheadConfig(enabled=True),
             )
-
-        elif preset == PassPreset.AGGRESSIVE:
+        if preset == PassPreset.AGGRESSIVE:
             return cls(
                 preset=preset,
                 roofline_enabled=True,
@@ -144,7 +142,6 @@ class PassConfig:
                     tiling_efficiency=0.9,
                 ),
             )
-
         return cls(preset=preset)
 
 

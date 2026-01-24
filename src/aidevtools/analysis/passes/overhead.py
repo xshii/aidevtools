@@ -141,9 +141,8 @@ class OverheadPass(BasePass):
         # 分发到具体计算函数
         if op_type in ["matmul", "gemm", "linear"]:
             return self._tiling_for_matmul(shapes, l2_size, tile_size)
-        elif op_type in ["conv2d", "conv"]:
+        if op_type in ["conv2d", "conv"]:
             return self._tiling_for_conv2d(shapes, l2_size, tile_size)
-
         return 1
 
     def _tiling_for_matmul(self, shapes: dict, l2_size: int, tile_size: int) -> int:

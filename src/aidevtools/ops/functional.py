@@ -404,12 +404,11 @@ def pad(
 
     if mode == "constant":
         return np.pad(input, pad_width, mode="constant", constant_values=value)
-    elif mode == "reflect":
+    if mode == "reflect":
         return np.pad(input, pad_width, mode="reflect")
-    elif mode == "replicate":
+    if mode == "replicate":
         return np.pad(input, pad_width, mode="edge")
-    else:
-        return np.pad(input, pad_width, mode="constant", constant_values=value)
+    return np.pad(input, pad_width, mode="constant", constant_values=value)
 
 
 def interpolate(
@@ -566,12 +565,12 @@ def nll_loss(
 
     if reduction == "none":
         return loss.astype(np.float32)
-    elif reduction == "sum":
+    if reduction == "sum":
         return np.array(np.sum(loss), dtype=np.float32)
-    else:  # mean
-        if weight is not None:
-            return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
-        return np.array(np.mean(loss), dtype=np.float32)
+    # mean
+    if weight is not None:
+        return np.array(np.sum(loss) / np.sum(weight[target.astype(int)]), dtype=np.float32)
+    return np.array(np.mean(loss), dtype=np.float32)
 
 
 def mse_loss(
@@ -671,10 +670,9 @@ def binary_cross_entropy(
 
     if reduction == "none":
         return loss.astype(np.float32)
-    elif reduction == "sum":
+    if reduction == "sum":
         return np.array(np.sum(loss), dtype=np.float32)
-    else:  # mean
-        return np.array(np.mean(loss), dtype=np.float32)
+    return np.array(np.mean(loss), dtype=np.float32)
 
 
 def binary_cross_entropy_with_logits(

@@ -11,8 +11,6 @@ from typing import List, Optional
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.datavalidation import DataValidation
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False

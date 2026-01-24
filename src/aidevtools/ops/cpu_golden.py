@@ -159,9 +159,9 @@ def _fp32_to_gfloat(x: np.ndarray, dtype: GFloatType) -> np.ndarray:
     bits = x.astype(np.float32).view(np.uint32)
     if dtype == "gfp16":
         return (bits >> 16).astype(np.uint16)
-    elif dtype == "gfp8":
+    if dtype == "gfp8":
         return (bits >> 24).astype(np.uint8)
-    elif dtype == "gfp4":
+    if dtype == "gfp4":
         val4 = (bits >> 28).astype(np.uint8)
         size = x.size
         packed_size = (size + 1) // 2
@@ -173,8 +173,7 @@ def _fp32_to_gfloat(x: np.ndarray, dtype: GFloatType) -> np.ndarray:
             else:
                 packed[byte_idx] |= val4.flat[i]
         return packed
-    else:
-        raise ValueError(f"Unknown dtype: {dtype}")
+    raise ValueError(f"Unknown dtype: {dtype}")
 
 
 def _gfloat_to_fp32(data: np.ndarray, dtype: GFloatType, size: Optional[int] = None) -> np.ndarray:
@@ -182,10 +181,10 @@ def _gfloat_to_fp32(data: np.ndarray, dtype: GFloatType, size: Optional[int] = N
     if dtype == "gfp16":
         bits = data.astype(np.uint32) << 16
         return bits.view(np.float32)
-    elif dtype == "gfp8":
+    if dtype == "gfp8":
         bits = data.astype(np.uint32) << 24
         return bits.view(np.float32)
-    elif dtype == "gfp4":
+    if dtype == "gfp4":
         if size is None:
             size = data.size * 2
         output = np.zeros(size, dtype=np.float32)
@@ -198,16 +197,14 @@ def _gfloat_to_fp32(data: np.ndarray, dtype: GFloatType, size: Optional[int] = N
             bits = np.uint32(val4) << 28
             output[i] = np.array([bits], dtype=np.uint32).view(np.float32)[0]
         return output
-    else:
-        raise ValueError(f"Unknown dtype: {dtype}")
+    raise ValueError(f"Unknown dtype: {dtype}")
 
 
 def _get_gfloat_numpy_dtype(dtype: GFloatType):
     """获取 gfloat 对应的 numpy dtype"""
     if dtype == "gfp16":
         return np.uint16
-    else:
-        return np.uint8
+    return np.uint8
 
 
 # ============================================================
