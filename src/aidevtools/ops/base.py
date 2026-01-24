@@ -369,7 +369,7 @@ class Op:
             raise ValueError("算子必须定义 name 属性")
 
     @staticmethod
-    def compute_flops(shapes: Dict[str, Any]) -> int:
+    def compute_flops(shapes: Dict[str, Any]) -> int:  # pylint: disable=unused-argument
         """
         计算 FLOPs
 

@@ -5,7 +5,7 @@ from aidevtools.formats.quantize import register_quantize
 
 
 @register_quantize("gfloat16")
-def to_gfloat16(data: np.ndarray, **kwargs) -> tuple:
+def to_gfloat16(data: np.ndarray, **_kwargs) -> tuple:
     """
     fp32 → gfloat16 (自定义 16 位浮点格式)
 
@@ -18,7 +18,7 @@ def to_gfloat16(data: np.ndarray, **kwargs) -> tuple:
 
 
 @register_quantize("gfloat8")
-def to_gfloat8(data: np.ndarray, **kwargs) -> tuple:
+def to_gfloat8(data: np.ndarray, **_kwargs) -> tuple:
     """
     fp32 → gfloat8 (自定义 8 位浮点格式)
 
@@ -59,7 +59,7 @@ def from_gfloat8(data: np.ndarray, original_shape: tuple = None) -> np.ndarray:
 
 
 @register_quantize("gfloat4")
-def to_gfloat4(data: np.ndarray, **kwargs) -> tuple:
+def to_gfloat4(data: np.ndarray, **_kwargs) -> tuple:
     """
     fp32 → gfloat4 (自定义 4 位浮点格式)
 

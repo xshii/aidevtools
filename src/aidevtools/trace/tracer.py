@@ -11,7 +11,7 @@ from aidevtools.formats.base import save as save_data
 _records: List[Dict[str, Any]] = []
 _counter: Dict[str, int] = {}
 
-def trace(fn=None, *, name: str = None, save_input: bool = True):
+def trace(fn=None, *, name: str = None, save_input: bool = True):  # pylint: disable=unused-argument
     """
     插桩装饰器，记录函数输入输出
 

@@ -145,7 +145,7 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
 # === 内置量化类型 ===
 
 @register_quantize("float16")
-def to_float16(data: np.ndarray, **kwargs) -> tuple:
+def to_float16(data: np.ndarray, **_kwargs) -> tuple:
     """fp32 → fp16"""
     return data.astype(np.float16), {}
 

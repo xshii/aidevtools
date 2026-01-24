@@ -144,7 +144,7 @@ def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, borde
         ws.column_dimensions[get_column_letter(col)].width = 14
 
 
-def _write_summary_sheet(ws, result: LatencyResult, header_font, header_fill, border):
+def _write_summary_sheet(ws, result: LatencyResult, _header_font, _header_fill, _border):
     """写入摘要页签"""
     from openpyxl.styles import Font
 
@@ -535,7 +535,7 @@ def _write_calculation_sheet(ws, result: LatencyResult, header_font, header_fill
         ws.column_dimensions[get_column_letter(i)].width = width
 
 
-def _write_gantt_sheet(ws, gantt_data: GanttData, header_font, header_fill, border):
+def _write_gantt_sheet(ws, gantt_data: GanttData, _header_font, _header_fill, _border):
     """写入 Gantt 图页签
 
     使用条件格式和单元格着色模拟 Gantt 图

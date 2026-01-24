@@ -67,13 +67,13 @@ def register_gfloat_golden():
     from aidevtools.formats.quantize import register_quantize
 
     @register_quantize("gfloat16_golden")
-    def golden_gfloat16(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
+    def golden_gfloat16(data: np.ndarray, **_kwargs) -> Tuple[np.ndarray, dict]:
         """Golden gfloat16 量化"""
         result = fp32_to_gfloat16(data)
         return result, {"format": "gfloat16_golden", "cpp": True}
 
     @register_quantize("gfloat8_golden")
-    def golden_gfloat8(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
+    def golden_gfloat8(data: np.ndarray, **_kwargs) -> Tuple[np.ndarray, dict]:
         """Golden gfloat8 量化"""
         result = fp32_to_gfloat8(data)
         return result, {"format": "gfloat8_golden", "cpp": True}

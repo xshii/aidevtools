@@ -1,3 +1,5 @@
+# pylint: disable=unused-argument
+# kwargs 为 CLI 框架预留参数
 """比数命令"""
 import numpy as np
 from prettycli import command

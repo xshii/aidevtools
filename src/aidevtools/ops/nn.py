@@ -1,6 +1,7 @@
-# pylint: disable=redefined-builtin,arguments-differ,arguments-renamed
+# pylint: disable=redefined-builtin,arguments-differ,arguments-renamed,unused-argument
 # redefined-builtin: 使用 `input` 作为参数名以兼容 PyTorch API
 # arguments-differ/renamed: 子类重写方法时使用具体参数签名而非 *args, **kwargs
+# unused-argument: 保留 API 兼容参数 (axis, eps 等) 和基类 compute_flops(s) 签名
 """神经网络算子
 
 每个算子包含三种实现：

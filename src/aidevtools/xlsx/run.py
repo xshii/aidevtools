@@ -286,7 +286,7 @@ def _exec_linear(inputs, config, dtype, nn):
     return nn.linear(x, weight)
 
 
-def _exec_matmul(inputs, config, dtype, nn):
+def _exec_matmul(inputs, _config, dtype, nn):
     if len(inputs) >= 2:
         keys = list(inputs.keys())
         return nn.matmul(inputs[keys[0]], inputs[keys[1]])
@@ -295,7 +295,7 @@ def _exec_matmul(inputs, config, dtype, nn):
     return nn.matmul(x, b)
 
 
-def _exec_attention(inputs, config, dtype, nn):
+def _exec_attention(inputs, _config, _dtype, nn):
     q, k, v = inputs.get("q"), inputs.get("k"), inputs.get("v")
     if q is not None and k is not None and v is not None:
         return nn.attention(q, k, v)
@@ -305,7 +305,7 @@ def _exec_attention(inputs, config, dtype, nn):
 
 def _exec_binary_op(op_func):
     """创建二元算子执行器"""
-    def executor(inputs, config, dtype, nn):
+    def executor(inputs, _config, _dtype, _nn):
         if len(inputs) >= 2:
             keys = list(inputs.keys())
             return op_func(inputs[keys[0]], inputs[keys[1]])
@@ -314,7 +314,7 @@ def _exec_binary_op(op_func):
     return executor
 
 
-def _exec_layernorm(inputs, config, dtype, nn):
+def _exec_layernorm(inputs, _config, dtype, nn):
     x = _get_input(inputs)
     gamma = np.ones(x.shape[-1], dtype=dtype)
     beta = np.zeros(x.shape[-1], dtype=dtype)
@@ -323,7 +323,7 @@ def _exec_layernorm(inputs, config, dtype, nn):
 
 def _exec_unary(op_name):
     """创建一元算子执行器"""
-    def executor(inputs, config, dtype, nn):
+    def executor(inputs, _config, _dtype, nn):
         return getattr(nn, op_name)(_get_input(inputs))
     return executor
 
