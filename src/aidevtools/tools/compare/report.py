@@ -75,5 +75,5 @@ def gen_heatmap_svg(blocks: List[Dict], output_path: str,
 
     svg_parts.append('</svg>')
 
-    Path(output_path).write_text("\n".join(svg_parts))
+    Path(output_path).write_text("\n".join(svg_parts), encoding="utf-8")
     logger.info(f"热力图生成: {output_path}")

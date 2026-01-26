@@ -2,6 +2,7 @@
 
 必须加载 C++ 实现，失败时报错。
 """
+
 from pathlib import Path
 from typing import Tuple
 
@@ -26,7 +27,10 @@ def is_cpp_available() -> bool:
 
 # ==================== 统一接口 ====================
 
-def fp32_to_bfp(data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8) -> Tuple[np.ndarray, np.ndarray]:
+
+def fp32_to_bfp(
+    data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     fp32 -> BFP
 
@@ -43,8 +47,9 @@ def fp32_to_bfp(data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8) 
     return _loader.module.fp32_to_bfp(data, block_size, mantissa_bits)
 
 
-def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
-               block_size: int = 16, mantissa_bits: int = 8) -> np.ndarray:
+def bfp_to_fp32(
+    mantissas: np.ndarray, shared_exps: np.ndarray, block_size: int = 16, mantissa_bits: int = 8
+) -> np.ndarray:
     """
     BFP -> fp32
 
@@ -64,6 +69,7 @@ def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
 
 
 # ==================== Golden 注册 ====================
+
 
 def register_bfp_golden():
     """
@@ -88,7 +94,7 @@ def register_bfp_golden():
             "format": "bfp16_golden",
             "block_size": block_size,
             "mantissa_bits": 8,
-            "cpp": True
+            "cpp": True,
         }
 
     @register_quantize("bfp8_golden")
@@ -104,7 +110,7 @@ def register_bfp_golden():
             "format": "bfp8_golden",
             "block_size": block_size,
             "mantissa_bits": 4,
-            "cpp": True
+            "cpp": True,
         }
 
     logger.info("BFP Golden 已注册 (C++ 实现)")

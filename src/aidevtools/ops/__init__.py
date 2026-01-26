@@ -1,20 +1,16 @@
 """算子 API
 
-PyTorch 风格 functional API:
-    from aidevtools import F
+推荐用法 - 通过 PyTorch 劫持:
+    import aidevtools.golden  # 导入即启用劫持
 
-    y = F.linear(x, weight, bias)
-    y = F.relu(y)
-    y = F.softmax(y, dim=-1)
-    y = F.layer_norm(y, normalized_shape, weight, bias)
-    y = F.scaled_dot_product_attention(q, k, v)
+    import torch.nn.functional as F
+    y = F.linear(x, w)  # 自动走 golden
 
 工具函数:
     from aidevtools import ops
 
     ops.seed(42)       # 设置随机种子
     ops.clear()        # 清空记录
-    # ... 执行算子 ...
     ops.dump("./out")  # 导出数据
 
 高级用法:
@@ -23,11 +19,6 @@ PyTorch 风格 functional API:
     set_golden_mode("cpp")  # 使用 C++ golden
     profiles = get_profiles()  # 获取性能数据
 """
-# 基础 API
-# PyTorch 风格 functional API
-# 导入 nn 以触发算子注册
-from aidevtools.ops import functional, nn
-
 # 工具函数
 from aidevtools.ops.auto import get_seed, seed
 from aidevtools.ops.base import (
@@ -49,6 +40,9 @@ from aidevtools.ops.base import (
     set_profile_enabled,
     set_profile_only,
 )
+
+# 内部模块，仅用于触发算子注册，不对外暴露
+from aidevtools.ops import _functional as _F  # noqa: F401
 
 __all__ = [
     # 工具函数
@@ -72,6 +66,4 @@ __all__ = [
     "Op",
     "register_golden_cpp",
     "has_golden_cpp",
-    # functional API
-    "functional",
 ]

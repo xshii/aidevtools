@@ -1,11 +1,10 @@
 """AI Dev Tools
 
-PyTorch 风格的算子 API:
-    from aidevtools import F
+推荐用法 - 通过 PyTorch 劫持:
+    import aidevtools.golden  # 导入即启用劫持
 
-    y = F.linear(x, weight, bias)
-    y = F.relu(y)
-    y = F.softmax(y, dim=-1)
+    import torch.nn.functional as F
+    y = F.linear(x, w)  # 自动走 golden
 
 工具函数:
     from aidevtools import ops
@@ -23,7 +22,4 @@ from aidevtools import ops
 # 便捷导出工具函数
 from aidevtools.ops import clear, dump, seed
 
-# PyTorch 风格 API: from aidevtools import F
-from aidevtools.ops import functional as F
-
-__all__ = ["ops", "F", "seed", "clear", "dump"]
+__all__ = ["ops", "seed", "clear", "dump"]

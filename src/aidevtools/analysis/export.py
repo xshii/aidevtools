@@ -12,20 +12,22 @@ from .latency import GanttData, LatencyResult
 
 # Gantt 图颜色映射
 GANTT_COLORS = {
-    "cube": "4472C4",       # 蓝色
-    "vector": "70AD47",     # 绿色
-    "dma": "FFC000",        # 黄色
+    "cube": "4472C4",  # 蓝色
+    "vector": "70AD47",  # 绿色
+    "dma": "FFC000",  # 黄色
     "execution": "4472C4",  # 蓝色
-    "prefetch": "FFC000",   # 黄色
-    "parallel": "7030A0",   # 紫色
+    "prefetch": "FFC000",  # 黄色
+    "parallel": "7030A0",  # 紫色
 }
 
 
-def export_xlsx(result: LatencyResult,
-                output_path: str,
-                include_gantt: bool = True,
-                include_passes: bool = True,
-                include_summary: bool = True):
+def export_xlsx(
+    result: LatencyResult,
+    output_path: str,
+    include_gantt: bool = True,
+    include_passes: bool = True,
+    include_summary: bool = True,
+):
     """导出分析结果到 xlsx
 
     Args:
@@ -38,8 +40,10 @@ def export_xlsx(result: LatencyResult,
     try:
         import openpyxl
         from openpyxl.styles import Border, Font, PatternFill, Side
-    except ImportError:
-        raise ImportError("openpyxl is required for xlsx export. Install with: pip install openpyxl")
+    except ImportError as exc:
+        raise ImportError(
+            "openpyxl is required for xlsx export. Install with: pip install openpyxl"
+        ) from exc
 
     wb = openpyxl.Workbook()
 
@@ -47,10 +51,10 @@ def export_xlsx(result: LatencyResult,
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
     )
 
     # 1. 主分析结果页签
@@ -96,11 +100,23 @@ def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, borde
 
     # 表头
     headers = [
-        "Op Name", "Op Type", "Compute Unit", "Dtype",
-        "FLOPs (M)", "Input (KB)", "Weight (KB)", "Output (KB)",
-        "Compute (us)", "Memory (us)", "Roofline (us)",
-        "Prefetch Saved", "Parallel Saved", "Overhead",
-        "Total (us)", "Bottleneck", "Min BW (GB/s)"
+        "Op Name",
+        "Op Type",
+        "Compute Unit",
+        "Dtype",
+        "FLOPs (M)",
+        "Input (KB)",
+        "Weight (KB)",
+        "Output (KB)",
+        "Compute (us)",
+        "Memory (us)",
+        "Roofline (us)",
+        "Prefetch Saved",
+        "Parallel Saved",
+        "Overhead",
+        "Total (us)",
+        "Bottleneck",
+        "Min BW (GB/s)",
     ]
 
     for col, header in enumerate(headers, 1):
@@ -108,7 +124,7 @@ def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, borde
         cell.font = header_font
         cell.fill = header_fill
         cell.border = border
-        cell.alignment = Alignment(horizontal='center')
+        cell.alignment = Alignment(horizontal="center")
 
     # 数据行
     for row_idx, bd in enumerate(result.breakdowns, 2):
@@ -137,7 +153,7 @@ def _write_main_sheet(ws, result: LatencyResult, header_font, header_fill, borde
             cell = ws.cell(row=row_idx, column=col, value=value)
             cell.border = border
             if isinstance(value, float):
-                cell.number_format = '0.00'
+                cell.number_format = "0.00"
 
     # 调整列宽
     for col in range(1, len(headers) + 1):
@@ -152,8 +168,10 @@ def _write_summary_sheet(ws, result: LatencyResult, _header_font, _header_fill, 
     chip = result.chip_spec
 
     # 标题
-    ws.cell(row=1, column=1, value=f"Paper Analysis Summary - {chip.name}").font = Font(bold=True, size=14)
-    ws.merge_cells('A1:D1')
+    ws.cell(row=1, column=1, value=f"Paper Analysis Summary - {chip.name}").font = Font(
+        bold=True, size=14
+    )
+    ws.merge_cells("A1:D1")
 
     # 基本信息
     data = [
@@ -190,8 +208,14 @@ def _write_summary_sheet(ws, result: LatencyResult, _header_font, _header_fill, 
         ("Unit Utilization", ""),
         ("Cube Time (us)", s.unit.cube_time_us),
         ("Vector Time (us)", s.unit.vector_time_us),
-        ("Cube Ratio (%)", s.unit.cube_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0),
-        ("Vector Ratio (%)", s.unit.vector_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0),
+        (
+            "Cube Ratio (%)",
+            s.unit.cube_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0,
+        ),
+        (
+            "Vector Ratio (%)",
+            s.unit.vector_time_us / s.totals.latency_us * 100 if s.totals.latency_us > 0 else 0,
+        ),
     ]
 
     for row_idx, (label, value) in enumerate(data, 3):
@@ -199,14 +223,14 @@ def _write_summary_sheet(ws, result: LatencyResult, _header_font, _header_fill, 
         if value != "":
             cell = ws.cell(row=row_idx, column=2, value=value)
             if isinstance(value, float):
-                cell.number_format = '0.00'
+                cell.number_format = "0.00"
 
         # 小节标题加粗
         if label and value == "":
             ws.cell(row=row_idx, column=1).font = Font(bold=True)
 
-    ws.column_dimensions['A'].width = 25
-    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions["A"].width = 25
+    ws.column_dimensions["B"].width = 15
 
 
 def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, border):
@@ -214,7 +238,15 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
     from openpyxl.utils import get_column_letter
 
     # 表头
-    headers = ["Op Name", "Pass Name", "Enabled", "Before (us)", "After (us)", "Saved (us)", "Improvement %"]
+    headers = [
+        "Op Name",
+        "Pass Name",
+        "Enabled",
+        "Before (us)",
+        "After (us)",
+        "Saved (us)",
+        "Improvement %",
+    ]
 
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -239,7 +271,7 @@ def _write_passes_sheet(ws, result: LatencyResult, header_font, header_fill, bor
                 cell = ws.cell(row=row_idx, column=col, value=value)
                 cell.border = border
                 if isinstance(value, float):
-                    cell.number_format = '0.00'
+                    cell.number_format = "0.00"
 
             row_idx += 1
 
@@ -253,7 +285,7 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
 
     # 标题
     ws.cell(row=1, column=1, value="Pass Configuration").font = Font(bold=True, size=14)
-    ws.merge_cells('A1:C1')
+    ws.merge_cells("A1:C1")
 
     # 预设信息
     ws.cell(row=3, column=1, value="Preset").font = Font(bold=True)
@@ -271,22 +303,47 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
     # Pass 配置列表
     passes_info = [
         ("Roofline", pass_config.roofline_enabled, "-"),
-        ("MinTraffic", pass_config.min_traffic.enabled,
-         f"l2_reuse={pass_config.min_traffic.l2_reuse_factor}, tiling_eff={pass_config.min_traffic.tiling_efficiency}"),
-        ("MemoryEfficiency", pass_config.memory_efficiency_enabled,
-         f"use_effective_bw={pass_config.use_effective_bandwidth}"),
-        ("BandwidthConstraint", pass_config.bandwidth.enabled,
-         f"streams={pass_config.bandwidth.concurrent_streams}, model={pass_config.bandwidth.contention_model}"),
-        ("ForwardPrefetch", pass_config.prefetch.forward_enabled,
-         f"efficiency={pass_config.prefetch.efficiency}"),
-        ("BackwardPrefetch", pass_config.prefetch.backward_enabled,
-         f"depth={pass_config.prefetch.backward_depth}"),
+        (
+            "MinTraffic",
+            pass_config.min_traffic.enabled,
+            f"l2_reuse={pass_config.min_traffic.l2_reuse_factor}, "
+            f"tiling_eff={pass_config.min_traffic.tiling_efficiency}",
+        ),
+        (
+            "MemoryEfficiency",
+            pass_config.memory_efficiency_enabled,
+            f"use_effective_bw={pass_config.use_effective_bandwidth}",
+        ),
+        (
+            "BandwidthConstraint",
+            pass_config.bandwidth.enabled,
+            f"streams={pass_config.bandwidth.concurrent_streams}, "
+            f"model={pass_config.bandwidth.contention_model}",
+        ),
+        (
+            "ForwardPrefetch",
+            pass_config.prefetch.forward_enabled,
+            f"efficiency={pass_config.prefetch.efficiency}",
+        ),
+        (
+            "BackwardPrefetch",
+            pass_config.prefetch.backward_enabled,
+            f"depth={pass_config.prefetch.backward_depth}",
+        ),
         ("CubeVectorParallel", pass_config.cube_vector_parallel_enabled, "-"),
-        ("Overhead", pass_config.overhead.enabled,
-         f"kernel={pass_config.overhead.kernel_launch_us}us, sync={pass_config.overhead.sync_us}us, "
-         f"ctx_switch={pass_config.overhead.context_switch_us}us, tiling={pass_config.overhead.tiling_us}us"),
-        ("TrafficConstraint", pass_config.traffic.enabled,
-         f"max={pass_config.traffic.max_bytes}, mode={pass_config.traffic.budget_mode}"),
+        (
+            "Overhead",
+            pass_config.overhead.enabled,
+            f"kernel={pass_config.overhead.kernel_launch_us}us, "
+            f"sync={pass_config.overhead.sync_us}us, "
+            f"ctx={pass_config.overhead.context_switch_us}us, "
+            f"tiling={pass_config.overhead.tiling_us}us",
+        ),
+        (
+            "TrafficConstraint",
+            pass_config.traffic.enabled,
+            f"max={pass_config.traffic.max_bytes}, mode={pass_config.traffic.budget_mode}",
+        ),
     ]
 
     # 颜色
@@ -299,7 +356,7 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
         cell = ws.cell(row=row, column=2, value="Yes" if enabled else "No")
         cell.fill = enabled_fill if enabled else disabled_fill
         cell.border = border
-        cell.alignment = Alignment(horizontal='center')
+        cell.alignment = Alignment(horizontal="center")
         ws.cell(row=row, column=3, value=params).border = border
 
     # 详细参数表
@@ -347,25 +404,42 @@ def _write_config_sheet(ws, pass_config, header_font, header_fill, border):
         cell = ws.cell(row=row, column=2, value=str(param_value))
         cell.border = border
         if isinstance(param_value, float):
-            cell.number_format = '0.00'
+            cell.number_format = "0.00"
 
-    ws.column_dimensions['A'].width = 28
-    ws.column_dimensions['B'].width = 15
-    ws.column_dimensions['C'].width = 50
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 15
+    ws.column_dimensions["C"].width = 50
 
 
 def _write_chip_params_section(ws, chip, border, start_row: int) -> int:
     """写入芯片参数部分"""
     from openpyxl.styles import Font
 
-    ws.cell(row=start_row, column=1, value="Chip Parameters (用于计算)").font = Font(bold=True, size=14)
-    ws.merge_cells(f'A{start_row}:D{start_row}')
+    ws.cell(row=start_row, column=1, value="Chip Parameters (用于计算)").font = Font(
+        bold=True, size=14
+    )
+    ws.merge_cells(f"A{start_row}:D{start_row}")
 
     chip_params = [
         ("Chip Name", chip.name, "", ""),
-        ("Cube FP16 TFLOPS", chip.cube.fp16_tflops, "TFLOPS", "Cube 计算时延 = FLOPs / (TFLOPS × 1e12) × 1e6 us"),
-        ("Vector FP16 GFLOPS", chip.vector.fp16_gflops, "GFLOPS", "Vector 计算时延 = FLOPs / (GFLOPS × 1e9) × 1e6 us"),
-        ("HBM Bandwidth", chip.memory.hbm.bandwidth_gbps, "GB/s", "访存时延 = Bytes / (BW × 1e9) × 1e6 us"),
+        (
+            "Cube FP16 TFLOPS",
+            chip.cube.fp16_tflops,
+            "TFLOPS",
+            "Cube 计算时延 = FLOPs / (TFLOPS × 1e12) × 1e6 us",
+        ),
+        (
+            "Vector FP16 GFLOPS",
+            chip.vector.fp16_gflops,
+            "GFLOPS",
+            "Vector 计算时延 = FLOPs / (GFLOPS × 1e9) × 1e6 us",
+        ),
+        (
+            "HBM Bandwidth",
+            chip.memory.hbm.bandwidth_gbps,
+            "GB/s",
+            "访存时延 = Bytes / (BW × 1e9) × 1e6 us",
+        ),
     ]
 
     row = start_row + 2
@@ -374,7 +448,7 @@ def _write_chip_params_section(ws, chip, border, start_row: int) -> int:
         cell = ws.cell(row=row, column=2, value=value)
         cell.border = border
         if isinstance(value, float):
-            cell.number_format = '0.00'
+            cell.number_format = "0.00"
         ws.cell(row=row, column=3, value=unit).border = border
         ws.cell(row=row, column=4, value=formula).font = Font(italic=True, color="666666")
         row += 1
@@ -382,7 +456,9 @@ def _write_chip_params_section(ws, chip, border, start_row: int) -> int:
     return row
 
 
-def _write_operator_details_section(ws, result: LatencyResult, header_font, header_fill, border, start_row: int) -> int:
+def _write_operator_details_section(
+    ws, result: LatencyResult, header_font, header_fill, border, start_row: int
+) -> int:
     """写入算子详情部分"""
     from openpyxl.styles import Alignment, Font
 
@@ -390,15 +466,28 @@ def _write_operator_details_section(ws, result: LatencyResult, header_font, head
 
     row = start_row + 2
     ws.cell(row=row, column=1, value="Operator Calculation Details").font = Font(bold=True, size=14)
-    ws.merge_cells(f'A{row}:R{row}')
+    ws.merge_cells(f"A{row}:R{row}")
     row += 2
 
     headers = [
-        "Op Name", "Op Type", "Unit", "Dtype", "Bytes/Elem",
-        "M", "N", "K",
-        "Input (B)", "Weight (B)", "Output (B)", "Total (B)",
-        "FLOPs", "AI (FLOPs/B)",
-        "Compute (us)", "Memory (us)", "Roofline (us)", "Bottleneck"
+        "Op Name",
+        "Op Type",
+        "Unit",
+        "Dtype",
+        "Bytes/Elem",
+        "M",
+        "N",
+        "K",
+        "Input (B)",
+        "Weight (B)",
+        "Output (B)",
+        "Total (B)",
+        "FLOPs",
+        "AI (FLOPs/B)",
+        "Compute (us)",
+        "Memory (us)",
+        "Roofline (us)",
+        "Bottleneck",
     ]
 
     for col, header in enumerate(headers, 1):
@@ -406,7 +495,7 @@ def _write_operator_details_section(ws, result: LatencyResult, header_font, head
         cell.font = header_font
         cell.fill = header_fill
         cell.border = border
-        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
     row += 1
 
@@ -424,18 +513,31 @@ def _write_operator_details_section(ws, result: LatencyResult, header_font, head
         k = k if k else "-"
 
         values = [
-            p.name, p.op_type, p.compute_unit, p.dtype, elem_bytes,
-            m, n, k,
-            p.input_bytes, p.weight_bytes, p.output_bytes, p.total_bytes,
-            p.flops, p.arithmetic_intensity,
-            bd.timing.compute_us, bd.timing.memory_us, bd.timing.roofline_us, bd.bottleneck,
+            p.name,
+            p.op_type,
+            p.compute_unit,
+            p.dtype,
+            elem_bytes,
+            m,
+            n,
+            k,
+            p.input_bytes,
+            p.weight_bytes,
+            p.output_bytes,
+            p.total_bytes,
+            p.flops,
+            p.arithmetic_intensity,
+            bd.timing.compute_us,
+            bd.timing.memory_us,
+            bd.timing.roofline_us,
+            bd.bottleneck,
         ]
 
         for col, value in enumerate(values, 1):
             cell = ws.cell(row=row, column=col, value=value)
             cell.border = border
             if isinstance(value, float):
-                cell.number_format = '0.0' if col == 14 else '0.00'
+                cell.number_format = "0.0" if col == 14 else "0.00"
 
         row += 1
 
@@ -447,8 +549,10 @@ def _write_formulas_section(ws, start_row: int) -> int:
     from openpyxl.styles import Font
 
     row = start_row + 2
-    ws.cell(row=row, column=1, value="Calculation Formulas (计算公式)").font = Font(bold=True, size=14)
-    ws.merge_cells(f'A{row}:F{row}')
+    ws.cell(row=row, column=1, value="Calculation Formulas (计算公式)").font = Font(
+        bold=True, size=14
+    )
+    ws.merge_cells(f"A{row}:F{row}")
     row += 2
 
     formulas = [
@@ -475,23 +579,33 @@ def _write_formulas_section(ws, start_row: int) -> int:
 
     for name, formula, desc in formulas:
         ws.cell(row=row, column=1, value=name).font = Font(bold=True)
-        ws.cell(row=row, column=2, value=formula).font = Font(name='Consolas')
+        ws.cell(row=row, column=2, value=formula).font = Font(name="Consolas")
         ws.cell(row=row, column=4, value=desc).font = Font(italic=True, color="666666")
         row += 1
 
     return row
 
 
-def _write_pass_effects_section(ws, result: LatencyResult, header_font, header_fill, border, start_row: int) -> int:
+def _write_pass_effects_section(
+    ws, result: LatencyResult, header_font, header_fill, border, start_row: int
+) -> int:
     """写入 Pass 优化效果部分"""
     from openpyxl.styles import Font
 
     row = start_row + 2
     ws.cell(row=row, column=1, value="Pass Effects (优化效果)").font = Font(bold=True, size=14)
-    ws.merge_cells(f'A{row}:H{row}')
+    ws.merge_cells(f"A{row}:H{row}")
     row += 2
 
-    pass_headers = ["Op Name", "Prefetch Saved", "Backward Prefetch", "Parallel Saved", "Overhead", "Total Time", "vs Roofline"]
+    pass_headers = [
+        "Op Name",
+        "Prefetch Saved",
+        "Backward Prefetch",
+        "Parallel Saved",
+        "Overhead",
+        "Total Time",
+        "vs Roofline",
+    ]
     for col, header in enumerate(pass_headers, 1):
         cell = ws.cell(row=row, column=col, value=header)
         cell.font = header_font
@@ -502,8 +616,12 @@ def _write_pass_effects_section(ws, result: LatencyResult, header_font, header_f
     for bd in result.breakdowns:
         delta = bd.timing.total_us - bd.timing.roofline_us
         values = [
-            bd.profile.name, bd.savings.prefetch_us, bd.savings.backward_prefetch_us,
-            bd.savings.parallel_us, bd.timing.overhead_us, bd.timing.total_us,
+            bd.profile.name,
+            bd.savings.prefetch_us,
+            bd.savings.backward_prefetch_us,
+            bd.savings.parallel_us,
+            bd.timing.overhead_us,
+            bd.timing.total_us,
             f"{delta:+.2f}" if delta != 0 else "0",
         ]
 
@@ -511,7 +629,7 @@ def _write_pass_effects_section(ws, result: LatencyResult, header_font, header_f
             cell = ws.cell(row=row, column=col, value=value)
             cell.border = border
             if isinstance(value, float):
-                cell.number_format = '0.00'
+                cell.number_format = "0.00"
 
         row += 1
 
@@ -544,11 +662,15 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, _header_font, _header_fill, _b
     from openpyxl.utils import get_column_letter
 
     # 标题
-    ws.cell(row=1, column=1, value=f"Pipeline Gantt Chart - {gantt_data.chip_name}").font = Font(bold=True, size=14)
-    ws.merge_cells('A1:Z1')
+    ws.cell(row=1, column=1, value=f"Pipeline Gantt Chart - {gantt_data.chip_name}").font = Font(
+        bold=True, size=14
+    )
+    ws.merge_cells("A1:Z1")
 
     # 时间刻度 (每列代表一定时间)
-    time_scale_us = gantt_data.total_duration_us / 50 if gantt_data.total_duration_us > 0 else 1  # 50 列
+    time_scale_us = (
+        gantt_data.total_duration_us / 50 if gantt_data.total_duration_us > 0 else 1
+    )  # 50 列
     ws.cell(row=2, column=1, value=f"Time Scale: {time_scale_us:.2f} us/column")
 
     # 图例
@@ -584,9 +706,9 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, _header_font, _header_fill, _b
     for item in gantt_data.items:
         ws.cell(row=row, column=1, value=item.op_name)
         ws.cell(row=row, column=2, value=item.unit)
-        ws.cell(row=row, column=3, value=item.start_us).number_format = '0.00'
-        ws.cell(row=row, column=4, value=item.end_us).number_format = '0.00'
-        ws.cell(row=row, column=5, value=item.end_us - item.start_us).number_format = '0.00'
+        ws.cell(row=row, column=3, value=item.start_us).number_format = "0.00"
+        ws.cell(row=row, column=4, value=item.end_us).number_format = "0.00"
+        ws.cell(row=row, column=5, value=item.end_us - item.start_us).number_format = "0.00"
 
         # 绘制 Gantt 条
         start_col = int(item.start_us / time_scale_us) + 6 if time_scale_us > 0 else 6
@@ -604,34 +726,45 @@ def _write_gantt_sheet(ws, gantt_data: GanttData, _header_font, _header_fill, _b
     # 总时间
     row += 1
     ws.cell(row=row, column=1, value="Total Time (us):").font = Font(bold=True)
-    ws.cell(row=row, column=2, value=gantt_data.total_duration_us).number_format = '0.00'
+    ws.cell(row=row, column=2, value=gantt_data.total_duration_us).number_format = "0.00"
 
     # 调整列宽
-    ws.column_dimensions['A'].width = 20
-    ws.column_dimensions['B'].width = 10
-    ws.column_dimensions['C'].width = 12
-    ws.column_dimensions['D'].width = 12
-    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 12
 
 
 def export_csv(result: LatencyResult, output_path: str):
     """导出为 CSV 格式"""
     import csv
-    from pathlib import Path
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
 
         # 表头
         headers = [
-            "Op Name", "Op Type", "Compute Unit", "Dtype",
-            "FLOPs", "Input Bytes", "Weight Bytes", "Output Bytes",
-            "Compute Time (us)", "Memory Time (us)", "Roofline Time (us)",
-            "Prefetch Saved (us)", "Parallel Saved (us)", "Overhead (us)",
-            "Total Time (us)", "Bottleneck", "Min Bandwidth (GB/s)"
+            "Op Name",
+            "Op Type",
+            "Compute Unit",
+            "Dtype",
+            "FLOPs",
+            "Input Bytes",
+            "Weight Bytes",
+            "Output Bytes",
+            "Compute Time (us)",
+            "Memory Time (us)",
+            "Roofline Time (us)",
+            "Prefetch Saved (us)",
+            "Parallel Saved (us)",
+            "Overhead (us)",
+            "Total Time (us)",
+            "Bottleneck",
+            "Min Bandwidth (GB/s)",
         ]
         writer.writerow(headers)
 
@@ -639,11 +772,23 @@ def export_csv(result: LatencyResult, output_path: str):
         for bd in result.breakdowns:
             p = bd.profile
             row = [
-                p.name, p.op_type, p.compute_unit, p.dtype,
-                p.flops, p.input_bytes, p.weight_bytes, p.output_bytes,
-                bd.timing.compute_us, bd.timing.memory_us, bd.timing.roofline_us,
-                bd.savings.prefetch_us, bd.savings.parallel_us, bd.timing.overhead_us,
-                bd.timing.total_us, bd.bottleneck, bd.bandwidth.min_gbps
+                p.name,
+                p.op_type,
+                p.compute_unit,
+                p.dtype,
+                p.flops,
+                p.input_bytes,
+                p.weight_bytes,
+                p.output_bytes,
+                bd.timing.compute_us,
+                bd.timing.memory_us,
+                bd.timing.roofline_us,
+                bd.savings.prefetch_us,
+                bd.savings.parallel_us,
+                bd.timing.overhead_us,
+                bd.timing.total_us,
+                bd.bottleneck,
+                bd.bandwidth.min_gbps,
             ]
             writer.writerow(row)
 
@@ -653,7 +798,6 @@ def export_csv(result: LatencyResult, output_path: str):
 def export_json(result: LatencyResult, output_path: str):
     """导出为 JSON 格式"""
     import json
-    from pathlib import Path
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -675,7 +819,7 @@ def export_json(result: LatencyResult, output_path: str):
             "achieved_tflops": result.summary.throughput.achieved_tflops,
             "achieved_bandwidth_gbps": result.summary.throughput.achieved_bandwidth_gbps,
         },
-        "breakdowns": []
+        "breakdowns": [],
     }
 
     for bd in result.breakdowns:
@@ -698,7 +842,7 @@ def export_json(result: LatencyResult, output_path: str):
         }
         data["breakdowns"].append(breakdown_data)
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
     print(f"Exported to: {output_path}")

@@ -33,12 +33,12 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
+from aidevtools.core.config import get_config, set_config
+
 # CPU Golden 可执行文件路径 (在 golden 目录)
 _GOLDEN_DIR = Path(__file__).parent.parent / "golden"
 _CPU_GOLDEN_PATH = _GOLDEN_DIR / "cpu_golden"
 _CPP_DIR = _GOLDEN_DIR / "cpp"
-
-from aidevtools.core.config import get_config, set_config
 
 GFloatType = Literal["gfp4", "gfp8", "gfp16"]
 
@@ -265,7 +265,7 @@ def run_cpu_golden(
                 full_cmd.append(arg)
 
         # 执行 subprocess
-        result = subprocess.run(full_cmd, capture_output=True, text=True)
+        result = subprocess.run(full_cmd, capture_output=True, text=True, check=False)
 
         if result.returncode != 0:
             raise RuntimeError(f"cpu_golden {op_name} failed: {result.stderr}")

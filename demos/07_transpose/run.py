@@ -10,9 +10,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
-from aidevtools import F, ops
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records
-from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+from aidevtools.tools.compare.diff import compare_full
 from aidevtools.formats.quantize import generate_fake_dut
 
 
@@ -56,25 +57,19 @@ def main():
     # 生成假 DUT
     print("\n[2] 生成假的 DUT 数据")
     np.random.seed(123)
-    dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.0005) for r in records]
+    dut_outputs = [generate_fake_dut(r["golden"], qtype="bfp8", noise_level=0.0005) for r in records]
 
     for i, r in enumerate(records):
         print(f"    {r['name']}: dut={dut_outputs[i].shape}")
 
     # 比对
-    print("\n[3] 比对结果")
-    results = []
+    print("\n[3] 比对结果 (golden vs DUT)")
+    print(f"    {'Op':15} {'Max Abs':>12} {'QSNR':>10} {'Cosine':>10} {'Status':>8}")
+    print("    " + "-" * 60)
     for i, r in enumerate(records):
-        result = compare_3col(
-            op_name=r["op"],
-            op_id=i,
-            result=dut_outputs[i],
-            golden_pure=r["reference"],
-            golden_qnt=r["golden"],
-        )
-        results.append(result)
-
-    print_compare_table(results)
+        diff = compare_full(r["golden"], dut_outputs[i])
+        status = "PASS" if diff.passed else "FAIL"
+        print(f"    {r['name']:15} {diff.max_abs:12.6e} {diff.qsnr:10.2f} {diff.cosine:10.6f} {status:>8}")
 
     # 导出
     output_dir = Path(__file__).parent / "workspace"

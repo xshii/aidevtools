@@ -18,7 +18,7 @@ class TestRegisterOp:
         meta = get_op_meta("linear")
         assert meta is not None
         assert meta.name == "linear"
-        assert "x" in meta.inputs
+        assert "input" in meta.inputs
         assert "weight" in meta.inputs
 
     def test_decorator_with_optional(self):

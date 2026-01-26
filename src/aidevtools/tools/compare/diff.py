@@ -1,4 +1,5 @@
 """比对核心逻辑"""
+
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -8,6 +9,7 @@ import numpy as np
 @dataclass
 class DiffResult:
     """比对结果"""
+
     passed: bool
     max_abs: float
     mean_abs: float
@@ -21,6 +23,7 @@ class DiffResult:
 @dataclass
 class ExactResult:
     """精确比对结果"""
+
     passed: bool
     mismatch_count: int
     first_diff_offset: int  # -1 表示无差异
@@ -34,23 +37,25 @@ class IsCloseResult:
 
     类似 numpy.isclose: |a - b| <= atol + rtol * |b|
     """
-    passed: bool              # 是否通过精度要求
-    total_elements: int       # 总元素数
-    exceed_count: int         # 超过门限的元素数
-    exceed_ratio: float       # 超限比例 (exceed_count / total_elements)
-    max_abs_error: float      # 最大绝对误差
-    max_rel_error: float      # 最大相对误差
-    mean_abs_error: float     # 平均绝对误差
-    mean_rel_error: float     # 平均相对误差
+
+    passed: bool  # 是否通过精度要求
+    total_elements: int  # 总元素数
+    exceed_count: int  # 超过门限的元素数
+    exceed_ratio: float  # 超限比例 (exceed_count / total_elements)
+    max_abs_error: float  # 最大绝对误差
+    max_rel_error: float  # 最大相对误差
+    mean_abs_error: float  # 平均绝对误差
+    mean_rel_error: float  # 平均相对误差
     # 参数
-    atol: float               # 绝对误差门限
-    rtol: float               # 相对误差门限
-    max_exceed_ratio: float   # 允许的最大超限比例
+    atol: float  # 绝对误差门限
+    rtol: float  # 相对误差门限
+    max_exceed_ratio: float  # 允许的最大超限比例
 
 
 @dataclass
 class CompareThresholds:
     """比对阈值配置"""
+
     # 精确比对
     exact_max_abs: float = 0.0
     exact_max_count: int = 0
@@ -70,6 +75,7 @@ class FullCompareResult:
     - fuzzy_pure: 模糊比对 (全程 fp32)
     - fuzzy_qnt: 模糊比对 (带量化)
     """
+
     op_name: str
     op_id: int
 
@@ -97,8 +103,9 @@ class FullCompareResult:
         return "FAIL"
 
 
-def compare_exact(golden: np.ndarray, result: np.ndarray,
-                  max_abs: float = 0.0, max_count: int = 0) -> ExactResult:
+def compare_exact(
+    golden: np.ndarray, result: np.ndarray, max_abs: float = 0.0, max_count: int = 0
+) -> ExactResult:
     """
     精确比对
 
@@ -121,7 +128,7 @@ def compare_exact(golden: np.ndarray, result: np.ndarray,
         # bit 级精确比对 (需要 contiguous 数组)
         g_cont = np.ascontiguousarray(golden)
         r_cont = np.ascontiguousarray(result)
-        mismatch_mask = (g_cont.view(np.uint8) != r_cont.view(np.uint8))
+        mismatch_mask = g_cont.view(np.uint8) != r_cont.view(np.uint8)
         mismatch_count = int(np.sum(mismatch_mask))
         first_diff = np.argmax(mismatch_mask) if mismatch_count > 0 else -1
     else:
@@ -139,12 +146,15 @@ def compare_exact(golden: np.ndarray, result: np.ndarray,
         max_abs=max_abs_actual,
     )
 
+
 def compare_bit(golden: bytes, result: bytes) -> bool:
     """bit 级对比，完全一致"""
     return golden == result
 
-def compare_block(golden: np.ndarray, result: np.ndarray,
-                  block_size: int = 256, threshold: float = 1e-5) -> List[Dict]:
+
+def compare_block(
+    golden: np.ndarray, result: np.ndarray, block_size: int = 256, threshold: float = 1e-5
+) -> List[Dict]:
     """
     分块对比 (256 byte 粒度)
     返回每个 block 的对比结果
@@ -154,8 +164,8 @@ def compare_block(golden: np.ndarray, result: np.ndarray,
 
     blocks = []
     for i in range(0, len(g_flat), block_size):
-        g_block = g_flat[i:i+block_size].view(golden.dtype)
-        r_block = r_flat[i:i+block_size].view(result.dtype)
+        g_block = g_flat[i : i + block_size].view(golden.dtype)
+        r_block = r_flat[i : i + block_size].view(result.dtype)
 
         if len(g_block) == 0:
             continue
@@ -164,18 +174,22 @@ def compare_block(golden: np.ndarray, result: np.ndarray,
         max_abs = float(abs_err.max())
         qsnr = calc_qsnr(g_block, r_block)
 
-        blocks.append({
-            "offset": i,
-            "size": len(g_block) * g_block.itemsize,
-            "max_abs": max_abs,
-            "qsnr": qsnr,
-            "passed": max_abs < threshold,
-        })
+        blocks.append(
+            {
+                "offset": i,
+                "size": len(g_block) * g_block.itemsize,
+                "max_abs": max_abs,
+                "qsnr": qsnr,
+                "passed": max_abs < threshold,
+            }
+        )
 
     return blocks
 
-def compare_full(golden: np.ndarray, result: np.ndarray,
-                 atol: float = 1e-5, rtol: float = 1e-5) -> DiffResult:
+
+def compare_full(
+    golden: np.ndarray, result: np.ndarray, atol: float = 1e-5, rtol: float = 1e-5
+) -> DiffResult:
     """完整对比"""
     g = golden.astype(np.float64).flatten()
     r = result.astype(np.float64).flatten()
@@ -205,17 +219,19 @@ def compare_full(golden: np.ndarray, result: np.ndarray,
         exceed_count=exceed_count,
     )
 
+
 def calc_qsnr(golden: np.ndarray, result: np.ndarray) -> float:
     """计算 QSNR (dB)"""
     g = golden.astype(np.float64).flatten()
     r = result.astype(np.float64).flatten()
 
-    signal = np.sum(g ** 2)
+    signal = np.sum(g**2)
     noise = np.sum((g - r) ** 2)
 
     if noise < 1e-12:
-        return float('inf')
+        return float("inf")
     return float(10 * np.log10(signal / noise))
+
 
 def calc_cosine(a: np.ndarray, b: np.ndarray) -> float:
     """计算余弦相似度"""
@@ -329,9 +345,9 @@ def print_isclose_result(result: IsCloseResult, name: str = ""):
 def _apply_fuzzy_thresholds(diff: DiffResult, thresholds: CompareThresholds) -> DiffResult:
     """应用模糊比对阈值，返回新的 DiffResult"""
     passed = (
-        diff.passed and
-        diff.qsnr >= thresholds.fuzzy_min_qsnr and
-        diff.cosine >= thresholds.fuzzy_min_cosine
+        diff.passed
+        and diff.qsnr >= thresholds.fuzzy_min_qsnr
+        and diff.cosine >= thresholds.fuzzy_min_cosine
     )
     return DiffResult(
         passed=passed,
@@ -392,19 +408,30 @@ def compare_3col(
 
 def _format_result_row(r: FullCompareResult) -> str:
     """格式化单行结果"""
-    marks = ("✓" if r.exact.passed else "✗", "✓" if r.fuzzy_pure.passed else "✗", "✓" if r.fuzzy_qnt.passed else "✗")
+    marks = (
+        "✓" if r.exact.passed else "✗",
+        "✓" if r.fuzzy_pure.passed else "✗",
+        "✓" if r.fuzzy_qnt.passed else "✗",
+    )
     max_abs = f"{r.fuzzy_qnt.max_abs:.2e}"
-    qsnr = f"{r.fuzzy_qnt.qsnr:.1f}" if r.fuzzy_qnt.qsnr != float('inf') else "inf"
+    qsnr = f"{r.fuzzy_qnt.qsnr:.1f}" if r.fuzzy_qnt.qsnr != float("inf") else "inf"
     cosine = f"{r.fuzzy_qnt.cosine:.6f}"
     name = f"{r.op_name}_{r.op_id}"
-    return f"{name:<15} {marks[0]:^7} {marks[1]:^7} {marks[2]:^7} {max_abs:>10} {qsnr:>8} {cosine:>8} {r.status:^12}"
+    return (
+        f"{name:<15} {marks[0]:^7} {marks[1]:^7} {marks[2]:^7} "
+        f"{max_abs:>10} {qsnr:>8} {cosine:>8} {r.status:^12}"
+    )
 
 
 def print_compare_table(results: List[FullCompareResult]):
     """打印比对结果表格"""
     print()
     print("=" * 100)
-    print(f"{'op_name':<15} {'exact':^7} {'f_pure':^7} {'f_qnt':^7} {'max_abs':>10} {'qsnr':>8} {'cosine':>8} {'status':^12}")
+    header = (
+        f"{'op_name':<15} {'exact':^7} {'f_pure':^7} {'f_qnt':^7} "
+        f"{'max_abs':>10} {'qsnr':>8} {'cosine':>8} {'status':^12}"
+    )
+    print(header)
     print("-" * 100)
 
     for r in results:
@@ -418,6 +445,10 @@ def print_compare_table(results: List[FullCompareResult]):
         if r.status in status_counts:
             status_counts[r.status] += 1
 
-    print(f"\nSummary: {status_counts['PERFECT']} PERFECT, {status_counts['PASS']} PASS, "
-          f"{status_counts['QUANT_ISSUE']} QUANT_ISSUE, {status_counts['FAIL']} FAIL (total: {len(results)})")
+    summary = (
+        f"\nSummary: {status_counts['PERFECT']} PERFECT, {status_counts['PASS']} PASS, "
+        f"{status_counts['QUANT_ISSUE']} QUANT_ISSUE, {status_counts['FAIL']} FAIL "
+        f"(total: {len(results)})"
+    )
+    print(summary)
     print()

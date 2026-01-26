@@ -6,7 +6,7 @@
 
 | 文件 | 是否必须 | 说明 |
 |------|---------|------|
-| `src/aidevtools/ops/nn.py` | ✅ 必须 | 添加算子类 |
+| `src/aidevtools/ops/_functional.py` | ✅ 必须 | 添加算子类 |
 | `src/aidevtools/ops/auto.py` | 🔄 自动 | 基于 `auto_gen` 元数据自动生成，无需修改 |
 | `src/aidevtools/golden/cpp/` | 可选 | 添加 C++ Golden |
 | `tests/ut/test_*.py` | ✅ 必须 | 添加单元测试 |
@@ -14,10 +14,10 @@
 
 ---
 
-## Step 1: 添加算子类 (`ops/nn.py`)
+## Step 1: 添加算子类 (`ops/_functional.py`)
 
 ```python
-# src/aidevtools/ops/nn.py
+# src/aidevtools/ops/_functional.py
 
 @register_op(
     inputs=["x", "gamma"],           # 必需输入参数
@@ -128,7 +128,7 @@ cd src/aidevtools/golden/cpp
 ### 3.3 添加 `cpu_golden` 方法
 
 ```python
-# src/aidevtools/ops/nn.py - RMSNorm 类中添加
+# src/aidevtools/ops/_functional.py - RMSNorm 类中添加
 
 def cpu_golden(self, x: np.ndarray, gamma: np.ndarray, eps: float = 1e-5) -> np.ndarray:
     """C++ Golden 实现"""
@@ -187,6 +187,7 @@ class RMSNorm(Op):
 
 import pytest
 import numpy as np
+from aidevtools.ops import _functional as F
 
 
 class TestRMSNormPythonGolden:
@@ -194,25 +195,20 @@ class TestRMSNormPythonGolden:
 
     def test_rmsnorm_basic(self):
         """基本功能测试"""
-        from aidevtools.ops.nn import rmsnorm
-
         x = np.random.randn(2, 8, 64).astype(np.float32)
         gamma = np.ones(64, dtype=np.float32)
 
-        y = rmsnorm(x, gamma)
+        y = F.rmsnorm(x, gamma)
 
         assert y.shape == x.shape
         assert y.dtype == np.float32
 
     def test_rmsnorm_reference(self):
         """reference 实现测试"""
-        from aidevtools.ops.nn import RMSNorm
-
         x = np.random.randn(2, 64).astype(np.float32)
         gamma = np.ones(64, dtype=np.float32)
 
-        op = RMSNorm()
-        y = op.reference(x, gamma)
+        y = F.RMSNorm().reference(x, gamma)
 
         # 验证 RMS 归一化后的值
         assert y.shape == x.shape
@@ -224,7 +220,6 @@ class TestRMSNormCppGolden:
     def test_rmsnorm_gfp16(self):
         """gfp16 格式测试"""
         from aidevtools.ops.cpu_golden import is_cpu_golden_available, set_cpu_golden_dtype
-        from aidevtools.ops.nn import RMSNorm
 
         if not is_cpu_golden_available():
             pytest.skip("CPU golden not available")
@@ -234,8 +229,7 @@ class TestRMSNormCppGolden:
         x = np.random.randn(2, 64).astype(np.float32)
         gamma = np.ones(64, dtype=np.float32)
 
-        op = RMSNorm()
-        y = op.cpu_golden(x, gamma)
+        y = F.RMSNorm().cpu_golden(x, gamma)
 
         assert y.shape == x.shape
 ```
@@ -263,12 +257,12 @@ EXTRA_OPS = [
 
 添加新算子时，检查以下项目:
 
-- [ ] `ops/nn.py` - 添加算子类，包含 `golden_python` 和 `reference` 方法
-- [ ] `ops/nn.py` - 配置 `@register_op` 的 `auto_gen` 参数
-- [ ] `ops/nn.py` - 文件末尾添加实例 (如 `rmsnorm = RMSNorm()`)
+- [ ] `ops/_functional.py` - 添加算子类，包含 `golden_python` 和 `reference` 方法
+- [ ] `ops/_functional.py` - 配置 `@register_op` 的 `auto_gen` 参数
+- [ ] `ops/_functional.py` - 文件末尾添加实例 (如 `rmsnorm = RMSNorm()`)
 - [ ] `ops/auto.py` - 🔄 **自动生成**，普通算子无需修改
 - [ ] `golden/cpp/` - 添加 C++ 实现并重新编译 (可选)
-- [ ] `ops/nn.py` - 添加 `cpu_golden` 方法 (如果有 C++ Golden)
+- [ ] `ops/_functional.py` - 添加 `cpu_golden` 方法 (如果有 C++ Golden)
 - [ ] `tests/ut/` - 添加单元测试
 - [ ] `xlsx/op_registry.py` - 添加到 EXTRA_OPS (可选)
 

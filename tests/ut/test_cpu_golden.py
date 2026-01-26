@@ -378,13 +378,13 @@ class TestOpCpuGoldenMethod:
 
     def test_matmul_cpu_golden(self):
         """MatMul.cpu_golden 方法"""
-        from aidevtools.ops.nn import MatMul
+        from aidevtools.ops import _functional as F
 
         M, K, N = 4, 8, 16
         a = np.random.randn(M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)
 
-        op = MatMul()
+        op = F.MatMul()
         c = op.cpu_golden(a, b)
 
         assert c.shape == (M, N)
@@ -392,12 +392,12 @@ class TestOpCpuGoldenMethod:
 
     def test_softmax_cpu_golden(self):
         """Softmax.cpu_golden 方法"""
-        from aidevtools.ops.nn import Softmax
+        from aidevtools.ops import _functional as F
 
         batch, seq = 4, 16
         x = np.random.randn(batch, seq).astype(np.float32)
 
-        op = Softmax()
+        op = F.Softmax()
         y = op.cpu_golden(x)
 
         assert y.shape == (batch, seq)
@@ -406,11 +406,11 @@ class TestOpCpuGoldenMethod:
 
     def test_softmax_1d_cpu_golden(self):
         """Softmax.cpu_golden 1D 输入"""
-        from aidevtools.ops.nn import Softmax
+        from aidevtools.ops import _functional as F
 
         x = np.random.randn(8).astype(np.float32)
 
-        op = Softmax()
+        op = F.Softmax()
         y = op.cpu_golden(x)
 
         assert y.shape == (8,)
@@ -418,15 +418,15 @@ class TestOpCpuGoldenMethod:
 
     def test_layernorm_cpu_golden(self):
         """LayerNorm.cpu_golden 方法"""
-        from aidevtools.ops.nn import LayerNorm
+        from aidevtools.ops import _functional as F
 
         batch, hidden = 4, 64
         x = np.random.randn(batch, hidden).astype(np.float32)
-        gamma = np.ones(hidden, dtype=np.float32)
-        beta = np.zeros(hidden, dtype=np.float32)
+        weight = np.ones(hidden, dtype=np.float32)
+        bias = np.zeros(hidden, dtype=np.float32)
 
-        op = LayerNorm()
-        y = op.cpu_golden(x, gamma, beta)
+        op = F.LayerNorm()
+        y = op.cpu_golden(x, normalized_shape=(hidden,), weight=weight, bias=bias)
 
         assert y.shape == (batch, hidden)
         # layernorm 输出每行均值应接近 0
@@ -434,12 +434,12 @@ class TestOpCpuGoldenMethod:
 
     def test_transpose_cpu_golden(self):
         """Transpose.cpu_golden 方法"""
-        from aidevtools.ops.nn import Transpose
+        from aidevtools.ops import _functional as F
 
         d0, d1, d2, d3 = 2, 4, 8, 16
         x = np.random.randn(d0, d1, d2, d3).astype(np.float32)
 
-        op = Transpose()
+        op = F.Transpose()
         y = op.cpu_golden(x)
 
         assert y.shape == (d0, d1, d3, d2)
@@ -462,14 +462,14 @@ class TestCppGoldenMode:
 
     def test_use_cpp_golden_mode(self):
         """使用 cpp golden mode"""
+        from aidevtools.ops import _functional as F
         from aidevtools.ops.base import set_golden_mode, clear, get_records
-        from aidevtools.ops.nn import softmax
 
         set_golden_mode("cpp")
         clear()
 
         x = np.random.randn(2, 8).astype(np.float32)
-        y = softmax(x)
+        y = F.softmax(x)
 
         assert y.shape == (2, 8)
         # softmax 输出每行和应该接近 1
@@ -481,15 +481,15 @@ class TestCppGoldenMode:
 
     def test_matmul_cpp_mode(self):
         """MatMul cpp golden mode"""
+        from aidevtools.ops import _functional as F
         from aidevtools.ops.base import set_golden_mode, clear, get_records
-        from aidevtools.ops.nn import matmul
 
         set_golden_mode("cpp")
         clear()
 
         a = np.random.randn(4, 8).astype(np.float32)
         b = np.random.randn(8, 16).astype(np.float32)
-        c = matmul(a, b)
+        c = F.matmul(a, b)
 
         assert c.shape == (4, 16)
 
@@ -583,8 +583,8 @@ class TestMixedPrecisionCpuGolden:
 
     def test_matmul_mixed_cpu_golden(self):
         """MatMul 混合精度 cpu_golden"""
+        from aidevtools.ops import _functional as F
         from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
-        from aidevtools.ops.nn import MatMul
 
         # 设置混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
         set_cpu_golden_dtype(
@@ -598,7 +598,7 @@ class TestMixedPrecisionCpuGolden:
         a = np.random.randn(M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)
 
-        op = MatMul()
+        op = F.MatMul()
         c = op.cpu_golden(a, b)
 
         assert c.shape == (M, N)
@@ -606,8 +606,8 @@ class TestMixedPrecisionCpuGolden:
 
     def test_matmul_mixed_batch(self):
         """MatMul 混合精度 batch 支持"""
+        from aidevtools.ops import _functional as F
         from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
-        from aidevtools.ops.nn import MatMul
 
         set_cpu_golden_dtype(
             dtype="gfp16",
@@ -621,7 +621,7 @@ class TestMixedPrecisionCpuGolden:
         a = np.random.randn(batch, M, K).astype(np.float32)
         b = np.random.randn(K, N).astype(np.float32)  # broadcast
 
-        op = MatMul()
+        op = F.MatMul()
         c = op.cpu_golden(a, b)
 
         assert c.shape == (batch, M, N)
@@ -645,9 +645,9 @@ class TestMixedPrecisionCppMode:
 
     def test_mixed_precision_cpp_mode(self):
         """混合精度 cpp golden mode"""
+        from aidevtools.ops import _functional as F
         from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
         from aidevtools.ops.base import set_golden_mode, clear, get_records
-        from aidevtools.ops.nn import matmul as nn_matmul
 
         # 设置混合精度: A 用 gfp8, B 用 gfp4, 输出用 gfp16
         set_cpu_golden_dtype(
@@ -662,7 +662,7 @@ class TestMixedPrecisionCppMode:
         # 执行 matmul
         a = np.random.randn(4, 8).astype(np.float32)
         b = np.random.randn(8, 16).astype(np.float32)
-        c = nn_matmul(a, b)
+        c = F.matmul(a, b)
 
         assert c.shape == (4, 16)
 

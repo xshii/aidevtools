@@ -243,7 +243,6 @@ class BasePass(ABC):
         Returns:
             PassResult
         """
-        pass
 
     def _skip(self, result: PassResult, latency_us: float, reason: str) -> PassResult:
         """跳过 Pass 时填充结果"""

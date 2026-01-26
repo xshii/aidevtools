@@ -149,15 +149,15 @@ class TestCompareClearCmd:
 
     def test_clear(self):
         """清空记录"""
+        from aidevtools.ops import _functional as F
         from aidevtools.commands.compare import cmd_compare
         from aidevtools.ops.base import clear, get_records
-        from aidevtools.ops import nn
 
         clear()
 
-        # 使用 ops.nn 触发记录
+        # 使用 F 触发记录
         x = np.random.randn(2, 4).astype(np.float32)
-        nn.relu(x)
+        F.relu(x)
         assert len(get_records()) == 1
 
         ret = cmd_compare(action="clear")
@@ -185,11 +185,11 @@ class TestCompareDumpCmd:
 
     def test_dump(self, tmp_path):
         """导出数据"""
+        from aidevtools.ops import _functional as F
         from aidevtools.commands.compare import cmd_compare
-        from aidevtools.ops import nn
 
         x = np.random.randn(2, 4).astype(np.float32)
-        nn.relu(x)
+        F.relu(x)
 
         ret = cmd_compare(action="dump", output=str(tmp_path))
         assert ret == 0

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Transformer Demo - 使用 PyTorch 风格 API 构建完整 Transformer
 
-演示使用 F.matmul, F.softmax, F.layer_norm 等构建 Transformer 模型。
+演示使用 F.matmul, F.softmax, F.layer_norm 构建 Transformer 模型。
+注意: 仅使用有 cpu_golden 实现的算子 (matmul, softmax, layernorm, transpose)
 
 使用方法:
     cd demos/03_transformer
@@ -12,9 +13,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
-from aidevtools import F, ops
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records
-from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+from aidevtools.tools.compare.diff import compare_full
 from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
@@ -87,8 +89,8 @@ def run_single_layer_transformer():
     ffn_up = F.matmul(ln1, w_up)
     print(f"  FFN up: {ffn_up.shape}")
 
-    # Activation (GELU)
-    ffn_act = F.gelu(ffn_up)
+    # Activation (使用 softmax 代替 GELU，因为 GELU 没有 cpu_golden)
+    ffn_act = F.softmax(ffn_up, dim=-1)
     print(f"  FFN activation: {ffn_act.shape}")
 
     # FFN down
@@ -124,25 +126,19 @@ def main():
     # 2. 生成假 DUT
     print("\n[2] 生成假的 DUT 数据")
     print("-" * 50)
-    print("流程: reference -> bfp8 量化/反量化 -> 加小噪声")
+    print("流程: golden -> bfp8 量化/反量化 -> 加小噪声")
     np.random.seed(123)
-    dut_outputs = [generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001) for r in records]
+    dut_outputs = [generate_fake_dut(r["golden"], qtype="bfp8", noise_level=0.001) for r in records]
 
     # 3. 比对
-    print("\n[3] 三列比对")
+    print("\n[3] 比对 (golden vs DUT)")
     print("-" * 50)
-    results = []
+    print(f"    {'Op':15} {'Max Abs':>12} {'QSNR':>10} {'Cosine':>10} {'Status':>8}")
+    print("    " + "-" * 60)
     for i, r in enumerate(records):
-        result = compare_3col(
-            op_name=r["op"],
-            op_id=i,
-            result=dut_outputs[i],
-            golden_pure=r["reference"],
-            golden_qnt=r["golden"],
-        )
-        results.append(result)
-
-    print_compare_table(results)
+        diff = compare_full(r["golden"], dut_outputs[i])
+        status = "PASS" if diff.passed else "FAIL"
+        print(f"    {r['name']:15} {diff.max_abs:12.6e} {diff.qsnr:10.2f} {diff.cosine:10.6f} {status:>8}")
 
     # 4. 导出
     print("\n[4] 导出 bin 文件")

@@ -5,6 +5,7 @@ from enum import IntEnum
 
 
 class Level(IntEnum):
+    """日志级别枚举"""
     DEBUG = 10
     INFO = 20
     WARN = 30
@@ -35,6 +36,7 @@ def _log(level: Level, module: str, msg: str):
     print(line, file=out)
 
 class Logger:
+    """日志记录器"""
     def __init__(self, module: str = ""):
         self.module = module or _module
 

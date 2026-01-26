@@ -5,6 +5,7 @@ from .base import FormatBase
 
 
 class RawFormat(FormatBase):
+    """Raw 二进制格式处理器"""
     name = "raw"
 
     def load(self, path: str, dtype=np.float32, shape=None, **kwargs) -> np.ndarray:

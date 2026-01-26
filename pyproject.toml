@@ -9,9 +9,10 @@ description = "AI operator development toolkit"
 requires-python = ">=3.8"
 dependencies = [
     "prettycli @ file:libs/prettycli",
-    "numpy>=1.21",
+    "numpy>=1.21,<2.0",
     "pyyaml>=6.0",
     "jinja2>=3.0",
+    "torch>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -45,13 +46,27 @@ packages = ["src/aidevtools"]
 [tool.pylint.messages_control]
 disable = [
     "import-outside-toplevel",  # 延迟导入可选依赖是合理设计
+    "abstract-method",  # 基类使用 NotImplementedError 而非 @abstractmethod
 ]
 
 [tool.pylint.basic]
 # 允许单字母变量名 (矩阵维度 M, K, N 等)
-good-names = ["i", "j", "k", "n", "m", "x", "y", "z", "M", "K", "N", "H", "W", "C", "B", "T", "S", "Q", "V", "_"]
+good-names = ["i", "j", "k", "n", "m", "x", "y", "z", "M", "K", "N", "H", "W", "C", "B", "T", "S", "Q", "V", "L", "kH", "kW", "_", "__version__"]
 # 允许模块级私有变量使用小写
 const-rgx = "(_?[A-Z][A-Z0-9_]*|_?[a-z][a-z0-9_]*)$"
+# 默认函数命名规则 (允许 _impl_xxx 私有函数)
+function-rgx = "[a-z_][a-z0-9_]{0,50}$"
+# 允许 C_in, K2 等变量名 (ML convention)
+variable-rgx = "([a-z_][a-z0-9_]{0,50}|[A-Z][A-Z0-9]?(_[a-z]+)?)$"
+# 允许小写类名 (用于 context manager 如 profile_only)
+class-rgx = "([A-Z_][a-zA-Z0-9]*|[a-z_][a-z0-9_]*)$"
+
+[tool.pylint.design]
+# 放宽复杂度限制
+max-args = 7
+max-positional-arguments = 7
+max-locals = 20  # 算子实现需要较多局部变量
+max-attributes = 12  # 配置类需要较多属性
 
 [tool.ruff]
 line-length = 100

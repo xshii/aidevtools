@@ -16,7 +16,8 @@ from pathlib import Path
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools import F, ops
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records, set_golden_mode, clear
 from aidevtools.xlsx import create_template, export_xlsx, import_xlsx, run_xlsx
 

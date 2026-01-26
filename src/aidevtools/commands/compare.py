@@ -1,6 +1,7 @@
 # pylint: disable=unused-argument
 # kwargs 为 CLI 框架预留参数
 """比数命令"""
+
 import numpy as np
 from prettycli import command
 
@@ -31,7 +32,9 @@ def _action_clear(**kwargs):
 def _action_single(golden, result, dtype, shape, **kwargs):
     """单次比对两个文件"""
     if not golden or not result:
-        logger.error("请指定文件: compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32")
+        logger.error(
+            "请指定文件: compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32"
+        )
         return 1
     dt = parse_dtype(dtype)
     sh = parse_shape(shape)
@@ -61,9 +64,9 @@ def _action_fuzzy(golden, result, dtype, shape, **kwargs):
     r_f64 = r.astype(np.float64).flatten()
 
     diff_val = g_f64 - r_f64
-    signal_power = np.mean(g_f64 ** 2)
-    noise_power = np.mean(diff_val ** 2)
-    qsnr = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float('inf')
+    signal_power = np.mean(g_f64**2)
+    noise_power = np.mean(diff_val**2)
+    qsnr = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float("inf")
 
     norm_g = np.linalg.norm(g_f64)
     norm_r = np.linalg.norm(r_f64)
@@ -83,7 +86,9 @@ def _action_convert(golden, output, dtype, shape, target_dtype, **kwargs):
     from aidevtools.formats.quantize import quantize
 
     if not golden:
-        logger.error("请指定输入文件: compare convert --golden=a.bin --output=out.bin --target_dtype=float16")
+        logger.error(
+            "请指定输入文件: compare convert --golden=a.bin --output=out.bin --target_dtype=float16"
+        )
         return 1
     if not target_dtype:
         logger.error("请指定目标类型: --target_dtype=float16 (可用: compare qtypes 查看)")
@@ -192,8 +197,13 @@ def cmd_compare(
     # 使用分发表处理 action
     if action in _ACTIONS:
         return _ACTIONS[action](
-            output=output, format=format, golden=golden, result=result,
-            dtype=dtype, shape=shape, target_dtype=target_dtype
+            output=output,
+            format=format,
+            golden=golden,
+            result=result,
+            dtype=dtype,
+            shape=shape,
+            target_dtype=target_dtype,
         )
     if action == "xlsx":
         return _handle_xlsx(subaction, xlsx, output, model, fmt=format, ops_str=ops)
@@ -206,6 +216,7 @@ def cmd_compare(
 def _xlsx_template(xlsx_path, output, model, ops_str, **kwargs):
     from aidevtools.xlsx import create_template
     from aidevtools.xlsx.op_registry import list_ops
+
     out_path = xlsx_path if xlsx_path else f"{output}/{model}_config.xlsx"
     ops_list = parse_list(ops_str) or None
     create_template(out_path, ops=ops_list)
@@ -216,6 +227,7 @@ def _xlsx_template(xlsx_path, output, model, ops_str, **kwargs):
 
 def _xlsx_export(xlsx_path, output, model, **kwargs):
     from aidevtools.xlsx import create_template, export_xlsx
+
     if not xlsx_path:
         xlsx_path = f"{output}/{model}_config.xlsx"
     records = get_records()
@@ -231,6 +243,7 @@ def _xlsx_export(xlsx_path, output, model, **kwargs):
 
 def _xlsx_import(xlsx_path, output, model, **kwargs):
     from aidevtools.xlsx import import_xlsx
+
     if not xlsx_path:
         logger.error("请指定 xlsx 文件: compare xlsx import --xlsx=config.xlsx")
         return 1
@@ -242,6 +255,7 @@ def _xlsx_import(xlsx_path, output, model, **kwargs):
 
 def _xlsx_run(xlsx_path, output, fmt, **kwargs):
     from aidevtools.xlsx import run_xlsx
+
     if not xlsx_path:
         logger.error("请指定 xlsx 文件: compare xlsx run --xlsx=config.xlsx")
         return 1
@@ -256,6 +270,7 @@ def _xlsx_run(xlsx_path, output, fmt, **kwargs):
 
 def _xlsx_ops(**kwargs):
     from aidevtools.xlsx.op_registry import list_ops
+
     print("可用算子:")
     for op in list_ops():
         print(f"  - {op}")
@@ -264,15 +279,22 @@ def _xlsx_ops(**kwargs):
 
 # xlsx 子命令分发表
 _XLSX_ACTIONS = {
-    "template": _xlsx_template, "t": _xlsx_template,
-    "export": _xlsx_export, "e": _xlsx_export,
-    "import": _xlsx_import, "i": _xlsx_import,
-    "run": _xlsx_run, "r": _xlsx_run,
-    "ops": _xlsx_ops, "o": _xlsx_ops,
+    "template": _xlsx_template,
+    "t": _xlsx_template,
+    "export": _xlsx_export,
+    "e": _xlsx_export,
+    "import": _xlsx_import,
+    "i": _xlsx_import,
+    "run": _xlsx_run,
+    "r": _xlsx_run,
+    "ops": _xlsx_ops,
+    "o": _xlsx_ops,
 }
 
 
-def _handle_xlsx(subaction: str, xlsx_path: str, output: str, model: str, fmt: str, ops_str: str) -> int:
+def _handle_xlsx(
+    subaction: str, xlsx_path: str, output: str, model: str, fmt: str, ops_str: str
+) -> int:
     """处理 xlsx 子命令"""
     if subaction in _XLSX_ACTIONS:
         return _XLSX_ACTIONS[subaction](

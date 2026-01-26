@@ -32,6 +32,7 @@ from .base import BasePass, PassContext, PassResult
 @dataclass
 class RooflineMetrics:
     """Roofline 指标"""
+
     flops: int = 0
     total_bytes: int = 0
     arithmetic_intensity: float = 0.0  # FLOPs / Bytes
@@ -48,8 +49,9 @@ class RooflinePass(BasePass):
     order = 100
     config_key = "roofline"
 
-    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
-                context: PassContext = None) -> PassResult:
+    def _do_run(
+        self, latency_breakdown, chip_spec, result: PassResult, context: PassContext = None
+    ) -> PassResult:
         """执行 Roofline 计算"""
         profile = latency_breakdown.profile
 
@@ -78,7 +80,11 @@ class RooflinePass(BasePass):
 
         # 计算算术强度和拐点
         arithmetic_intensity = profile.flops / total_bytes if total_bytes > 0 else 0
-        ridge_point = (peak_tflops * TFLOPS_TO_FLOPS) / (hbm_bandwidth_gbps * GBPS_TO_BPS) if hbm_bandwidth_gbps > 0 else 0
+        ridge_point = (
+            (peak_tflops * TFLOPS_TO_FLOPS) / (hbm_bandwidth_gbps * GBPS_TO_BPS)
+            if hbm_bandwidth_gbps > 0
+            else 0
+        )
 
         # 判断瓶颈
         is_compute_bound = arithmetic_intensity >= ridge_point
@@ -129,10 +135,16 @@ class RooflinePass(BasePass):
 
     # dtype 到属性名的映射
     _DTYPE_MAP = {
-        "fp16": "fp16", "float16": "fp16", "half": "fp16",
-        "bf16": "bf16", "bfloat16": "bf16",
-        "fp32": "fp32", "float32": "fp32", "float": "fp32",
-        "int8": "int8", "int8_t": "int8",
+        "fp16": "fp16",
+        "float16": "fp16",
+        "half": "fp16",
+        "bf16": "bf16",
+        "bfloat16": "bf16",
+        "fp32": "fp32",
+        "float32": "fp32",
+        "float": "fp32",
+        "int8": "int8",
+        "int8_t": "int8",
     }
 
     def _get_cube_tflops(self, chip_spec, dtype: str) -> float:

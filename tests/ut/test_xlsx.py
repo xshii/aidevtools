@@ -242,27 +242,32 @@ class TestXlsxRun:
 
     def test_run_xlsx_simple(self):
         """简单运行测试"""
+        import pytest
         from aidevtools.xlsx import create_template, run_xlsx
         from openpyxl import load_workbook
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         xlsx_path = Path(self.temp_dir) / "test_run.xlsx"
 
         # 创建模板
         create_template(str(xlsx_path), include_examples=False)
 
-        # 手动添加简单用例
+        # 手动添加简单用例 - 使用有 cpu_golden 的 softmax
         wb = load_workbook(xlsx_path)
         ws = wb["ops"]
 
-        # 添加一个 relu 用例
+        # 添加一个 softmax 用例 (有 cpu_golden 实现)
         ws.cell(row=2, column=1, value=0)  # id
-        ws.cell(row=2, column=2, value="relu")  # op_name
+        ws.cell(row=2, column=2, value="softmax")  # op_name
         ws.cell(row=2, column=3, value="1,64")  # shape
         ws.cell(row=2, column=4, value="float32")  # dtype
         ws.cell(row=2, column=5, value="")  # depends
         ws.cell(row=2, column=6, value="")  # qtype
         ws.cell(row=2, column=7, value="FALSE")  # skip
-        ws.cell(row=2, column=8, value="test relu")  # note
+        ws.cell(row=2, column=8, value="test softmax")  # note
 
         wb.save(xlsx_path)
 
@@ -807,12 +812,13 @@ class TestXlsxImportEdgeCases:
         py_path = Path(self.temp_dir) / "all_ops.py"
         code = import_xlsx(str(xlsx_path), str(py_path))
 
-        assert "nn.linear" in code
-        assert "nn.relu" in code
-        assert "nn.softmax" in code
-        assert "nn.matmul" in code
-        assert "nn.add" in code
-        assert "nn.mul" in code
+        # 代码现在使用 F.linear 而非 nn.linear
+        assert "F.linear" in code
+        assert "F.relu" in code
+        assert "F.softmax" in code
+        assert "F.matmul" in code
+        assert "F.add" in code
+        assert "F.mul" in code
         assert "未知算子: unknown_op" in code
         assert py_path.exists()
 

@@ -29,8 +29,9 @@ class CubeVectorParallelPass(BasePass):
     order = 500
     config_key = "cube_vector_parallel"
 
-    def _do_run(self, latency_breakdown, chip_spec, result: PassResult,
-                context: PassContext = None) -> PassResult:
+    def _do_run(
+        self, latency_breakdown, chip_spec, result: PassResult, context: PassContext = None
+    ) -> PassResult:
         """执行 Cube/Vector 并行优化"""
         profile = latency_breakdown.profile
         latency_before = latency_breakdown.timing.roofline_us
@@ -53,7 +54,7 @@ class CubeVectorParallelPass(BasePass):
             result.details = {
                 "reason": "相邻算子使用相同计算单元",
                 "current_unit": current_unit,
-                "adjacent_unit": adjacent_unit
+                "adjacent_unit": adjacent_unit,
             }
             result.latency_before_us = latency_before
             result.latency_after_us = latency_before
@@ -106,6 +107,8 @@ class CubeVectorParallelPass(BasePass):
         compute_time = profile.flops / (tflops * TFLOPS_TO_FLOPS) * S_TO_US if tflops > 0 else 0
 
         bandwidth = chip_spec.memory.hbm.bandwidth_gbps
-        memory_time = profile.total_bytes / (bandwidth * GBPS_TO_BPS) * S_TO_US if bandwidth > 0 else 0
+        memory_time = (
+            profile.total_bytes / (bandwidth * GBPS_TO_BPS) * S_TO_US if bandwidth > 0 else 0
+        )
 
         return max(compute_time, memory_time)

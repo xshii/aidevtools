@@ -23,6 +23,7 @@ from .passes import (
     PassConfig,
     PassContext,
     PassPreset,
+    PassResult,
     RooflinePass,
     TrafficConstraintPass,
 )
@@ -32,6 +33,7 @@ from .profile import OpProfile
 @dataclass
 class SummaryTotals:
     """汇总指标"""
+
     latency_us: float = 0.0
     compute_time_us: float = 0.0
     memory_time_us: float = 0.0
@@ -42,6 +44,7 @@ class SummaryTotals:
 @dataclass
 class BottleneckStats:
     """瓶颈统计"""
+
     compute_bound_ops: int = 0
     memory_bound_ops: int = 0
 
@@ -49,6 +52,7 @@ class BottleneckStats:
 @dataclass
 class OptimizationStats:
     """优化效果统计"""
+
     prefetch_saved_us: float = 0.0
     parallel_saved_us: float = 0.0
     overhead_us: float = 0.0
@@ -57,6 +61,7 @@ class OptimizationStats:
 @dataclass
 class ThroughputStats:
     """吞吐量统计"""
+
     achieved_tflops: float = 0.0
     achieved_bandwidth_gbps: float = 0.0
 
@@ -64,6 +69,7 @@ class ThroughputStats:
 @dataclass
 class UnitStats:
     """计算单元时间统计"""
+
     cube_time_us: float = 0.0
     vector_time_us: float = 0.0
 
@@ -71,6 +77,7 @@ class UnitStats:
 @dataclass
 class TrafficStats:
     """流量统计"""
+
     original_bytes: int = 0
     optimized_bytes: int = 0
     saved_ratio: float = 0.0
@@ -108,10 +115,9 @@ class PaperAnalyzer:
         >>> export_xlsx(result, "report.xlsx")
     """
 
-    def __init__(self,
-                 chip: str = "npu_910",
-                 chip_spec: ChipSpec = None,
-                 pass_config: PassConfig = None):
+    def __init__(
+        self, chip: str = "npu_910", chip_spec: ChipSpec = None, pass_config: PassConfig = None
+    ):
         """
         初始化分析器。
 
@@ -167,7 +173,7 @@ class PaperAnalyzer:
             context = PassContext(
                 next_profile=self._profiles[i + 1] if i + 1 < len(self._profiles) else None,
                 prev_profile=self._profiles[i - 1] if i > 0 else None,
-                future_profiles=self._profiles[i + 1:i + 1 + depth],
+                future_profiles=self._profiles[i + 1 : i + 1 + depth],
             )
 
             # Pass 列表
@@ -217,15 +223,18 @@ class PaperAnalyzer:
             summary.totals.compute_time_us += bd.timing.compute_us
             summary.totals.memory_time_us += bd.timing.memory_us
             summary.totals.flops += bd.profile.flops
-            summary.totals.bytes += (bd.profile.input_bytes + bd.profile.weight_bytes +
-                                     bd.profile.output_bytes)
+            summary.totals.bytes += (
+                bd.profile.input_bytes + bd.profile.weight_bytes + bd.profile.output_bytes
+            )
 
             if bd.bottleneck == "compute":
                 summary.bottleneck.compute_bound_ops += 1
             else:
                 summary.bottleneck.memory_bound_ops += 1
 
-            summary.optimization.prefetch_saved_us += bd.savings.prefetch_us + bd.savings.backward_prefetch_us
+            summary.optimization.prefetch_saved_us += (
+                bd.savings.prefetch_us + bd.savings.backward_prefetch_us
+            )
             summary.optimization.parallel_saved_us += bd.savings.parallel_us
             summary.optimization.overhead_us += bd.timing.overhead_us
 
@@ -235,8 +244,12 @@ class PaperAnalyzer:
                 summary.unit.vector_time_us += bd.timing.roofline_us
 
             # 流量统计
-            original = (bd.profile.input_bytes + bd.profile.weight_bytes +
-                        bd.profile.output_bytes + bd.profile.workspace_bytes)
+            original = (
+                bd.profile.input_bytes
+                + bd.profile.weight_bytes
+                + bd.profile.output_bytes
+                + bd.profile.workspace_bytes
+            )
             summary.traffic.original_bytes += original
             if bd.traffic.optimized_bytes > 0:
                 summary.traffic.optimized_bytes += bd.traffic.optimized_bytes
@@ -250,8 +263,12 @@ class PaperAnalyzer:
 
         # 计算实际吞吐量
         if summary.totals.latency_us > 0:
-            summary.throughput.achieved_tflops = summary.totals.flops / (summary.totals.latency_us * 1e-6) / 1e12
-            summary.throughput.achieved_bandwidth_gbps = summary.totals.bytes / (summary.totals.latency_us * 1e-6) / 1e9
+            summary.throughput.achieved_tflops = (
+                summary.totals.flops / (summary.totals.latency_us * 1e-6) / 1e12
+            )
+            summary.throughput.achieved_bandwidth_gbps = (
+                summary.totals.bytes / (summary.totals.latency_us * 1e-6) / 1e9
+            )
 
         # 流量节省比例
         if summary.traffic.original_bytes > 0:
@@ -328,11 +345,11 @@ class PaperAnalyzer:
             return
 
         s = self._summary
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Paper Analysis Summary - {self.chip_spec.name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Total Operators: {len(self._profiles)}")
-        print(f"Total Latency: {s.totals.latency_us:.2f} us ({s.totals.latency_us/1000:.3f} ms)")
+        print(f"Total Latency: {s.totals.latency_us:.2f} us ({s.totals.latency_us / 1000:.3f} ms)")
         print("\n--- Breakdown ---")
         print(f"Compute Time: {s.totals.compute_time_us:.2f} us")
         print(f"Memory Time: {s.totals.memory_time_us:.2f} us")
@@ -347,16 +364,20 @@ class PaperAnalyzer:
         print(f"Achieved TFLOPS: {s.throughput.achieved_tflops:.2f}")
         print(f"Achieved Bandwidth: {s.throughput.achieved_bandwidth_gbps:.2f} GB/s")
         if s.traffic.effective_bandwidth_gbps > 0:
-            print(f"Effective Bandwidth (contention): {s.traffic.effective_bandwidth_gbps:.2f} GB/s")
+            print(
+                f"Effective Bandwidth (contention): {s.traffic.effective_bandwidth_gbps:.2f} GB/s"
+            )
         print("\n--- Traffic Analysis ---")
-        print(f"Original Traffic: {s.traffic.original_bytes/(1024*1024):.2f} MB")
-        print(f"Optimized Traffic: {s.traffic.optimized_bytes/(1024*1024):.2f} MB")
+        print(f"Original Traffic: {s.traffic.original_bytes / (1024 * 1024):.2f} MB")
+        print(f"Optimized Traffic: {s.traffic.optimized_bytes / (1024 * 1024):.2f} MB")
         if s.traffic.saved_ratio > 0:
-            print(f"Traffic Saved: {s.traffic.saved_ratio*100:.1f}%")
+            print(f"Traffic Saved: {s.traffic.saved_ratio * 100:.1f}%")
         print("\n--- Unit Utilization ---")
-        print(f"Cube Time: {s.unit.cube_time_us:.2f} us ({s.unit.cube_time_us/s.totals.latency_us*100:.1f}%)")
-        print(f"Vector Time: {s.unit.vector_time_us:.2f} us ({s.unit.vector_time_us/s.totals.latency_us*100:.1f}%)")
-        print(f"{'='*60}\n")
+        cube_pct = s.unit.cube_time_us / s.totals.latency_us * 100
+        vec_pct = s.unit.vector_time_us / s.totals.latency_us * 100
+        print(f"Cube Time: {s.unit.cube_time_us:.2f} us ({cube_pct:.1f}%)")
+        print(f"Vector Time: {s.unit.vector_time_us:.2f} us ({vec_pct:.1f}%)")
+        print(f"{'=' * 60}\n")
 
     def to_dataframe(self):
         """转换为 pandas DataFrame"""

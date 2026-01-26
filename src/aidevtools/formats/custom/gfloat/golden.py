@@ -1,7 +1,7 @@
 """GFloat 自定义浮点格式"""
 import numpy as np
 
-from aidevtools.formats.quantize import register_quantize
+from aidevtools.formats._quantize_registry import register_quantize
 
 
 @register_quantize("gfloat16")

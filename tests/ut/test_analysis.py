@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 
 from aidevtools import ops
-from aidevtools.ops.nn import matmul, layernorm, gelu, attention, transpose
+from aidevtools.ops import _functional as F
 
 
 def _profile(op_fn, *args, **kwargs):
@@ -37,7 +37,7 @@ class TestOpProfile:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
 
         assert profile.op_type == "matmul"
         assert profile.compute_unit == "cube"
@@ -50,7 +50,7 @@ class TestOpProfile:
         x = np.zeros((4, 512, 768), dtype=np.float16)
         gamma = np.zeros((768,), dtype=np.float16)
         beta = np.zeros((768,), dtype=np.float16)
-        profile = _profile(layernorm, x, gamma, beta)
+        profile = _profile(F.layernorm, x, gamma, beta)
 
         assert profile.op_type == "layernorm"
         assert profile.compute_unit == "vector"
@@ -63,7 +63,7 @@ class TestOpProfile:
         q = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
         k = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
         v = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-        profile = _profile(attention, q, k, v)
+        profile = _profile(F.attention, q, k, v)
 
         assert profile.op_type == "attention"
         assert profile.compute_unit == "cube"
@@ -72,7 +72,7 @@ class TestOpProfile:
     def test_transpose_profile(self):
         """测试 Transpose profile"""
         x = np.zeros((4, 12, 512, 64), dtype=np.float16)
-        profile = _profile(transpose, x, (0, 2, 1, 3))
+        profile = _profile(F.transpose, x, (0, 2, 1, 3))
 
         assert profile.op_type == "transpose"
         assert profile.memory_pattern == "strided"
@@ -231,7 +231,7 @@ class TestPaperAnalyzer:
         # 添加简单的 matmul
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -254,9 +254,9 @@ class TestPaperAnalyzer:
         beta = np.zeros((768,), dtype=np.float16)
 
         with ops.profile_only():
-            layernorm(x, gamma, beta)
-            matmul(x, w)
-            gelu(x)
+            F.layernorm(x, gamma, beta)
+            F.matmul(x, w)
+            F.gelu(x)
             profiles = ops.get_profiles()
 
         for i, p in enumerate(profiles):
@@ -276,7 +276,7 @@ class TestPaperAnalyzer:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -307,7 +307,7 @@ class TestExport:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -333,7 +333,7 @@ class TestExport:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -363,7 +363,7 @@ class TestExport:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -396,21 +396,21 @@ class TestIntegration:
             x = np.zeros((batch, seq, hidden), dtype=np.float16)
             gamma = np.zeros((hidden,), dtype=np.float16)
             beta = np.zeros((hidden,), dtype=np.float16)
-            layernorm(x, gamma, beta)
+            F.layernorm(x, gamma, beta)
 
             # QKV 投影
             w = np.zeros((hidden, hidden), dtype=np.float16)
             for _ in range(3):  # q, k, v
-                matmul(x, w)
+                F.matmul(x, w)
 
             # Attention
             q = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
             k = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
             v = np.zeros((batch, heads, seq, head_dim), dtype=np.float16)
-            attention(q, k, v)
+            F.attention(q, k, v)
 
             # Output 投影
-            matmul(x, w)
+            F.matmul(x, w)
 
             profiles = ops.get_profiles()
 
@@ -934,7 +934,7 @@ class TestBandwidthPasses:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)
@@ -955,7 +955,7 @@ class TestBandwidthPasses:
 
         a = np.zeros((4, 512, 768), dtype=np.float16)
         b = np.zeros((768, 768), dtype=np.float16)
-        profile = _profile(matmul, a, b)
+        profile = _profile(F.matmul, a, b)
         profile.name = "test_matmul"
 
         analyzer.add_profile(profile)

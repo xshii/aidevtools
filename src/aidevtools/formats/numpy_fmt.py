@@ -5,6 +5,7 @@ from .base import FormatBase
 
 
 class NumpyFormat(FormatBase):
+    """Numpy npy/npz 格式处理器"""
     name = "numpy"
 
     def load(self, path: str, **kwargs) -> np.ndarray:

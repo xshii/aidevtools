@@ -1,17 +1,17 @@
 """算子基础框架
 
 设计说明：
-- 每个算子包含3种计算形式：
-  1. cpu_golden: C++ Golden 实现（子类方法，has_cpp_golden=True 的算子）
-  2. golden_python: Python Golden 实现（子类实现）
-  3. reference: 参考实现（numpy fp32，用于 fuzzy 比对）
+- 每个算子实现 cpu_golden 或 gpu_golden 方法
+- Reference (torch fp16) 由劫持模式 (torch_backend) 提供
 
-- 调用算子时，根据全局配置 golden_mode 选择执行哪种 golden：
-  - golden_mode="cpp": 使用 cpu_golden 方法（如果存在）
-  - golden_mode="python": 使用 golden_python
-
-- reference 始终执行，用于 fuzzy 比对
+工作流：
+1. 使用 torch fp16 生成随机数据
+2. 使用 golden builder 量化数据
+3. 使用 cpu_golden/gpu_golden 计算 golden
+4. 使用 torch fp16 计算 reference (ground truth)
+5. 比对 golden 和 reference
 """
+
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -33,6 +33,7 @@ def fp32_reference(func: Callable) -> Callable:
         def reference(self, x, y):
             return x * y  # 自动 fp32 计算，返回 fp32
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         # 转换位置参数 (跳过 self)
@@ -56,8 +57,8 @@ def fp32_reference(func: Callable) -> Callable:
         if isinstance(result, np.ndarray):
             return result.astype(np.float32)
         return result
-    return wrapper
 
+    return wrapper
 
 
 # Golden 实现注册表 (C++ bindings)
@@ -128,10 +129,12 @@ def register_golden_cpp(name: str) -> Callable[[Callable], Callable]:
         def golden_linear(x, weight, bias=None):
             return cpp_linear(x, weight, bias)
     """
+
     def decorator(func: Callable) -> Callable:
         _golden_cpp_registry[name] = func
         logger.info(f"注册 C++ Golden 实现: {name}")
         return func
+
     return decorator
 
 
@@ -174,8 +177,7 @@ def set_profile_only(enabled: bool) -> None:
         enabled: True=启用 profile-only 模式, False=正常执行模式
 
     Example:
-        from aidevtools import ops
-        from aidevtools.ops.nn import linear, relu
+        from aidevtools import ops, F
 
         # 启用 profile-only 模式
         ops.set_profile_only(True)
@@ -184,8 +186,8 @@ def set_profile_only(enabled: bool) -> None:
         # 定义模型（不执行实际计算）
         x = np.zeros((4, 512, 768), dtype=np.float16)
         w = np.zeros((768, 768), dtype=np.float16)
-        linear(x, w)
-        relu(x)
+        F.linear(x, w)
+        F.relu(x)
 
         # 获取 profiles 用于分析
         profiles = ops.get_profiles()
@@ -211,15 +213,14 @@ class profile_only:
     适用于 Paper Analysis 场景。
 
     Example:
-        from aidevtools import ops
-        from aidevtools.ops.nn import linear, relu
+        from aidevtools import ops, F
         from aidevtools.analysis import PaperAnalyzer
 
         with ops.profile_only():
             x = np.zeros((4, 512, 768), dtype=np.float16)
             w = np.zeros((768, 768), dtype=np.float16)
-            linear(x, w)
-            relu(x)
+            F.linear(x, w)
+            F.relu(x)
             profiles = ops.get_profiles()
 
         # 分析
@@ -311,7 +312,7 @@ def _collect_array_info(param_values: dict, weight_params: set) -> tuple:
 
 def _create_profile(op_name: str, full_name: str, args: tuple, kwargs: dict) -> Optional[Any]:
     """根据算子元信息自动创建 OpProfile"""
-    from aidevtools.ops.registry import get_op_meta
+    from aidevtools.ops._op_registry import get_op_meta
 
     meta = get_op_meta(op_name)
     if meta is None:
@@ -323,11 +324,17 @@ def _create_profile(op_name: str, full_name: str, args: tuple, kwargs: dict) -> 
         return None
 
     param_values = _parse_param_values(args, kwargs, meta.inputs + meta.optional)
-    shapes, dtype, input_bytes, weight_bytes = _collect_array_info(param_values, set(meta.weight_params))
+    shapes, dtype, input_bytes, weight_bytes = _collect_array_info(
+        param_values, set(meta.weight_params)
+    )
 
     # 输出字节数
     first_input = args[0] if args else None
-    output_bytes = np.asarray(first_input).nbytes if first_input is not None and _is_array_like(first_input) else 0
+    output_bytes = (
+        np.asarray(first_input).nbytes
+        if first_input is not None and _is_array_like(first_input)
+        else 0
+    )
 
     # FLOPs
     flops = 0
@@ -338,10 +345,16 @@ def _create_profile(op_name: str, full_name: str, args: tuple, kwargs: dict) -> 
             pass
 
     return OpProfile(
-        name=full_name, op_type=op_name, shapes=shapes, dtype=dtype,
-        flops=int(flops), compute_unit=meta.compute_unit,
-        input_bytes=int(input_bytes), weight_bytes=int(weight_bytes),
-        output_bytes=int(output_bytes), memory_pattern=meta.memory_pattern,
+        name=full_name,
+        op_type=op_name,
+        shapes=shapes,
+        dtype=dtype,
+        flops=int(flops),
+        compute_unit=meta.compute_unit,
+        input_bytes=int(input_bytes),
+        weight_bytes=int(weight_bytes),
+        output_bytes=int(output_bytes),
+        memory_pattern=meta.memory_pattern,
     )
 
 
@@ -351,17 +364,19 @@ class Op:
 
     子类必须实现：
     - name: 算子名称
-    - golden_python(): Python Golden 实现
-    - reference(): 参考实现（用于 fuzzy 比对）
+    - cpu_golden() 或 gpu_golden(): Golden 实现
 
     可选：
-    - 通过 @register_golden_cpp 注册 C++ Golden 实现
+    - compute_flops(): FLOPs 计算
 
-    调用时：
-    1. 根据 golden_mode 执行 golden_cpp 或 golden_python -> 保存为 golden
-    2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
-    3. 返回 golden 的结果（作为数据流）
+    工作流：
+    1. 使用 torch fp16 生成随机数据
+    2. 使用 golden builder 量化数据
+    3. 使用 cpu_golden/gpu_golden 计算 golden
+    4. 使用 torch fp16 计算 reference (ground truth)
+    5. 比对 golden 和 reference
     """
+
     name: str = None  # 算子名，子类必须定义
 
     def __init__(self):
@@ -396,48 +411,51 @@ class Op:
         # 默认返回 0，子类应重写
         return 0
 
-    def golden_python(self, *args, **kwargs) -> np.ndarray:
-        """
-        Python Golden 实现，子类必须实现
-
-        这是 Python 版本的精确实现
-        """
-        raise NotImplementedError(f"{self.name} 未实现 golden_python 方法")
-
-    def reference(self, *args, **kwargs) -> np.ndarray:
-        """
-        参考实现（numpy fp32）
-
-        用于 fuzzy 比对，子类必须实现
-        """
-        raise NotImplementedError(f"{self.name} 未实现 reference 方法")
-
     def cpu_golden(self, *args, **kwargs) -> np.ndarray:
         """
-        C++ Golden 实现，有 has_cpp_golden=True 的子类可实现
+        C++ Golden 实现
+
+        子类必须实现 cpu_golden 或 gpu_golden 之一
         """
-        raise NotImplementedError(f"{self.name} 未实现 cpu_golden 方法")
+        raise NotImplementedError(f"{self.name} 未实现 cpu_golden")
+
+    def gpu_golden(self, *args, **kwargs) -> np.ndarray:
+        """
+        GPU Golden 实现
+
+        子类必须实现 cpu_golden 或 gpu_golden 之一
+        """
+        raise NotImplementedError(f"{self.name} 未实现 gpu_golden")
 
     def _get_golden(self, *args, **kwargs) -> np.ndarray:
         """
-        获取 Golden 输出（根据配置选择 cpp 或 python）
-        """
-        mode = get_golden_mode()
+        获取 Golden 输出
 
-        if mode == "cpp":
-            # 优先使用类方法 cpu_golden
-            if hasattr(self.__class__, 'cpu_golden') and self.__class__.cpu_golden is not Op.cpu_golden:
-                return self.cpu_golden(*args, **kwargs)
-            # 兼容旧的注册方式
-            if has_golden_cpp(self.name):
-                return _golden_cpp_registry[self.name](*args, **kwargs)
-            raise RuntimeError(
-                f"算子 '{self.name}' 没有 C++ Golden 实现，"
-                f"请在算子类中实现 cpu_golden 方法，"
-                f"或设置 set_golden_mode('python') 使用 Python 实现"
-            )
-        else:
-            return self.golden_python(*args, **kwargs)
+        优先级：gpu_golden > cpu_golden > 注册的 C++ golden
+        如果都没有实现，抛出异常
+        """
+        # 优先使用 gpu_golden
+        if (
+            hasattr(self.__class__, "gpu_golden")
+            and self.__class__.gpu_golden is not Op.gpu_golden
+        ):
+            return self.gpu_golden(*args, **kwargs)
+
+        # 其次使用 cpu_golden
+        if (
+            hasattr(self.__class__, "cpu_golden")
+            and self.__class__.cpu_golden is not Op.cpu_golden
+        ):
+            return self.cpu_golden(*args, **kwargs)
+
+        # 兼容旧的注册方式
+        if has_golden_cpp(self.name):
+            return _golden_cpp_registry[self.name](*args, **kwargs)
+
+        raise NotImplementedError(
+            f"算子 '{self.name}' 未实现 golden，"
+            f"请实现 cpu_golden 或 gpu_golden 方法"
+        )
 
     def __call__(self, *args, **kwargs) -> np.ndarray:
         """
@@ -445,10 +463,9 @@ class Op:
 
         执行流程：
         - profile-only 模式: 只生成 profile，不执行计算
-        - 正常模式:
-          1. 如果 compute_golden=True，执行 golden (cpp 或 python) -> 保存为 golden
-          2. 执行 reference -> 保存为 reference（用于 fuzzy 比对）
-          3. 返回 golden 或 reference 的结果
+        - 正常模式: 执行 golden (cpu_golden 或 gpu_golden)
+
+        注意：reference (torch fp16) 由劫持模式 (torch_backend) 提供
         """
         # 计数
         idx = _counter.get(self.name, 0)
@@ -465,15 +482,9 @@ class Op:
             # 返回第一个输入（保持数据流）
             return args[0] if args else None
 
-        # 执行 golden（如果启用）
-        golden_output = None
-        if get_compute_golden():
-            golden_output = self._get_golden(*args, **kwargs)
-            logger.debug(f"{full_name}: golden ({get_golden_mode()}) 执行完成")
-
-        # 执行 reference（用于 fuzzy 比对）
-        ref_output = self.reference(*args, **kwargs)
-        logger.debug(f"{full_name}: reference 执行完成")
+        # 执行 golden
+        golden_output = self._get_golden(*args, **kwargs)
+        logger.debug(f"{full_name}: golden 执行完成")
 
         # 记录
         record = {
@@ -481,8 +492,7 @@ class Op:
             "op": self.name,
             "input": args[0] if args else None,
             "weight": args[1] if len(args) > 1 else kwargs.get("weight"),
-            "golden": golden_output,      # golden 输出（cpp 或 python），可能为 None
-            "reference": ref_output,      # 高精度参考（用于 fuzzy 比对）
+            "golden": golden_output,
         }
         _records.append(record)
 
@@ -493,17 +503,33 @@ class Op:
                 _profiles.append(profile)
                 logger.debug(f"{full_name}: profile 生成完成")
 
-        # 返回结果：优先 golden，否则 reference
-        return golden_output if golden_output is not None else ref_output
+        return golden_output
 
     def __repr__(self):
         has_cpp = "✓" if has_golden_cpp(self.name) else "✗"
         return f"<Op {self.name} cpp={has_cpp}>"
 
 
+# ============================================================
+# 辅助函数 (供 registry.py 使用，避免循环导入)
+# ============================================================
+
+
+def is_compute_flops_overridden(cls: type) -> bool:
+    """检查类是否重写了 compute_flops 方法"""
+    return hasattr(cls, "compute_flops") and cls.compute_flops is not Op.compute_flops
+
+
+def is_cpu_golden_overridden(cls: type) -> bool:
+    """检查类是否重写了 cpu_golden 方法"""
+    return hasattr(cls, "cpu_golden") and cls.cpu_golden is not Op.cpu_golden
+
+
 def _is_array_like(obj: Any) -> bool:
     """检查是否为数组类型"""
-    return isinstance(obj, np.ndarray) or (hasattr(obj, '__array__') and not isinstance(obj, (dict, list)))
+    return isinstance(obj, np.ndarray) or (
+        hasattr(obj, "__array__") and not isinstance(obj, (dict, list))
+    )
 
 
 def dump(output_dir: str = "./workspace", fmt: str = "raw") -> None:
@@ -528,15 +554,12 @@ def dump(output_dir: str = "./workspace", fmt: str = "raw") -> None:
     for r in _records:
         name = r["name"]
         # 保存 golden
-        if r["golden"] is not None and _is_array_like(r["golden"]):
+        if r.get("golden") is not None and _is_array_like(r["golden"]):
             save_data(str(path / f"{name}_golden.bin"), np.asarray(r["golden"]), fmt=fmt)
-        # 保存 reference
-        if r["reference"] is not None and _is_array_like(r["reference"]):
-            save_data(str(path / f"{name}_reference.bin"), np.asarray(r["reference"]), fmt=fmt)
         # 保存输入
-        if r["input"] is not None and _is_array_like(r["input"]):
+        if r.get("input") is not None and _is_array_like(r["input"]):
             save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), fmt=fmt)
         # 保存权重
-        if r["weight"] is not None and _is_array_like(r["weight"]):
+        if r.get("weight") is not None and _is_array_like(r["weight"]):
             save_data(str(path / f"{name}_weight.bin"), np.asarray(r["weight"]), fmt=fmt)
         logger.info(f"dump: {name}")

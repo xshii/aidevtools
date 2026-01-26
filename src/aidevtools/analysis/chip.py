@@ -145,7 +145,6 @@ _BUILTIN_CHIPS: Dict[str, ChipSpec] = {}
 
 def _init_builtin_chips():
     """初始化内置芯片配置"""
-    global _BUILTIN_CHIPS
 
     # NPU 310
     _BUILTIN_CHIPS["npu_310"] = ChipSpec(
@@ -347,7 +346,7 @@ def load_chip_spec(chip_name: str) -> ChipSpec:
 
 def _load_chip_from_yaml(path: Path) -> ChipSpec:
     """从 YAML 文件加载芯片配置"""
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
     # 构建 ChipSpec
@@ -427,5 +426,3 @@ def _parse_size(value) -> int:
 def list_chips() -> list:
     """列出所有可用芯片"""
     return list(_BUILTIN_CHIPS.keys())
-
-

@@ -1,98 +1,86 @@
 #!/usr/bin/env python
 """基础算子示例
 
-演示 PyTorch 风格的 functional API。
+演示通过 PyTorch 劫持使用 golden 实现。
 
 用法:
-    from aidevtools import F
-    y = F.linear(x, weight, bias)
-    y = F.relu(y)
+    import aidevtools.golden  # 导入即启用劫持
+
+    import torch.nn.functional as F
+    y = F.linear(x, w)  # 自动走 golden
 """
-import numpy as np
 import sys
 from pathlib import Path
+
+import torch
 
 # 添加 src 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from aidevtools import F, ops
-from aidevtools.ops import get_records
+import aidevtools.golden as golden  # noqa: E402  # 导入即启用劫持
+from aidevtools import ops  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
 
 
 def main():
     print("=" * 60)
-    print("基础算子 Golden 示例 (PyTorch 风格 API)")
+    print("基础算子 Golden 示例 (PyTorch 劫持模式)")
     print("=" * 60)
 
     # 清空之前的记录
-    ops.clear()
+    golden.clear()
 
     # 1. Linear
     print("\n[1] Linear: y = x @ W.T + b")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
+    x = torch.randn(2, 4, 64)
     # PyTorch 格式: weight [out_features, in_features]
-    w = np.random.randn(128, 64).astype(np.float32)
-    b = np.random.randn(128).astype(np.float32)
+    w = torch.randn(128, 64)
+    b = torch.randn(128)
     y = F.linear(x, w, b)
     print(f"    input: {x.shape}, weight: {w.shape} -> output: {y.shape}")
 
     # 2. ReLU
     print("\n[2] ReLU: y = max(0, x)")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
+    x = torch.randn(2, 4, 64)
     y = F.relu(x)
     print(f"    input: {x.shape} -> output: {y.shape}")
-    print(f"    负值数量: {np.sum(x < 0)} -> {np.sum(y < 0)}")
+    print(f"    负值数量: {(x < 0).sum().item()} -> {(y < 0).sum().item()}")
 
     # 3. GELU
     print("\n[3] GELU")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
+    x = torch.randn(2, 4, 64)
     y = F.gelu(x)
     print(f"    input: {x.shape} -> output: {y.shape}")
 
     # 4. Softmax
     print("\n[4] Softmax")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
+    x = torch.randn(2, 4, 64)
     y = F.softmax(x, dim=-1)
     print(f"    input: {x.shape} -> output: {y.shape}")
-    print(f"    sum(dim=-1): {y.sum(axis=-1)[0, 0]:.6f} (should be 1.0)")
+    print(f"    sum(dim=-1): {y.sum(dim=-1)[0, 0].item():.6f} (should be 1.0)")
 
-    # 5. LayerNorm
+    # 5. LayerNorm (需要 normalized_shape)
     print("\n[5] LayerNorm")
-    x = np.random.randn(2, 4, 64).astype(np.float32)
+    x = torch.randn(2, 4, 64)
     y = F.layer_norm(x, normalized_shape=(64,))
     print(f"    input: {x.shape} -> output: {y.shape}")
-    print(f"    mean: {y.mean():.6f}, std: {y.std():.6f}")
+    print(f"    mean: {y.mean().item():.6f}, std: {y.std().item():.6f}")
 
     # 6. Attention
     print("\n[6] Scaled Dot-Product Attention")
-    q = np.random.randn(2, 4, 8, 64).astype(np.float32)  # [B, H, L, D]
-    k = np.random.randn(2, 4, 8, 64).astype(np.float32)
-    v = np.random.randn(2, 4, 8, 64).astype(np.float32)
+    q = torch.randn(2, 4, 8, 64)  # [B, H, L, D]
+    k = torch.randn(2, 4, 8, 64)
+    v = torch.randn(2, 4, 8, 64)
     y = F.scaled_dot_product_attention(q, k, v)
     print(f"    Q: {q.shape}, K: {k.shape}, V: {v.shape} -> output: {y.shape}")
 
-    # 7. Embedding
-    print("\n[7] Embedding")
-    input_ids = np.array([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=np.int64)
-    embed_table = np.random.randn(100, 64).astype(np.float32)
-    y = F.embedding(input_ids, embed_table)
-    print(f"    input_ids: {input_ids.shape}, table: {embed_table.shape} -> output: {y.shape}")
-
-    # 导出
+    # 打印报告
     print("\n" + "=" * 60)
-    print("导出 Golden 数据")
+    print("Golden 比对报告")
     print("=" * 60)
+    golden.report()
 
-    output_dir = Path(__file__).parent / "workspace"
-    ops.dump(str(output_dir), format="raw")
-
-    records = get_records()
-    print(f"\n共记录 {len(records)} 个算子:")
-    for r in records:
-        print(f"  - {r['name']}")
-
-    print(f"\n输出目录: {output_dir}")
-    print("完成!")
+    print("\n完成!")
 
 
 if __name__ == "__main__":

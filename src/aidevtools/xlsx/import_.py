@@ -2,12 +2,14 @@
 
 从 xlsx 解析配置并生成 Python 代码。
 """
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 try:
     from openpyxl import load_workbook
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -23,48 +25,52 @@ def _check_openpyxl():
 
 def _gen_linear(lines, indent, cfg, shape, dtype, depends, input_var):
     """生成 linear 算子代码"""
+    in_dim = shape[-1] if shape else 64
     if not depends:
-        lines.append(f'{indent}w_{cfg.id} = np.random.randn({shape[-1] if shape else 64}, 256).astype(np.{dtype})')
-        lines.append(f'{indent}out_{cfg.id} = nn.linear({input_var}, w_{cfg.id})')
+        lines.append(f"{indent}w_{cfg.id} = np.random.randn({in_dim}, 256).astype(np.{dtype})")
     else:
-        lines.append(f'{indent}w_{cfg.id} = np.random.randn({input_var}.shape[-1], 256).astype(np.{dtype})')
-        lines.append(f'{indent}out_{cfg.id} = nn.linear({input_var}, w_{cfg.id})')
+        lines.append(
+            f"{indent}w_{cfg.id} = np.random.randn({input_var}.shape[-1], 256).astype(np.{dtype})"
+        )
+    lines.append(f"{indent}out_{cfg.id} = F.linear({input_var}, w_{cfg.id})")
 
 
 def _gen_matmul(lines, indent, cfg, shape, dtype, depends, input_var):
     """生成 matmul 算子代码"""
     if len(depends) >= 2:
         keys = list(depends.keys())
-        lines.append(f'{indent}out_{cfg.id} = nn.matmul({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})')
+        lines.append(f"{indent}out_{cfg.id} = F.matmul({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})")
     else:
+        dim = shape[-1] if shape else 64
         if not depends:
-            lines.append(f'{indent}b_{cfg.id} = np.random.randn({shape[-1] if shape else 64}, {shape[-1] if shape else 64}).astype(np.{dtype})')
+            lines.append(f"{indent}b_{cfg.id} = np.random.randn({dim}, {dim}).astype(np.{dtype})")
         else:
-            lines.append(f'{indent}b_{cfg.id} = np.random.randn({input_var}.shape[-1], {input_var}.shape[-1]).astype(np.{dtype})')
-        lines.append(f'{indent}out_{cfg.id} = nn.matmul({input_var}, b_{cfg.id})')
+            d = f"{input_var}.shape[-1]"
+            lines.append(f"{indent}b_{cfg.id} = np.random.randn({d}, {d}).astype(np.{dtype})")
+        lines.append(f"{indent}out_{cfg.id} = F.matmul({input_var}, b_{cfg.id})")
 
 
 def _gen_attention(lines, indent, cfg, depends, input_var):
     """生成 attention 算子代码"""
     if "q" in depends and "k" in depends and "v" in depends:
-        lines.append(f'{indent}out_{cfg.id} = nn.attention(q_{cfg.id}, k_{cfg.id}, v_{cfg.id})')
+        lines.append(f"{indent}out_{cfg.id} = F.attention(q_{cfg.id}, k_{cfg.id}, v_{cfg.id})")
     else:
-        lines.append(f'{indent}# attention 需要 q, k, v 三个输入')
-        lines.append(f'{indent}out_{cfg.id} = {input_var}  # placeholder')
+        lines.append(f"{indent}# attention 需要 q, k, v 三个输入")
+        lines.append(f"{indent}out_{cfg.id} = {input_var}  # placeholder")
 
 
 def _gen_binary_op(lines, indent, cfg, op_name, depends, input_var):
     """生成二元算子代码 (add, mul)"""
     if len(depends) >= 2:
         keys = list(depends.keys())
-        lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})')
+        lines.append(f"{indent}out_{cfg.id} = F.{op_name}({keys[0]}_{cfg.id}, {keys[1]}_{cfg.id})")
     else:
-        lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({input_var}, {input_var})')
+        lines.append(f"{indent}out_{cfg.id} = F.{op_name}({input_var}, {input_var})")
 
 
 def _gen_unary_op(lines, indent, cfg, op_name, input_var):
     """生成一元算子代码 (relu, softmax 等)"""
-    lines.append(f'{indent}out_{cfg.id} = nn.{op_name}({input_var})')
+    lines.append(f"{indent}out_{cfg.id} = F.{op_name}({input_var})")
 
 
 def _generate_op_call(lines, indent, cfg, op_name, shape, dtype, depends, input_var):
@@ -85,23 +91,25 @@ def _generate_op_call(lines, indent, cfg, op_name, shape, dtype, depends, input_
     elif op_name in unary_ops:
         _gen_unary_op(lines, indent, cfg, op_name, input_var)
     else:
-        lines.append(f'{indent}# 未知算子: {op_name}')
-        lines.append(f'{indent}out_{cfg.id} = {input_var}  # placeholder')
+        lines.append(f"{indent}# 未知算子: {op_name}")
+        lines.append(f"{indent}out_{cfg.id} = {input_var}  # placeholder")
 
 
 @dataclass
 class BinaryPaths:
     """二进制文件路径配置"""
-    golden: str = ""   # golden 文件路径（留空=自动生成）
-    result: str = ""   # result 文件路径
-    input: str = ""    # input 文件路径
-    weight: str = ""   # weight 文件路径
+
+    golden: str = ""  # golden 文件路径（留空=自动生成）
+    result: str = ""  # result 文件路径
+    input: str = ""  # input 文件路径
+    weight: str = ""  # weight 文件路径
     sim_cmd: str = ""  # 仿真命令，支持占位符
 
 
 @dataclass
 class OpConfig:
     """算子配置 (使用组合模式)"""
+
     id: int
     op_name: str
     shape: Tuple[int, ...]
@@ -279,24 +287,24 @@ def import_xlsx(xlsx_path: str, output_py: Optional[str] = None) -> str:
     # 生成代码
     lines = [
         '"""自动生成的算子测试代码',
-        '',
-        f'从 xlsx 配置生成: {Path(xlsx_path).name}',
+        "",
+        f"从 xlsx 配置生成: {Path(xlsx_path).name}",
         '"""',
-        'import numpy as np',
-        'from aidevtools.ops import nn',
-        'from aidevtools.ops.base import clear, dump, gen_csv',
-        '',
-        '',
-        'def run():',
+        "import numpy as np",
+        "from aidevtools.ops import _functional as F",
+        "from aidevtools.ops.base import clear, dump, gen_csv",
+        "",
+        "",
+        "def run():",
         '    """执行算子测试"""',
-        '    clear()  # 清空之前的记录',
-        '    outputs = {}  # 保存各步骤的输出',
-        '',
+        "    clear()  # 清空之前的记录",
+        "    outputs = {}  # 保存各步骤的输出",
+        "",
     ]
 
     for config in op_configs:
         if config.skip:
-            lines.append(f'    # [SKIP] {config.op_name} (id={config.id})')
+            lines.append(f"    # [SKIP] {config.op_name} (id={config.id})")
             continue
 
         indent = "    "
@@ -309,43 +317,51 @@ def import_xlsx(xlsx_path: str, output_py: Optional[str] = None) -> str:
 
         # 生成注释
         if config.note:
-            lines.append(f'{indent}# {config.note}')
+            lines.append(f"{indent}# {config.note}")
 
         # 生成输入
         if not depends:
             # 无依赖，随机输入
             shape_str = ", ".join(str(d) for d in shape) if shape else "1, 64"
-            lines.append(f'{indent}x_{config.id} = np.random.randn({shape_str}).astype(np.{dtype})')
+            lines.append(f"{indent}x_{config.id} = np.random.randn({shape_str}).astype(np.{dtype})")
             input_var = f"x_{config.id}"
         else:
             # 有依赖
             input_vars = []
             for name, deps in depends.items():
                 for dep_id in deps:
-                    lines.append(f'{indent}{name}_{config.id} = outputs[{dep_id}]')
+                    lines.append(f"{indent}{name}_{config.id} = outputs[{dep_id}]")
                     input_vars.append(f"{name}_{config.id}")
-            input_var = ", ".join(input_vars) if len(input_vars) > 1 else input_vars[0] if input_vars else f"x_{config.id}"
+            input_var = (
+                ", ".join(input_vars)
+                if len(input_vars) > 1
+                else input_vars[0]
+                if input_vars
+                else f"x_{config.id}"
+            )
 
             # 生成算子调用
         _generate_op_call(lines, indent, config, op_name, shape, dtype, depends, input_var)
 
         # 保存输出
-        lines.append(f'{indent}outputs[{config.id}] = out_{config.id}')
-        lines.append('')
+        lines.append(f"{indent}outputs[{config.id}] = out_{config.id}")
+        lines.append("")
 
     # 生成导出代码
-    lines.extend([
-        '    # 导出结果',
-        '    dump("./workspace")',
-        '    csv_path = gen_csv("./workspace", "generated")',
-        '    print(f"生成 compare 配置: {csv_path}")',
-        '    return outputs',
-        '',
-        '',
-        'if __name__ == "__main__":',
-        '    run()',
-        '',
-    ])
+    lines.extend(
+        [
+            "    # 导出结果",
+            '    dump("./workspace")',
+            '    csv_path = gen_csv("./workspace", "generated")',
+            '    print(f"生成 compare 配置: {csv_path}")',
+            "    return outputs",
+            "",
+            "",
+            'if __name__ == "__main__":',
+            "    run()",
+            "",
+        ]
+    )
 
     code = "\n".join(lines)
 

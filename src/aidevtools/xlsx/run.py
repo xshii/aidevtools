@@ -2,6 +2,7 @@
 
 从 xlsx 配置运行比对流程。
 """
+
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -10,6 +11,7 @@ import numpy as np
 
 try:
     import openpyxl  # noqa: F401  # pylint: disable=unused-import
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -56,7 +58,9 @@ def _run_sim_cmd(
     golden_bin = config.paths.golden or str(output_dir / f"{name}_golden.bin")
     result_bin = config.paths.result or str(output_dir / f"{name}_result.bin")
     input_bin = config.paths.input or (str(output_dir / f"{name}_input.bin") if has_input else "")
-    weight_bin = config.paths.weight or (str(output_dir / f"{name}_weight.bin") if has_weight else "")
+    weight_bin = config.paths.weight or (
+        str(output_dir / f"{name}_weight.bin") if has_weight else ""
+    )
 
     # 替换占位符
     cmd = sim_cmd.format(
@@ -77,6 +81,7 @@ def _run_sim_cmd(
             capture_output=True,
             text=True,
             timeout=300,  # 5 分钟超时
+            check=False,  # 手动检查 returncode
         )
 
         if result.returncode != 0:
@@ -90,6 +95,7 @@ def _run_sim_cmd(
         result_path = Path(result_bin)
         if result_path.exists():
             from aidevtools.formats.base import load as load_data
+
             data = load_data(result_bin)
             logger.info(f"仿真结果: {result_bin}, shape={data.shape}")
             return data
@@ -106,13 +112,17 @@ def _run_sim_cmd(
         return None
 
 
-def _get_binary_paths(config: "OpConfig", output_dir: Path, name: str, has_input: bool, has_weight: bool) -> dict:
+def _get_binary_paths(
+    config: "OpConfig", output_dir: Path, name: str, has_input: bool, has_weight: bool
+) -> dict:
     """获取 binary 路径（优先使用配置中的自定义路径）"""
     return {
         "golden_bin": config.paths.golden or str(output_dir / f"{name}_golden.bin"),
         "result_bin": config.paths.result or str(output_dir / f"{name}_result.bin"),
-        "input_bin": config.paths.input or (str(output_dir / f"{name}_input.bin") if has_input else ""),
-        "weight_bin": config.paths.weight or (str(output_dir / f"{name}_weight.bin") if has_weight else ""),
+        "input_bin": config.paths.input
+        or (str(output_dir / f"{name}_input.bin") if has_input else ""),
+        "weight_bin": config.paths.weight
+        or (str(output_dir / f"{name}_weight.bin") if has_weight else ""),
     }
 
 
@@ -193,7 +203,9 @@ def _compare_record(record: Dict, idx: int, out_path: Path) -> Dict[str, Any]:
     res["cosine"] = f"{diff.cosine:.6f}"
 
     # compare_isclose
-    isclose = compare_isclose(np.asarray(golden), np.asarray(result), atol=1e-4, rtol=1e-2, max_exceed_ratio=0.01)
+    isclose = compare_isclose(
+        np.asarray(golden), np.asarray(result), atol=1e-4, rtol=1e-2, max_exceed_ratio=0.01
+    )
     res["isclose_pass"] = "PASS" if isclose.passed else "FAIL"
     res["exceed_count"] = str(isclose.exceed_count)
     res["exceed_ratio"] = f"{isclose.exceed_ratio:.4%}"
@@ -279,58 +291,64 @@ def _get_input(inputs: Dict[str, np.ndarray], key: str = "x") -> np.ndarray:
     return inputs.get(key, list(inputs.values())[0])
 
 
-def _exec_linear(inputs, config, dtype, nn):
+def _exec_linear(inputs, config, dtype, F_module):
     x = _get_input(inputs)
     out_features = config.shape[-1] if config.shape else 256
-    weight = np.random.randn(x.shape[-1], out_features).astype(dtype)
-    return nn.linear(x, weight)
+    # PyTorch 格式: weight [out_features, in_features]
+    weight = np.random.randn(out_features, x.shape[-1]).astype(dtype)
+    return F_module.linear(x, weight)
 
 
-def _exec_matmul(inputs, _config, dtype, nn):
+def _exec_matmul(inputs, _config, dtype, F_module):
     if len(inputs) >= 2:
         keys = list(inputs.keys())
-        return nn.matmul(inputs[keys[0]], inputs[keys[1]])
+        return F_module.matmul(inputs[keys[0]], inputs[keys[1]])
     x = _get_input(inputs)
     b = np.random.randn(x.shape[-1], x.shape[-1]).astype(dtype)
-    return nn.matmul(x, b)
+    return F_module.matmul(x, b)
 
 
-def _exec_attention(inputs, _config, _dtype, nn):
+def _exec_attention(inputs, _config, _dtype, F_module):
     q, k, v = inputs.get("q"), inputs.get("k"), inputs.get("v")
     if q is not None and k is not None and v is not None:
-        return nn.attention(q, k, v)
+        return F_module.attention(q, k, v)
     x = _get_input(inputs)
-    return nn.attention(x, x, x)
+    return F_module.attention(x, x, x)
 
 
 def _exec_binary_op(op_func):
     """创建二元算子执行器"""
-    def executor(inputs, _config, _dtype, _nn):
+
+    def executor(inputs, _config, _dtype, _F):
         if len(inputs) >= 2:
             keys = list(inputs.keys())
             return op_func(inputs[keys[0]], inputs[keys[1]])
         x = _get_input(inputs)
         return op_func(x, x)
+
     return executor
 
 
-def _exec_layernorm(inputs, _config, dtype, nn):
+def _exec_layernorm(inputs, _config, dtype, F_module):
     x = _get_input(inputs)
     gamma = np.ones(x.shape[-1], dtype=dtype)
     beta = np.zeros(x.shape[-1], dtype=dtype)
-    return nn.layernorm(x, gamma, beta)
+    # PyTorch 风格签名: layernorm(input, normalized_shape, weight, bias, eps)
+    return F_module.layernorm(x, normalized_shape=(x.shape[-1],), weight=gamma, bias=beta)
 
 
 def _exec_unary(op_name):
     """创建一元算子执行器"""
-    def executor(inputs, _config, _dtype, nn):
-        return getattr(nn, op_name)(_get_input(inputs))
+
+    def executor(inputs, _config, _dtype, F_module):
+        return getattr(F_module, op_name)(_get_input(inputs))
+
     return executor
 
 
 def _execute_op(config: OpConfig, inputs: Dict[str, np.ndarray]) -> np.ndarray:
     """执行单个算子 - 使用分发表"""
-    from aidevtools.ops import nn
+    from aidevtools.ops import _functional as F_module
 
     op_name = config.op_name
     dtype = getattr(np, config.dtype, np.float32)
@@ -340,8 +358,8 @@ def _execute_op(config: OpConfig, inputs: Dict[str, np.ndarray]) -> np.ndarray:
         "linear": _exec_linear,
         "matmul": _exec_matmul,
         "attention": _exec_attention,
-        "add": _exec_binary_op(nn.add),
-        "mul": _exec_binary_op(nn.mul),
+        "add": _exec_binary_op(F_module.add),
+        "mul": _exec_binary_op(F_module.mul),
         "layernorm": _exec_layernorm,
         "relu": _exec_unary("relu"),
         "softmax": _exec_unary("softmax"),
@@ -352,10 +370,10 @@ def _execute_op(config: OpConfig, inputs: Dict[str, np.ndarray]) -> np.ndarray:
     }
 
     if op_name in executors:
-        return executors[op_name](inputs, config, dtype, nn)
+        return executors[op_name](inputs, config, dtype, F_module)
 
     # 尝试动态调用
-    if hasattr(nn, op_name):
-        return getattr(nn, op_name)(_get_input(inputs))
+    if hasattr(F_module, op_name):
+        return getattr(F_module, op_name)(_get_input(inputs))
 
     raise ValueError(f"未知算子: {op_name}")

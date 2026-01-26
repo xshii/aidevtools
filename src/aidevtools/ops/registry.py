@@ -32,47 +32,10 @@ auto_gen 策略说明:
     - "xavier:in_dim,out_dim": Xavier 初始化，需要指定输入输出维度
     - "same:param": 与另一个参数相同 shape
 """
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
 from aidevtools.core.log import logger
-
-# ============================================================
-# 算子元信息
-# ============================================================
-
-@dataclass
-class OpMeta:
-    """算子元信息"""
-    name: str
-    inputs: List[str] = field(default_factory=lambda: ["x"])
-    optional: List[str] = field(default_factory=list)
-    description: str = ""
-    has_cpp_golden: bool = False
-    # auto API 参数生成配置
-    auto_gen: Dict[str, str] = field(default_factory=dict)
-    # 算子类引用 (运行时填充)
-    op_class: Optional[Type] = None
-    # 算子实例 (运行时填充)
-    op_instance: Optional[Any] = None
-
-    # ============================================================
-    # Profile 相关配置 (用于 Paper Analysis)
-    # ============================================================
-    compute_unit: str = "vector"     # "cube" | "vector"
-    memory_pattern: str = "sequential"  # "sequential" | "strided" | "random"
-    # FLOPs 计算函数: flops_fn(shapes) -> int
-    # shapes 是从输入推断的形状字典
-    flops_fn: Optional[Callable] = None
-    # 权重参数名 (用于区分 input_bytes 和 weight_bytes)
-    weight_params: List[str] = field(default_factory=list)
-
-
-# ============================================================
-# 全局注册表
-# ============================================================
-
-_op_registry: Dict[str, OpMeta] = {}
+from aidevtools.ops._op_registry import OpMeta, _op_registry
 
 
 def register_op(
@@ -140,10 +103,10 @@ def register_op(
 
         # 如果没有提供 flops_fn，检查类是否有自定义的 compute_flops 方法
         actual_flops_fn = flops_fn
-        if actual_flops_fn is None and hasattr(cls, 'compute_flops'):
+        if actual_flops_fn is None:
             # 检查是否是自定义实现（不是基类的默认实现）
-            from aidevtools.ops.base import Op
-            if cls.compute_flops is not Op.compute_flops:
+            from aidevtools.ops.base import is_compute_flops_overridden
+            if is_compute_flops_overridden(cls):
                 actual_flops_fn = cls.compute_flops
 
         # 创建元信息
@@ -263,18 +226,14 @@ def check_cpp_golden_registered() -> Dict[str, bool]:
         status = check_cpp_golden_registered()
         # {'matmul': True, 'softmax': True, 'layernorm': True, ...}
     """
-    from aidevtools.ops.base import Op
+    from aidevtools.ops.base import is_cpu_golden_overridden
 
     result = {}
     for name in get_cpp_golden_ops():
         meta = _op_registry.get(name)
         if meta and meta.op_class:
             # 检查类是否实现了 cpu_golden 方法
-            has_method = (
-                hasattr(meta.op_class, 'cpu_golden') and
-                meta.op_class.cpu_golden is not Op.cpu_golden
-            )
-            result[name] = has_method
+            result[name] = is_cpu_golden_overridden(meta.op_class)
         else:
             result[name] = False
     return result

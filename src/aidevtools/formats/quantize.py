@@ -3,36 +3,12 @@ from typing import Callable, Dict
 
 import numpy as np
 
-# 量化类型注册表
-_quantize_registry: Dict[str, Callable] = {}
-
-
-def register_quantize(name: str):
-    """
-    注册量化转换函数
-
-    示例:
-        @register_quantize("int8_symmetric")
-        def to_int8_symmetric(data: np.ndarray, **kwargs) -> np.ndarray:
-            scale = np.max(np.abs(data)) / 127
-            return np.round(data / scale).astype(np.int8), {"scale": scale}
-    """
-    def decorator(func: Callable):
-        _quantize_registry[name] = func
-        return func
-    return decorator
-
-
-def get_quantize(name: str) -> Callable:
-    """获取量化函数"""
-    if name not in _quantize_registry:
-        raise ValueError(f"未知量化类型: {name}, 可用: {list(_quantize_registry.keys())}")
-    return _quantize_registry[name]
-
-
-def list_quantize() -> list:
-    """列出所有注册的量化类型"""
-    return list(_quantize_registry.keys())
+# 从注册表模块导入 (避免循环导入)
+from aidevtools.formats._quantize_registry import (
+    get_quantize,
+    list_quantize as list_quantize,
+    register_quantize,
+)
 
 
 def quantize(data: np.ndarray, qtype: str, **kwargs) -> tuple:
@@ -198,6 +174,5 @@ def generate_fake_dut(
     return dut_quantized
 
 
-# 导入自定义格式以触发注册
-from aidevtools.formats.custom import gfloat as _gfloat  # noqa: F401
-from aidevtools.formats.custom.bfp import golden as _bfp_golden  # noqa: F401
+# 注意: 自定义格式的注册已移至 formats/__init__.py
+# 这样可以避免循环导入 (quantize <-> gfloat/bfp golden)

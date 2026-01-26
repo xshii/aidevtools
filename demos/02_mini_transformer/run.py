@@ -3,18 +3,19 @@
 
 演示完整的 golden 生成与比对流程：
 1. 使用 PyTorch 风格 F API 定义算子序列
-2. 执行 cpp golden (via subprocess) 和 reference (pure fp32)
+2. 执行 cpu_golden (via subprocess)
 3. 构造假的 DUT 数据（模拟 bfp 格式处理）
-4. 三列比对：exact / fuzzy_pure / fuzzy_qnt
+4. 比对 golden 与 DUT
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 import numpy as np
-from aidevtools import F, ops
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records
-from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+from aidevtools.tools.compare.diff import compare_full
 from aidevtools.formats.quantize import generate_fake_dut
 
 # 设置 cpu golden dtype 并使用 cpp golden
@@ -24,7 +25,7 @@ ops.set_golden_mode("cpp")
 
 
 def run_model():
-    """运行模型，返回每层的 golden 和 reference"""
+    """运行模型，返回每层的 golden"""
     ops.seed(42)
     ops.clear()
 
@@ -58,9 +59,7 @@ def main():
 
     # 1. 运行模型
     print("\n[1] 运行模型 (MatMul -> LayerNorm -> Softmax)")
-    print("    框架自动执行:")
-    print("    - reference: fp32 计算 (用于 fuzzy_pure)")
-    print("    - golden: cpp golden via subprocess (用于 fuzzy_qnt)")
+    print("    框架执行 cpu_golden via subprocess")
     records = run_model()
 
     for r in records:
@@ -68,28 +67,23 @@ def main():
 
     # 2. 生成假的 DUT 数据
     print("\n[2] 生成假的 DUT 数据 (模拟 bfp8 格式处理)")
-    print("    流程: reference -> bfp8 量化/反量化 -> 加小噪声")
+    print("    流程: golden -> bfp8 量化/反量化 -> 加小噪声")
     np.random.seed(123)
     dut_outputs = []
     for r in records:
-        dut = generate_fake_dut(r["reference"], qtype="bfp8", noise_level=0.001)
+        # 使用 golden 作为基准生成假 DUT
+        dut = generate_fake_dut(r["golden"], qtype="bfp8", noise_level=0.001)
         dut_outputs.append(dut)
         print(f"    {r['name']}: dut={dut.shape}")
 
     # 3. 使用框架比对工具
-    print("\n[3] 比对 (使用框架 compare_3col)")
-    results = []
+    print("\n[3] 比对 (golden vs DUT)")
+    print(f"    {'Op':15} {'Max Abs':>12} {'QSNR':>10} {'Cosine':>10} {'Status':>8}")
+    print("    " + "-" * 60)
     for i, r in enumerate(records):
-        result = compare_3col(
-            op_name=r["op"],
-            op_id=i,
-            result=dut_outputs[i],
-            golden_pure=r["reference"],
-            golden_qnt=r["golden"],
-        )
-        results.append(result)
-
-    print_compare_table(results)
+        diff = compare_full(r["golden"], dut_outputs[i])
+        status = "PASS" if diff.passed else "FAIL"
+        print(f"    {r['name']:15} {diff.max_abs:12.6e} {diff.qsnr:10.2f} {diff.cosine:10.6f} {status:>8}")
 
     # 4. 导出 bin
     print("[4] 导出 bin 文件")

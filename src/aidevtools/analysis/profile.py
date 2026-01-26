@@ -57,7 +57,3 @@ class OpProfile:
     def __repr__(self):
         return (f"OpProfile({self.name}, flops={self.flops/1e9:.2f}G, "
                 f"bytes={self.total_bytes/1e6:.1f}MB, AI={self.arithmetic_intensity:.1f})")
-
-
-
-

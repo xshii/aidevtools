@@ -1,4 +1,5 @@
 """模糊比对支持"""
+
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -81,7 +82,7 @@ class FuzzyCase:
             # 保存 meta 信息
             if meta:
                 meta_path = self.output_dir / f"input_{name}.meta"
-                with open(meta_path, "w") as f:
+                with open(meta_path, "w", encoding="utf-8") as f:
                     for k, v in meta.items():
                         f.write(f"{k}={v}\n")
 
@@ -96,7 +97,7 @@ class FuzzyCase:
 
             if meta:
                 meta_path = self.output_dir / f"weight_{name}.meta"
-                with open(meta_path, "w") as f:
+                with open(meta_path, "w", encoding="utf-8") as f:
                     for k, v in meta.items():
                         f.write(f"{k}={v}\n")
 
@@ -108,8 +109,12 @@ class FuzzyCase:
         """导出用例信息"""
         return {
             "name": self.name,
-            "inputs": {k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in self.inputs.items()},
-            "weights": {k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in self.weights.items()},
+            "inputs": {
+                k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in self.inputs.items()
+            },
+            "weights": {
+                k: {"shape": list(v.shape), "dtype": str(v.dtype)} for k, v in self.weights.items()
+            },
             "golden_shape": list(self.golden.shape) if self.golden is not None else None,
         }
 

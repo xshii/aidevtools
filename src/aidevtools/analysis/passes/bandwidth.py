@@ -156,7 +156,7 @@ class TrafficConstraintPass(BasePass):
         budget_mode = self.config.traffic.budget_mode
 
         # 检查是否超限
-        over_budget = max_traffic > 0 and total_traffic > max_traffic
+        over_budget = 0 < max_traffic < total_traffic
         over_ratio = total_traffic / max_traffic if max_traffic > 0 else 0
 
         result.latency_before_us = latency_before

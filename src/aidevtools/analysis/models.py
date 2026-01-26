@@ -25,6 +25,7 @@ import numpy as np
 def _run_ops_model(model_fn):
     """运行模型函数，返回自动生成的 profiles"""
     from aidevtools.ops import clear, get_profiles
+
     clear()
     model_fn()
     return get_profiles()
@@ -58,8 +59,8 @@ def transformer_layer(
     Example:
         profiles = transformer_layer(batch=4, seq=512, hidden=768, num_heads=12)
     """
-    from aidevtools.ops.nn import add, attention, gelu, layernorm, linear, silu
-    from aidevtools.ops.nn import relu as relu_op
+    from aidevtools.ops._functional import add, attention, gelu, layernorm, linear, silu
+    from aidevtools.ops._functional import relu as relu_op
 
     ffn_h = ffn_hidden or hidden * 4
     head_dim = hidden // num_heads
@@ -132,7 +133,7 @@ def llama_layer(
     Returns:
         List[OpProfile]
     """
-    from aidevtools.ops.nn import add, attention, linear, mul, rmsnorm, silu
+    from aidevtools.ops._functional import add, attention, linear, mul, rmsnorm, silu
 
     ffn_h = ffn_hidden or int(hidden * 8 / 3 / 256) * 256
     kv_heads = num_kv_heads or num_heads
@@ -188,9 +189,13 @@ def gpt2_layer(
 ) -> List:
     """创建 GPT-2 style Layer 的 profiles"""
     return transformer_layer(
-        batch=batch, seq=seq, hidden=hidden,
-        num_heads=num_heads, ffn_hidden=ffn_hidden or hidden * 4,
-        dtype=dtype, activation="gelu"
+        batch=batch,
+        seq=seq,
+        hidden=hidden,
+        num_heads=num_heads,
+        ffn_hidden=ffn_hidden or hidden * 4,
+        dtype=dtype,
+        activation="gelu",
     )
 
 
@@ -204,9 +209,13 @@ def bert_layer(
 ) -> List:
     """创建 BERT style Layer 的 profiles"""
     return transformer_layer(
-        batch=batch, seq=seq, hidden=hidden,
-        num_heads=num_heads, ffn_hidden=ffn_hidden or hidden * 4,
-        dtype=dtype, activation="gelu"
+        batch=batch,
+        seq=seq,
+        hidden=hidden,
+        num_heads=num_heads,
+        ffn_hidden=ffn_hidden or hidden * 4,
+        dtype=dtype,
+        activation="gelu",
     )
 
 
@@ -220,9 +229,13 @@ def vit_layer(
 ) -> List:
     """创建 ViT (Vision Transformer) Layer 的 profiles"""
     return transformer_layer(
-        batch=batch, seq=seq, hidden=hidden,
-        num_heads=num_heads, ffn_hidden=ffn_hidden or hidden * 4,
-        dtype=dtype, activation="gelu"
+        batch=batch,
+        seq=seq,
+        hidden=hidden,
+        num_heads=num_heads,
+        ffn_hidden=ffn_hidden or hidden * 4,
+        dtype=dtype,
+        activation="gelu",
     )
 
 
@@ -233,16 +246,19 @@ MODEL_CONFIGS = {
     "gpt2-medium": {"hidden": 1024, "num_heads": 16, "ffn_hidden": 4096, "seq": 1024},
     "gpt2-large": {"hidden": 1280, "num_heads": 20, "ffn_hidden": 5120, "seq": 1024},
     "gpt2-xl": {"hidden": 1600, "num_heads": 25, "ffn_hidden": 6400, "seq": 1024},
-
     # BERT 系列
     "bert-base": {"hidden": 768, "num_heads": 12, "ffn_hidden": 3072, "seq": 512},
     "bert-large": {"hidden": 1024, "num_heads": 16, "ffn_hidden": 4096, "seq": 512},
-
     # LLaMA 系列
     "llama-7b": {"hidden": 4096, "num_heads": 32, "ffn_hidden": 11008, "seq": 2048},
     "llama-13b": {"hidden": 5120, "num_heads": 40, "ffn_hidden": 13824, "seq": 2048},
-    "llama-70b": {"hidden": 8192, "num_heads": 64, "ffn_hidden": 28672, "seq": 4096, "num_kv_heads": 8},
-
+    "llama-70b": {
+        "hidden": 8192,
+        "num_heads": 64,
+        "ffn_hidden": 28672,
+        "seq": 4096,
+        "num_kv_heads": 8,
+    },
     # ViT 系列
     "vit-base": {"hidden": 768, "num_heads": 12, "ffn_hidden": 3072, "seq": 197},
     "vit-large": {"hidden": 1024, "num_heads": 16, "ffn_hidden": 4096, "seq": 197},

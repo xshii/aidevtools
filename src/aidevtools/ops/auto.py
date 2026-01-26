@@ -2,14 +2,14 @@
 
 提供 seed, clear, dump 等工具函数。
 
-算子 API 请使用 PyTorch 风格:
-    from aidevtools import F
+推荐用法 - 通过 PyTorch 劫持:
+    import aidevtools.golden  # 导入即启用劫持
 
-    y = F.linear(x, weight, bias)
-    y = F.relu(y)
-    y = F.softmax(y, dim=-1)
+    import torch.nn.functional as F
+    y = F.linear(x, w)  # 自动走 golden
 """
 import numpy as np
+import torch
 
 from aidevtools.ops.base import (
     clear as _clear,
@@ -23,10 +23,11 @@ _seed: int = 42
 
 
 def seed(s: int) -> None:
-    """设置随机种子"""
+    """设置随机种子 (numpy + torch)"""
     global _seed  # pylint: disable=global-statement
     _seed = s
     np.random.seed(s)
+    torch.manual_seed(s)
 
 
 def get_seed() -> int:

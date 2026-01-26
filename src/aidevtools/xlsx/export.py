@@ -2,12 +2,14 @@
 
 从 trace 记录导出到 xlsx，保留已有的结果列。
 """
+
 from pathlib import Path
 from typing import Any, Dict, List
 
 try:
     from openpyxl import load_workbook
     from openpyxl.styles import Border, Font, PatternFill, Side
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -43,7 +45,12 @@ def _get_xlsx_styles():
     """获取 xlsx 样式"""
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
     return header_font, header_fill, thin_border
 
 
@@ -71,7 +78,7 @@ def _write_ops_sheet(wb, records: List[Dict], header_font, header_fill, border):
         if output is None:
             output = record.get("output")
         shape_str, dtype_str = "", ""
-        if output is not None and hasattr(output, 'shape'):
+        if output is not None and hasattr(output, "shape"):
             arr = np.asarray(output)
             shape_str = ",".join(str(d) for d in arr.shape)
             dtype_str = str(arr.dtype)
@@ -81,9 +88,21 @@ def _write_ops_sheet(wb, records: List[Dict], header_font, header_fill, border):
             ws.cell(row=row, column=col, value=val).border = border
 
 
-def _write_compare_sheet(wb, records: List[Dict], existing_data: Dict, header_font, header_fill, border):
+def _write_compare_sheet(
+    wb, records: List[Dict], existing_data: Dict, header_font, header_fill, border
+):
     """写入 compare sheet"""
-    compare_headers = ["id", "op_name", "status", "max_abs", "qsnr", "cosine", "golden_bin", "result_bin", "note"]
+    compare_headers = [
+        "id",
+        "op_name",
+        "status",
+        "max_abs",
+        "qsnr",
+        "cosine",
+        "golden_bin",
+        "result_bin",
+        "note",
+    ]
     compare_keys = ["status", "max_abs", "qsnr", "cosine", "golden_bin", "result_bin", "note"]
 
     if "compare" in wb.sheetnames:
@@ -115,12 +134,17 @@ def export_xlsx(
     _check_openpyxl()
 
     output_path = Path(output_path)
-    existing_data = _load_existing_compare_data(output_path) if preserve_results and output_path.exists() else {}
+    existing_data = (
+        _load_existing_compare_data(output_path)
+        if preserve_results and output_path.exists()
+        else {}
+    )
 
     if output_path.exists():
         wb = load_workbook(output_path)
     else:
         from aidevtools.xlsx.template import create_template
+
         create_template(str(output_path), include_examples=False)
         wb = load_workbook(output_path)
 
@@ -183,7 +207,16 @@ def update_compare_results(
     fail_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
     # 普通字段列表 (直接更新值)
-    value_fields = ["max_abs", "qsnr", "cosine", "golden_bin", "result_bin", "note", "exceed_count", "exceed_ratio"]
+    value_fields = [
+        "max_abs",
+        "qsnr",
+        "cosine",
+        "golden_bin",
+        "result_bin",
+        "note",
+        "exceed_count",
+        "exceed_ratio",
+    ]
     # 状态字段列表 (需要应用样式)
     status_fields = ["status", "isclose_pass"]
 

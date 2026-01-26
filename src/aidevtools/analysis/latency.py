@@ -14,34 +14,38 @@ if TYPE_CHECKING:
 @dataclass
 class TimingMetrics:
     """时延指标"""
-    compute_us: float = 0.0       # 计算时延
-    memory_us: float = 0.0        # 访存时延
-    roofline_us: float = 0.0      # Roofline 时延 = max(compute, memory)
-    overhead_us: float = 0.0      # 开销（启动、tiling等）
-    total_us: float = 0.0         # 最终时延
+
+    compute_us: float = 0.0  # 计算时延
+    memory_us: float = 0.0  # 访存时延
+    roofline_us: float = 0.0  # Roofline 时延 = max(compute, memory)
+    overhead_us: float = 0.0  # 开销（启动、tiling等）
+    total_us: float = 0.0  # 最终时延
 
 
 @dataclass
 class OptimizationSavings:
     """优化节省"""
-    prefetch_us: float = 0.0           # 前向预取节省
+
+    prefetch_us: float = 0.0  # 前向预取节省
     backward_prefetch_us: float = 0.0  # 后向预取节省
-    parallel_us: float = 0.0           # 并行节省
+    parallel_us: float = 0.0  # 并行节省
 
 
 @dataclass
 class BandwidthMetrics:
     """带宽指标"""
-    min_gbps: float = 0.0          # 最低带宽需求
-    headroom: float = 0.0          # 带宽余量
-    effective_gbps: float = 0.0    # 有效带宽 (考虑并发竞争)
+
+    min_gbps: float = 0.0  # 最低带宽需求
+    headroom: float = 0.0  # 带宽余量
+    effective_gbps: float = 0.0  # 有效带宽 (考虑并发竞争)
 
 
 @dataclass
 class TrafficMetrics:
     """流量指标"""
-    original_bytes: int = 0        # 原始流量
-    optimized_bytes: int = 0       # 优化后流量 (L2复用/Tiling后)
+
+    original_bytes: int = 0  # 原始流量
+    optimized_bytes: int = 0  # 优化后流量 (L2复用/Tiling后)
 
 
 @dataclass
@@ -57,7 +61,7 @@ class LatencyBreakdown:
     traffic: TrafficMetrics = field(default_factory=TrafficMetrics)
 
     # === 瓶颈分析 ===
-    bottleneck: str = "memory"     # "compute" | "memory"
+    bottleneck: str = "memory"  # "compute" | "memory"
 
     # === 额外信息 ===
     details: Dict[str, Any] = field(default_factory=dict)
@@ -85,6 +89,7 @@ class LatencyBreakdown:
 @dataclass
 class ResultTotals:
     """结果汇总"""
+
     latency_us: float = 0.0
     flops: int = 0
     memory_bytes: int = 0
@@ -93,7 +98,8 @@ class ResultTotals:
 @dataclass
 class PipelineEffects:
     """流水效果"""
-    serial_latency_us: float = 0.0     # 串行时延（无优化）
+
+    serial_latency_us: float = 0.0  # 串行时延（无优化）
     prefetch_saved_us: float = 0.0
     parallel_saved_us: float = 0.0
 
@@ -101,6 +107,7 @@ class PipelineEffects:
 @dataclass
 class UtilizationMetrics:
     """利用率指标"""
+
     compute: float = 0.0
     bandwidth: float = 0.0
 
@@ -111,8 +118,8 @@ class LatencyResult:
 
     # 芯片信息
     chip_name: str = ""
-    chip_spec: Optional['ChipSpec'] = None
-    pass_config: Optional['PassConfig'] = None
+    chip_spec: Optional["ChipSpec"] = None
+    pass_config: Optional["PassConfig"] = None
 
     # 算子时延 (主字段)
     breakdowns: List[LatencyBreakdown] = field(default_factory=list)
@@ -123,9 +130,9 @@ class LatencyResult:
     utilization: UtilizationMetrics = field(default_factory=UtilizationMetrics)
 
     # === 其他 ===
-    summary: Optional['AnalysisSummary'] = None
-    pass_results: List['PassResult'] = field(default_factory=list)
-    gantt_data: Optional['GanttData'] = None
+    summary: Optional["AnalysisSummary"] = None
+    pass_results: List["PassResult"] = field(default_factory=list)
+    gantt_data: Optional["GanttData"] = None
 
     def compute_summary(self):
         """计算汇总数据"""
@@ -133,7 +140,9 @@ class LatencyResult:
         self.totals.flops = sum(op.profile.flops for op in ops)
         self.totals.memory_bytes = sum(op.profile.total_bytes for op in ops)
         self.totals.latency_us = sum(op.timing.total_us for op in ops)
-        self.pipeline.serial_latency_us = sum(op.timing.roofline_us + op.timing.overhead_us for op in ops)
+        self.pipeline.serial_latency_us = sum(
+            op.timing.roofline_us + op.timing.overhead_us for op in ops
+        )
         self.pipeline.prefetch_saved_us = sum(
             op.savings.prefetch_us + op.savings.backward_prefetch_us for op in ops
         )
@@ -153,11 +162,12 @@ class GanttItem:
         label: 显示标签
         color: 颜色代码 (十六进制)
     """
+
     op_name: str
-    unit: str = ""             # "cube" | "vector" | "dma"
+    unit: str = ""  # "cube" | "vector" | "dma"
     start_us: float = 0.0
     end_us: float = 0.0
-    category: str = ""         # "execution" | "prefetch" | "parallel"
+    category: str = ""  # "execution" | "prefetch" | "parallel"
     label: str = ""
     color: str = ""
 
@@ -176,6 +186,7 @@ class GanttData:
         total_duration_us: 总持续时间 (微秒)
         chip_name: 芯片名称
     """
+
     items: List[GanttItem] = field(default_factory=list)
     total_duration_us: float = 0.0
     chip_name: str = ""

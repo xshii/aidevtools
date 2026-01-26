@@ -3,9 +3,10 @@
 Transformer 模型时延分析 Demo
 
 演示如何使用 PyTorch 风格 F API 定义模型，自动生成 OpProfile 进行 Paper Analysis。
+注意: 仅使用有 cpu_golden 实现的算子 (matmul, softmax, layernorm, transpose, linear)
 
 使用方式:
-1. 调用 F.linear, F.layer_norm, F.gelu 等算子
+1. 调用 F.matmul, F.layer_norm, F.softmax 等有 cpu_golden 的算子
 2. 调用 ops.get_profiles() 获取自动生成的 profiles
 3. 使用 PaperAnalyzer 分析时延
 
@@ -19,7 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aidevtools import F, ops
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 from aidevtools.analysis import (
     PaperAnalyzer,
     PassConfig,
@@ -70,8 +72,12 @@ def transformer_layer_ops(
     k = k.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
     v = v.reshape(batch, seq, num_heads, head_dim).transpose(0, 2, 1, 3)
 
-    # Attention
-    attn_out = F.scaled_dot_product_attention(q, k, v)
+    # Attention (分解为 matmul + softmax，因为 attention 没有 cpu_golden)
+    # Q @ K^T / sqrt(d_k)
+    k_t = np.swapaxes(k, -2, -1)
+    attn_scores = F.matmul(q, k_t) / np.sqrt(head_dim)
+    attn_weights = F.softmax(attn_scores, dim=-1)
+    attn_out = F.matmul(attn_weights, v)
 
     # Reshape back
     attn_out = attn_out.transpose(0, 2, 1, 3).reshape(batch, seq, hidden)
@@ -94,8 +100,8 @@ def transformer_layer_ops(
     w_ffn1 = np.random.randn(hidden, ffn_hidden).astype(np.float32) * 0.02
     h = F.matmul(x_norm, w_ffn1)
 
-    # GELU
-    h = F.gelu(h)
+    # Activation (使用 softmax 代替 GELU，因为 GELU 没有 cpu_golden)
+    h = F.softmax(h, dim=-1)
 
     # FFN2: ffn_hidden -> hidden
     w_ffn2 = np.random.randn(ffn_hidden, hidden).astype(np.float32) * 0.02

@@ -8,13 +8,10 @@ class TestExportFailedCases:
 
     def test_export_failed_blocks(self, tmp_path):
         """导出低 QSNR 片段"""
-        from aidevtools.tools.compare.export import export_failed_cases
+        from aidevtools.tools.compare.export import ExportConfig, export_failed_cases
 
         # 创建测试数据
         golden = np.arange(1024, dtype=np.float32)
-        result = golden.copy()
-        # 在某些位置加入较大误差
-        result[256:512] += 10.0
 
         # 模拟 blocks 结果
         blocks = [
@@ -23,11 +20,12 @@ class TestExportFailedCases:
             {"offset": 2048, "size": 1024, "qsnr": 45.0, "max_abs": 1e-5, "passed": True},
         ]
 
-        exported = export_failed_cases(
-            golden, result, blocks,
-            str(tmp_path), "test_op",
+        config = ExportConfig(
+            output_dir=str(tmp_path),
+            op_name="test_op",
             qsnr_threshold=20.0
         )
+        exported = export_failed_cases(golden, blocks, config)
 
         assert exported == 1  # 只导出 1 个低于阈值的
 
@@ -42,47 +40,47 @@ class TestExportFailedCases:
         assert len(json_files) == 1
 
         # 验证 json 内容
-        with open(json_files[0]) as f:
+        with open(json_files[0], encoding="utf-8") as f:
             param = json.load(f)
             assert param["op_name"] == "test_op"
             assert param["qsnr"] == 10.0
 
     def test_export_no_failed(self, tmp_path):
         """无失败用例时不导出"""
-        from aidevtools.tools.compare.export import export_failed_cases
+        from aidevtools.tools.compare.export import ExportConfig, export_failed_cases
 
         golden = np.arange(100, dtype=np.float32)
-        result = golden.copy()
 
         blocks = [
             {"offset": 0, "size": 400, "qsnr": 50.0, "max_abs": 0, "passed": True},
         ]
 
-        exported = export_failed_cases(
-            golden, result, blocks,
-            str(tmp_path), "test_op",
+        config = ExportConfig(
+            output_dir=str(tmp_path),
+            op_name="test_op",
             qsnr_threshold=20.0
         )
+        exported = export_failed_cases(golden, blocks, config)
 
         assert exported == 0
 
     def test_export_multiple_failed(self, tmp_path):
         """多个失败片段"""
-        from aidevtools.tools.compare.export import export_failed_cases
+        from aidevtools.tools.compare.export import ExportConfig, export_failed_cases
 
         golden = np.arange(1000, dtype=np.float32)
-        result = golden + 5.0  # 全部有误差
 
         blocks = [
             {"offset": i * 100, "size": 100, "qsnr": 5.0, "max_abs": 5.0, "passed": False}
             for i in range(10)
         ]
 
-        exported = export_failed_cases(
-            golden, result, blocks,
-            str(tmp_path), "test_op",
+        config = ExportConfig(
+            output_dir=str(tmp_path),
+            op_name="test_op",
             qsnr_threshold=20.0
         )
+        exported = export_failed_cases(golden, blocks, config)
 
         assert exported == 10
 

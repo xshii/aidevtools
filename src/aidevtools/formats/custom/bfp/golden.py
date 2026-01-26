@@ -6,11 +6,12 @@ BFP 将数据分块，每块共享一个指数，每个元素只存尾数。
 - AMD Quark BFP16: https://quark.docs.amd.com/latest/onnx/tutorial_bfp16_quantization.html
 - Static BFP CNN: https://github.com/os-hxfan/Static_BFP_CNN
 """
+
 from typing import Tuple
 
 import numpy as np
 
-from aidevtools.formats.quantize import register_quantize
+from aidevtools.formats._quantize_registry import register_quantize
 
 
 def _compute_shared_exponent(data: np.ndarray, block_size: int) -> np.ndarray:
@@ -38,7 +39,9 @@ def _compute_shared_exponent(data: np.ndarray, block_size: int) -> np.ndarray:
     return shared_exp, blocks, pad_len
 
 
-def fp32_to_bfp(data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8) -> Tuple[np.ndarray, np.ndarray, dict]:
+def fp32_to_bfp(
+    data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8
+) -> Tuple[np.ndarray, np.ndarray, dict]:
     """
     fp32 -> Block Floating Point
 
@@ -84,9 +87,13 @@ def fp32_to_bfp(data: np.ndarray, block_size: int = 16, mantissa_bits: int = 8) 
     return mantissas_flat, shared_exp_flat, meta
 
 
-def bfp_to_fp32(mantissas: np.ndarray, shared_exps: np.ndarray,
-               block_size: int = 16, mantissa_bits: int = 8,
-               original_shape: tuple = None) -> np.ndarray:
+def bfp_to_fp32(
+    mantissas: np.ndarray,
+    shared_exps: np.ndarray,
+    block_size: int = 16,
+    mantissa_bits: int = 8,
+    original_shape: tuple = None,
+) -> np.ndarray:
     """
     Block Floating Point -> fp32
 
@@ -136,6 +143,7 @@ _BFP_FORMATS = [
 
 def _make_bfp_quantizer(default_block_size: int, mantissa_bits: int):
     """生成 BFP 量化函数"""
+
     def quantizer(data: np.ndarray, **kwargs) -> Tuple[np.ndarray, dict]:
         block_size = kwargs.get("block_size", default_block_size)
         mantissas, shared_exps, meta = fp32_to_bfp(
@@ -143,6 +151,7 @@ def _make_bfp_quantizer(default_block_size: int, mantissa_bits: int):
         )
         packed = np.concatenate([shared_exps.astype(np.int8), mantissas.astype(np.int8)])
         return packed, meta
+
     return quantizer
 
 

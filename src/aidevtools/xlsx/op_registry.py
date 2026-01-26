@@ -3,12 +3,12 @@
 从统一注册表 (ops.registry) 获取算子信息。
 为了向后兼容，保留原有 API。
 
-注意：算子定义现在集中在 ops/nn.py，使用 @register_op 装饰器。
+注意：算子定义现在集中在 ops/_functional.py，使用 @register_op 装饰器。
 """
 from typing import Any, Dict
 
-# 导入 nn 模块以触发算子注册
-from aidevtools.ops import nn as _nn  # noqa: F401
+# 导入 _functional 模块以触发算子注册
+from aidevtools.ops import _functional  # noqa: F401
 
 # 从统一注册表导入
 from aidevtools.ops.registry import (
@@ -17,7 +17,7 @@ from aidevtools.ops.registry import (
     validate_op,
 )
 
-# 额外的算子定义（不在 nn.py 中实现的）
+# 额外的算子定义（不在 _functional.py 中实现的）
 # 这些算子仅用于 xlsx 模板，可能没有对应的 Python 实现
 _extra_ops: Dict[str, Dict[str, Any]] = {
     "conv2d": {
