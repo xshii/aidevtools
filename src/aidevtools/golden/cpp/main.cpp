@@ -37,6 +37,14 @@ void print_usage(const char* prog) {
               << "  " << prog << " softmax <dtype> <input.bin> <output.bin> <batch> <seq>\n"
               << "  " << prog << " layernorm <dtype> <input.bin> <gamma.bin> <beta.bin> <output.bin> <batch> <hidden>\n"
               << "  " << prog << " transpose <dtype> <input.bin> <output.bin> <d0> <d1> <d2> <d3>\n"
+              << "  " << prog << " relu <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " gelu <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " sigmoid <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " tanh <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " silu <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " add <dtype> <a.bin> <b.bin> <c.bin> <size>\n"
+              << "  " << prog << " mul <dtype> <a.bin> <b.bin> <c.bin> <size>\n"
+              << "  " << prog << " div <dtype> <a.bin> <b.bin> <c.bin> <size>\n"
               << "\n"
               << "dtype: gfp4, gfp8, gfp16 (or gfloat4, gfloat8, gfloat16, 4, 8, 16)\n"
               << "\n"
@@ -44,7 +52,10 @@ void print_usage(const char* prog) {
               << "  " << prog << " matmul gfp16 a.bin b.bin c.bin 64 128 256\n"
               << "  " << prog << " softmax gfp8 input.bin output.bin 4 64\n"
               << "  " << prog << " layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256\n"
-              << "  " << prog << " transpose gfp16 x.bin y.bin 2 4 8 32\n";
+              << "  " << prog << " transpose gfp16 x.bin y.bin 2 4 8 32\n"
+              << "  " << prog << " relu gfp16 x.bin y.bin 1024\n"
+              << "  " << prog << " gelu gfp16 x.bin y.bin 1024\n"
+              << "  " << prog << " add gfp16 a.bin b.bin c.bin 1024\n";
 }
 
 int run_matmul(int argc, char* argv[]) {
@@ -255,6 +266,80 @@ int run_transpose(int argc, char* argv[]) {
     return 0;
 }
 
+// ==================== 激活函数通用模板 ====================
+
+template<void (*activation_fn)(const float*, float*, size_t)>
+int run_activation(int argc, char* argv[], const char* op_name) {
+    if (argc < 6) {
+        std::cerr << "Error: " << op_name << " requires 4 arguments\n";
+        return 1;
+    }
+
+    GFloatType dtype = parse_gfloat_type(argv[2]);
+    std::string input_path = argv[3];
+    std::string output_path = argv[4];
+    size_t size = std::stoull(argv[5]);
+
+    std::cerr << "[cpu_golden] " << op_name << ": " << gfloat_type_to_string(dtype)
+              << " [" << size << "]\n";
+
+    auto input_fp32 = load_gfloat_as_fp32(input_path, dtype);
+
+    if (input_fp32.size() < size) {
+        std::cerr << "Error: input.bin size mismatch\n";
+        return 1;
+    }
+
+    std::vector<float> output_fp32(size);
+    activation_fn(input_fp32.data(), output_fp32.data(), size);
+
+    if (!save_as_gfloat(output_fp32.data(), size, output_path, dtype)) {
+        std::cerr << "Error: failed to save output\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden] " << op_name << " done: " << output_path << "\n";
+    return 0;
+}
+
+// ==================== 逐元素运算通用模板 ====================
+
+template<void (*elementwise_fn)(const float*, const float*, float*, size_t)>
+int run_elementwise(int argc, char* argv[], const char* op_name) {
+    if (argc < 7) {
+        std::cerr << "Error: " << op_name << " requires 5 arguments\n";
+        return 1;
+    }
+
+    GFloatType dtype = parse_gfloat_type(argv[2]);
+    std::string a_path = argv[3];
+    std::string b_path = argv[4];
+    std::string c_path = argv[5];
+    size_t size = std::stoull(argv[6]);
+
+    std::cerr << "[cpu_golden] " << op_name << ": " << gfloat_type_to_string(dtype)
+              << " [" << size << "]\n";
+
+    auto a_fp32 = load_gfloat_as_fp32(a_path, dtype);
+    auto b_fp32 = load_gfloat_as_fp32(b_path, dtype);
+
+    if (a_fp32.size() < size || b_fp32.size() < size) {
+        std::cerr << "Error: input size mismatch\n";
+        return 1;
+    }
+
+    std::vector<float> c_fp32(size);
+    elementwise_fn(a_fp32.data(), b_fp32.data(), c_fp32.data(), size);
+
+    if (!save_as_gfloat(c_fp32.data(), size, c_path, dtype)) {
+        std::cerr << "Error: failed to save output\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden] " << op_name << " done: " << c_path << "\n";
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -274,6 +359,24 @@ int main(int argc, char* argv[]) {
             return run_layernorm(argc, argv);
         } else if (op == "transpose") {
             return run_transpose(argc, argv);
+        // 激活函数
+        } else if (op == "relu") {
+            return run_activation<relu_fp32>(argc, argv, "relu");
+        } else if (op == "gelu") {
+            return run_activation<gelu_fp32>(argc, argv, "gelu");
+        } else if (op == "sigmoid") {
+            return run_activation<sigmoid_fp32>(argc, argv, "sigmoid");
+        } else if (op == "tanh") {
+            return run_activation<tanh_fp32>(argc, argv, "tanh");
+        } else if (op == "silu") {
+            return run_activation<silu_fp32>(argc, argv, "silu");
+        // 逐元素运算
+        } else if (op == "add") {
+            return run_elementwise<add_fp32>(argc, argv, "add");
+        } else if (op == "mul") {
+            return run_elementwise<mul_fp32>(argc, argv, "mul");
+        } else if (op == "div") {
+            return run_elementwise<div_fp32>(argc, argv, "div");
         } else if (op == "-h" || op == "--help" || op == "help") {
             print_usage(argv[0]);
             return 0;

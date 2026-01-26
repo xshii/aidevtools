@@ -33,7 +33,13 @@ class TestRegisterOp:
         assert meta is not None
         assert meta.has_cpp_golden is True
 
+        # relu 现在也有 cpp golden
         meta = get_op_meta("relu")
+        assert meta is not None
+        assert meta.has_cpp_golden is True
+
+        # batchnorm 没有 cpp golden
+        meta = get_op_meta("batchnorm")
         assert meta is not None
         assert meta.has_cpp_golden is False
 
@@ -135,8 +141,17 @@ class TestCppGoldenIntegration:
         assert "softmax" in cpp_ops
         assert "layernorm" in cpp_ops
         assert "transpose" in cpp_ops
-        # relu 没有 C++ golden
-        assert "relu" not in cpp_ops
+        # 激活函数和逐元素运算现在也有 C++ golden
+        assert "relu" in cpp_ops
+        assert "gelu" in cpp_ops
+        assert "sigmoid" in cpp_ops
+        assert "tanh" in cpp_ops
+        assert "silu" in cpp_ops
+        assert "add" in cpp_ops
+        assert "mul" in cpp_ops
+        assert "div" in cpp_ops
+        # batchnorm 没有 C++ golden
+        assert "batchnorm" not in cpp_ops
 
     def test_check_cpp_golden_registered(self):
         """检查 C++ golden 注册状态 (检查类是否有 cpu_golden 方法)"""

@@ -134,6 +134,7 @@ class Linear(Op):
 @register_op(
     inputs=["x"],
     description="ReLU 激活 y = max(0, x)",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class ReLU(Op):
@@ -144,6 +145,24 @@ class ReLU(Op):
     @staticmethod
     def compute_flops(s):
         return s.get("x_size", 0)
+
+    def cpu_golden(self, x: np.ndarray, inplace: bool = False) -> np.ndarray:  # pylint: disable=unused-argument
+        dtype = get_cpu_golden_dtype()
+        x = np.asarray(x, dtype=np.float32)
+        original_shape = x.shape
+        size = x.size
+
+        y = run_cpu_golden(
+            op_name="relu",
+            cmd_args=["relu", dtype, "@input.bin", "@output", str(size)],
+            inputs={"input.bin": (x.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return y.reshape(original_shape)
 
     def torch_reference(self, x: np.ndarray, inplace: bool = False) -> np.ndarray:
         """Torch Reference: relu"""
@@ -158,6 +177,7 @@ class ReLU(Op):
 @register_op(
     inputs=["x"],
     description="GELU 激活 (近似)",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class GELU(Op):
@@ -168,6 +188,24 @@ class GELU(Op):
     @staticmethod
     def compute_flops(s):
         return 10 * s.get("x_size", 0)
+
+    def cpu_golden(self, x: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        x = np.asarray(x, dtype=np.float32)
+        original_shape = x.shape
+        size = x.size
+
+        y = run_cpu_golden(
+            op_name="gelu",
+            cmd_args=["gelu", dtype, "@input.bin", "@output", str(size)],
+            inputs={"input.bin": (x.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return y.reshape(original_shape)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: gelu"""
@@ -182,6 +220,7 @@ class GELU(Op):
 @register_op(
     inputs=["x"],
     description="Sigmoid 激活 y = 1 / (1 + exp(-x))",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class Sigmoid(Op):
@@ -192,6 +231,24 @@ class Sigmoid(Op):
     @staticmethod
     def compute_flops(s):
         return 4 * s.get("x_size", 0)
+
+    def cpu_golden(self, x: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        x = np.asarray(x, dtype=np.float32)
+        original_shape = x.shape
+        size = x.size
+
+        y = run_cpu_golden(
+            op_name="sigmoid",
+            cmd_args=["sigmoid", dtype, "@input.bin", "@output", str(size)],
+            inputs={"input.bin": (x.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return y.reshape(original_shape)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: sigmoid"""
@@ -206,6 +263,7 @@ class Sigmoid(Op):
 @register_op(
     inputs=["x"],
     description="Tanh 激活",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class Tanh(Op):
@@ -216,6 +274,24 @@ class Tanh(Op):
     @staticmethod
     def compute_flops(s):
         return 6 * s.get("x_size", 0)
+
+    def cpu_golden(self, x: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        x = np.asarray(x, dtype=np.float32)
+        original_shape = x.shape
+        size = x.size
+
+        y = run_cpu_golden(
+            op_name="tanh",
+            cmd_args=["tanh", dtype, "@input.bin", "@output", str(size)],
+            inputs={"input.bin": (x.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return y.reshape(original_shape)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: tanh"""
@@ -230,6 +306,7 @@ class Tanh(Op):
 @register_op(
     inputs=["x"],
     description="SiLU/Swish 激活 y = x * sigmoid(x) (LLaMA FFN)",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class SiLU(Op):
@@ -240,6 +317,24 @@ class SiLU(Op):
     @staticmethod
     def compute_flops(s):
         return 5 * s.get("x_size", 0)
+
+    def cpu_golden(self, x: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        x = np.asarray(x, dtype=np.float32)
+        original_shape = x.shape
+        size = x.size
+
+        y = run_cpu_golden(
+            op_name="silu",
+            cmd_args=["silu", dtype, "@input.bin", "@output", str(size)],
+            inputs={"input.bin": (x.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return y.reshape(original_shape)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: silu"""
@@ -588,6 +683,7 @@ class MatMul(Op):
 @register_op(
     inputs=["a", "b"],
     description="逐元素加法",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class Add(Op):
@@ -599,10 +695,40 @@ class Add(Op):
     def compute_flops(s):
         return s.get("a_size", 0)
 
+    def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        a = np.asarray(a, dtype=np.float32)
+        b = np.asarray(b, dtype=np.float32)
+        original_shape = a.shape
+        size = a.size
+
+        c = run_cpu_golden(
+            op_name="add",
+            cmd_args=["add", dtype, "@a.bin", "@b.bin", "@output", str(size)],
+            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return c.reshape(original_shape)
+
+    def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Torch Reference: a + b"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        a_t = _to_torch(a)
+        b_t = _to_torch(b)
+        c_t = a_t + b_t
+        return _to_numpy(c_t)
+
 
 @register_op(
     inputs=["a", "b"],
     description="逐元素乘法",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class Mul(Op):
@@ -614,10 +740,40 @@ class Mul(Op):
     def compute_flops(s):
         return s.get("a_size", 0)
 
+    def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        a = np.asarray(a, dtype=np.float32)
+        b = np.asarray(b, dtype=np.float32)
+        original_shape = a.shape
+        size = a.size
+
+        c = run_cpu_golden(
+            op_name="mul",
+            cmd_args=["mul", dtype, "@a.bin", "@b.bin", "@output", str(size)],
+            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return c.reshape(original_shape)
+
+    def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Torch Reference: a * b"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        a_t = _to_torch(a)
+        b_t = _to_torch(b)
+        c_t = a_t * b_t
+        return _to_numpy(c_t)
+
 
 @register_op(
     inputs=["a", "b"],
     description="逐元素除法",
+    has_cpp_golden=True,
     compute_unit="vector",
 )
 class Div(Op):
@@ -628,6 +784,35 @@ class Div(Op):
     @staticmethod
     def compute_flops(s):
         return s.get("a_size", 0)
+
+    def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        dtype = get_cpu_golden_dtype()
+        a = np.asarray(a, dtype=np.float32)
+        b = np.asarray(b, dtype=np.float32)
+        original_shape = a.shape
+        size = a.size
+
+        c = run_cpu_golden(
+            op_name="div",
+            cmd_args=["div", dtype, "@a.bin", "@b.bin", "@output", str(size)],
+            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
+            output_name="output.bin",
+            output_dtype=dtype,
+            output_size=size,
+            output_shape=(size,),
+        )
+
+        return c.reshape(original_shape)
+
+    def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Torch Reference: a / b"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        a_t = _to_torch(a)
+        b_t = _to_torch(b)
+        c_t = a_t / b_t
+        return _to_numpy(c_t)
 
 
 @register_op(

@@ -24,55 +24,60 @@ class TestOpsBase:
         assert not has_golden_cpp("unknown_op")
 
     def test_op_default_python_mode(self):
-        """默认模式执行 golden (cpu_golden/gpu_golden)"""
-        import pytest
+        """默认模式执行 golden (cpu_golden)"""
         from aidevtools.ops.base import clear, get_records, set_golden_mode
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         set_golden_mode("python")
         clear()
         x = np.array([[-1, 0, 1], [2, -2, 3]], dtype=np.float32)
 
-        # ReLU 没有 cpu_golden，应该抛出 NotImplementedError
-        with pytest.raises(NotImplementedError):
-            F.relu(x)
+        # ReLU 有 cpu_golden 实现
+        y = F.relu(x)
+        expected = np.array([[0, 0, 1], [2, 0, 3]], dtype=np.float32)
+        assert np.allclose(y, expected, atol=0.01)
 
     def test_op_with_cpp_golden(self):
-        """注册 C++ golden 后调用算子"""
-        from aidevtools.ops.base import register_golden_cpp, clear, get_records, set_golden_mode
+        """注册 C++ golden 后调用算子 (使用内置 cpu_golden)"""
+        from aidevtools.ops.base import clear, get_records, set_golden_mode
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
 
-        @register_golden_cpp("relu")
-        def cpp_relu(x):
-            return np.maximum(0, x) + 0.001  # 故意加点误差
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
-        set_golden_mode("cpp")
+        set_golden_mode("python")
         clear()
         relu = F.ReLU()
         x = np.array([[-1, 0, 1]], dtype=np.float32)
         y = relu(x)
 
-        # 返回注册的 cpp golden 结果（带误差）
-        assert np.allclose(y, np.array([[0.001, 0.001, 1.001]]))
+        # 返回 cpu_golden 结果
+        expected = np.array([[0, 0, 1]], dtype=np.float32)
+        assert np.allclose(y, expected, atol=0.01)
 
         records = get_records()
         assert len(records) == 1
         assert records[0]["golden"] is not None
 
-        # 恢复 python 模式
-        set_golden_mode("python")
-
     def test_golden_mode_none(self):
-        """golden_mode=none 时跳过 golden 计算"""
-        import pytest
+        """golden_mode=none 时仍执行 golden 计算"""
         from aidevtools.ops.base import clear, set_golden_mode
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         set_golden_mode("none")
         clear()
         x = np.array([[-1, 0, 1]], dtype=np.float32)
 
-        # golden_mode=none 时 compute_golden=False，但 ReLU 没有实现 golden
-        # 所以仍会抛出 NotImplementedError
-        with pytest.raises(NotImplementedError):
-            F.relu(x)
+        # ReLU 有 cpu_golden，正常执行
+        y = F.relu(x)
+        expected = np.array([[0, 0, 1]], dtype=np.float32)
+        assert np.allclose(y, expected, atol=0.01)
 
         # 恢复 python 模式
         set_golden_mode("python")
@@ -109,20 +114,30 @@ class TestNNOps:
         assert y.shape == expected.shape
 
     def test_relu(self):
-        """ReLU 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """ReLU 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         x = np.array([-2, -1, 0, 1, 2], dtype=np.float32)
-        with pytest.raises(NotImplementedError):
-            F.relu(x)
+        y = F.relu(x)
+        expected = np.array([0, 0, 0, 1, 2], dtype=np.float32)
+        assert np.allclose(y, expected, atol=0.01)
 
     def test_gelu(self):
-        """GELU 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """GELU 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         x = np.array([0], dtype=np.float32)
-        with pytest.raises(NotImplementedError):
-            F.gelu(x)
+        y = F.gelu(x)
+        # GELU(0) = 0
+        assert np.allclose(y, np.array([0], dtype=np.float32), atol=0.01)
 
     def test_softmax(self):
         """Softmax 算子"""
@@ -166,20 +181,30 @@ class TestNNOps:
             F.attention(q, k, v)
 
     def test_sigmoid(self):
-        """Sigmoid 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """Sigmoid 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         x = np.array([0, 1, -1], dtype=np.float32)
-        with pytest.raises(NotImplementedError):
-            F.sigmoid(x)
+        y = F.sigmoid(x)
+        # sigmoid(0) = 0.5
+        assert np.allclose(y[0], 0.5, atol=0.01)
 
     def test_tanh(self):
-        """Tanh 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """Tanh 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         x = np.array([0, 1, -1], dtype=np.float32)
-        with pytest.raises(NotImplementedError):
-            F.tanh(x)
+        y = F.tanh(x)
+        # tanh(0) = 0
+        assert np.allclose(y[0], 0, atol=0.01)
 
     def test_batchnorm(self):
         """BatchNorm 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
@@ -231,34 +256,49 @@ class TestNNOps:
         assert y.shape == (2, 3, 5)
 
     def test_add(self):
-        """Add 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """Add 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         a = np.array([1, 2, 3], dtype=np.float32)
         b = np.array([4, 5, 6], dtype=np.float32)
 
-        with pytest.raises(NotImplementedError):
-            F.add(a, b)
+        c = F.add(a, b)
+        expected = np.array([5, 7, 9], dtype=np.float32)
+        assert np.allclose(c, expected, atol=0.01)
 
     def test_mul(self):
-        """Mul 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """Mul 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         a = np.array([1, 2, 3], dtype=np.float32)
         b = np.array([4, 5, 6], dtype=np.float32)
 
-        with pytest.raises(NotImplementedError):
-            F.mul(a, b)
+        c = F.mul(a, b)
+        expected = np.array([4, 10, 18], dtype=np.float32)
+        assert np.allclose(c, expected, atol=0.01)
 
     def test_div(self):
-        """Div 算子 - 无 cpu_golden，预期抛出 NotImplementedError"""
+        """Div 算子"""
         import pytest
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         a = np.array([4, 10, 18], dtype=np.float32)
         b = np.array([2, 5, 6], dtype=np.float32)
 
-        with pytest.raises(NotImplementedError):
-            F.div(a, b)
+        c = F.div(a, b)
+        expected = np.array([2, 2, 3], dtype=np.float32)
+        assert np.allclose(c, expected, atol=0.01)
 
     def test_op_repr(self):
         """Op.__repr__ 测试"""

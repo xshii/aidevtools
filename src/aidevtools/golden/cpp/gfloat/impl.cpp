@@ -122,5 +122,67 @@ void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N) {
     }
 }
 
+// ==================== 激活函数 ====================
+
+void relu_fp32(const float* input, float* output, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        output[i] = std::max(0.0f, input[i]);
+    }
+}
+
+void gelu_fp32(const float* input, float* output, size_t size) {
+    // GELU: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+    const float sqrt_2_pi = 0.7978845608f;  // sqrt(2/pi)
+    const float coef = 0.044715f;
+
+    for (size_t i = 0; i < size; ++i) {
+        float x = input[i];
+        float x3 = x * x * x;
+        float inner = sqrt_2_pi * (x + coef * x3);
+        output[i] = 0.5f * x * (1.0f + std::tanh(inner));
+    }
+}
+
+void sigmoid_fp32(const float* input, float* output, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        output[i] = 1.0f / (1.0f + std::exp(-input[i]));
+    }
+}
+
+void tanh_fp32(const float* input, float* output, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        output[i] = std::tanh(input[i]);
+    }
+}
+
+void silu_fp32(const float* input, float* output, size_t size) {
+    // SiLU: x * sigmoid(x)
+    for (size_t i = 0; i < size; ++i) {
+        float x = input[i];
+        float sig = 1.0f / (1.0f + std::exp(-x));
+        output[i] = x * sig;
+    }
+}
+
+// ==================== 逐元素运算 ====================
+
+void add_fp32(const float* a, const float* b, float* c, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+void mul_fp32(const float* a, const float* b, float* c, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = a[i] * b[i];
+    }
+}
+
+void div_fp32(const float* a, const float* b, float* c, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = a[i] / b[i];
+    }
+}
+
 }  // namespace ops
 }  // namespace cpu_golden

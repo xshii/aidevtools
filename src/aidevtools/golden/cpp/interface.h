@@ -87,29 +87,81 @@ void transpose_4d_fp32(const float* input, float* output,
  */
 void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N);
 
-// ==================== 可选扩展算子 ====================
-// 如果你需要添加更多算子，在这里声明接口
+// ==================== 激活函数 ====================
 
-/*
-// RMSNorm: y = x / sqrt(mean(x^2) + eps) * gamma
-void rmsnorm_fp32(const float* input, const float* gamma,
-                  float* output, size_t batch, size_t hidden, float eps = 1e-5f);
-
-// SiLU/Swish: y = x * sigmoid(x)
-void silu_fp32(const float* input, float* output, size_t size);
-
-// GELU: y = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-void gelu_fp32(const float* input, float* output, size_t size);
-
-// ReLU: y = max(0, x)
+/**
+ * ReLU: y = max(0, x)
+ *
+ * @param input   输入数据
+ * @param output  输出数据
+ * @param size    元素数量
+ */
 void relu_fp32(const float* input, float* output, size_t size);
 
-// Add: c = a + b
+/**
+ * GELU: y = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+ *
+ * @param input   输入数据
+ * @param output  输出数据
+ * @param size    元素数量
+ */
+void gelu_fp32(const float* input, float* output, size_t size);
+
+/**
+ * Sigmoid: y = 1 / (1 + exp(-x))
+ *
+ * @param input   输入数据
+ * @param output  输出数据
+ * @param size    元素数量
+ */
+void sigmoid_fp32(const float* input, float* output, size_t size);
+
+/**
+ * Tanh: y = tanh(x)
+ *
+ * @param input   输入数据
+ * @param output  输出数据
+ * @param size    元素数量
+ */
+void tanh_fp32(const float* input, float* output, size_t size);
+
+/**
+ * SiLU/Swish: y = x * sigmoid(x)
+ *
+ * @param input   输入数据
+ * @param output  输出数据
+ * @param size    元素数量
+ */
+void silu_fp32(const float* input, float* output, size_t size);
+
+// ==================== 逐元素运算 ====================
+
+/**
+ * Add: c = a + b
+ *
+ * @param a, b    输入数据
+ * @param c       输出数据
+ * @param size    元素数量
+ */
 void add_fp32(const float* a, const float* b, float* c, size_t size);
 
-// Mul: c = a * b
+/**
+ * Mul: c = a * b
+ *
+ * @param a, b    输入数据
+ * @param c       输出数据
+ * @param size    元素数量
+ */
 void mul_fp32(const float* a, const float* b, float* c, size_t size);
-*/
+
+/**
+ * Div: c = a / b
+ *
+ * @param a, b    输入数据
+ * @param c       输出数据
+ * @param size    元素数量
+ */
+void div_fp32(const float* a, const float* b, float* c, size_t size);
 
 }  // namespace ops
 }  // namespace cpu_golden

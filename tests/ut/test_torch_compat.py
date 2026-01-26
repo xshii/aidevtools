@@ -12,39 +12,51 @@ from aidevtools.ops.cpu_golden import is_cpu_golden_available, set_cpu_golden_dt
 torch = pytest.importorskip("torch")
 
 
-class TestActivationsNotImplemented:
-    """激活函数 - 无 cpu_golden 实现，预期抛出 NotImplementedError"""
+class TestActivations:
+    """激活函数 - 有 cpu_golden 实现"""
 
     def setup_method(self):
         """清理测试间的注册状态"""
         from aidevtools.ops.base import _golden_cpp_registry, clear
         _golden_cpp_registry.clear()
         clear()
+        if is_cpu_golden_available():
+            set_cpu_golden_dtype("gfp16")
 
-    def test_relu_not_implemented(self):
+    def test_relu_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
-        with pytest.raises(NotImplementedError):
-            F.relu(x_np)
+        y = F.relu(x_np)
+        assert y.shape == x_np.shape
 
-    def test_gelu_not_implemented(self):
+    def test_gelu_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
-        with pytest.raises(NotImplementedError):
-            F.gelu(x_np)
+        y = F.gelu(x_np)
+        assert y.shape == x_np.shape
 
-    def test_sigmoid_not_implemented(self):
+    def test_sigmoid_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
-        with pytest.raises(NotImplementedError):
-            F.sigmoid(x_np)
+        y = F.sigmoid(x_np)
+        assert y.shape == x_np.shape
 
-    def test_tanh_not_implemented(self):
+    def test_tanh_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
-        with pytest.raises(NotImplementedError):
-            F.tanh(x_np)
+        y = F.tanh(x_np)
+        assert y.shape == x_np.shape
 
-    def test_silu_not_implemented(self):
+    def test_silu_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
-        with pytest.raises(NotImplementedError):
-            F.silu(x_np)
+        y = F.silu(x_np)
+        assert y.shape == x_np.shape
 
 
 class TestSoftmax:
@@ -202,29 +214,36 @@ class TestLossFunctionsNotImplemented:
             F.bce_with_logits(logits_np, target_np, reduction="mean")
 
 
-class TestElementwiseOpsNotImplemented:
-    """逐元素运算 - 无 cpu_golden 实现"""
+class TestElementwiseOps:
+    """逐元素运算 - 有 cpu_golden 实现"""
 
-    def test_add_not_implemented(self):
+    def setup_method(self):
+        if is_cpu_golden_available():
+            set_cpu_golden_dtype("gfp16")
+
+    def test_add_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         a_np = np.random.randn(2, 3, 4).astype(np.float32)
         b_np = np.random.randn(2, 3, 4).astype(np.float32)
+        c = F.add(a_np, b_np)
+        assert c.shape == a_np.shape
 
-        with pytest.raises(NotImplementedError):
-            F.add(a_np, b_np)
-
-    def test_mul_not_implemented(self):
+    def test_mul_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         a_np = np.random.randn(2, 3, 4).astype(np.float32)
         b_np = np.random.randn(2, 3, 4).astype(np.float32)
+        c = F.mul(a_np, b_np)
+        assert c.shape == a_np.shape
 
-        with pytest.raises(NotImplementedError):
-            F.mul(a_np, b_np)
-
-    def test_div_not_implemented(self):
+    def test_div_shape(self):
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
         a_np = np.random.randn(2, 3, 4).astype(np.float32)
         b_np = np.random.randn(2, 3, 4).astype(np.float32) + 0.1
-
-        with pytest.raises(NotImplementedError):
-            F.div(a_np, b_np)
+        c = F.div(a_np, b_np)
+        assert c.shape == a_np.shape
 
 
 class TestTranspose:
