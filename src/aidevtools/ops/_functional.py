@@ -145,6 +145,15 @@ class ReLU(Op):
     def compute_flops(s):
         return s.get("x_size", 0)
 
+    def torch_reference(self, x: np.ndarray, inplace: bool = False) -> np.ndarray:
+        """Torch Reference: relu"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        y_t = torch.nn.functional.relu(x_t)
+        return _to_numpy(y_t)
+
 
 @register_op(
     inputs=["x"],
@@ -159,6 +168,15 @@ class GELU(Op):
     @staticmethod
     def compute_flops(s):
         return 10 * s.get("x_size", 0)
+
+    def torch_reference(self, x: np.ndarray) -> np.ndarray:
+        """Torch Reference: gelu"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        y_t = torch.nn.functional.gelu(x_t)
+        return _to_numpy(y_t)
 
 
 @register_op(
@@ -175,6 +193,15 @@ class Sigmoid(Op):
     def compute_flops(s):
         return 4 * s.get("x_size", 0)
 
+    def torch_reference(self, x: np.ndarray) -> np.ndarray:
+        """Torch Reference: sigmoid"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        y_t = torch.sigmoid(x_t)
+        return _to_numpy(y_t)
+
 
 @register_op(
     inputs=["x"],
@@ -190,6 +217,15 @@ class Tanh(Op):
     def compute_flops(s):
         return 6 * s.get("x_size", 0)
 
+    def torch_reference(self, x: np.ndarray) -> np.ndarray:
+        """Torch Reference: tanh"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        y_t = torch.tanh(x_t)
+        return _to_numpy(y_t)
+
 
 @register_op(
     inputs=["x"],
@@ -204,6 +240,15 @@ class SiLU(Op):
     @staticmethod
     def compute_flops(s):
         return 5 * s.get("x_size", 0)
+
+    def torch_reference(self, x: np.ndarray) -> np.ndarray:
+        """Torch Reference: silu"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        y_t = torch.nn.functional.silu(x_t)
+        return _to_numpy(y_t)
 
 
 @register_op(
