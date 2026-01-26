@@ -312,5 +312,5 @@ class TestOpsDump:
         assert (tmp_path / "linear_0_golden.bin").exists()
         assert (tmp_path / "linear_0_input.bin").exists()
         assert (tmp_path / "linear_0_weight.bin").exists()
-        # reference 已移除，不再导出
-        assert not (tmp_path / "linear_0_reference.bin").exists()
+        # reference 由 torch 内部计算
+        assert (tmp_path / "linear_0_reference.bin").exists()

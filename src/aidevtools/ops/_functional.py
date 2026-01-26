@@ -4,20 +4,20 @@
 # unused-argument: 保留 API 兼容参数 (axis, eps 等) 和基类 compute_flops(s) 签名
 """神经网络算子
 
-每个算子实现 cpu_golden 或 gpu_golden 方法。
-Reference (torch fp16) 由劫持模式 (torch_backend) 提供。
+自定义 API，torch 对外部不可见。
 
 工作流：
-1. 使用 torch fp16 生成随机数据
-2. 使用 golden builder 量化数据
-3. 使用 cpu_golden/gpu_golden 计算 golden
-4. 使用 torch fp16 计算 reference (ground truth)
-5. 比对 golden 和 reference
+1. 用户调用 F.matmul, F.softmax 等自定义 API
+2. cpu_golden/gpu_golden 计算 golden（C++ 实现）
+3. torch_reference 计算 reference（torch fp32，内部使用）
+4. 比对 golden 和 reference
 
 使用 @register_op 装饰器自动注册算子元信息。
 
-注意: cpu_golden 通过 C++ 实现 (src/aidevtools/golden/cpp/)。
-目前支持的算子: matmul, softmax, layernorm, transpose
+注意:
+- cpu_golden 通过 C++ 实现 (src/aidevtools/golden/cpp/)
+- torch_reference 内部使用 torch 计算（对外不可见）
+- 目前有 C++ cpu_golden 的算子: matmul, softmax, layernorm, transpose
 """
 
 import numpy as np
@@ -29,6 +29,34 @@ from aidevtools.ops.cpu_golden import (
     run_cpu_golden,
 )
 from aidevtools.ops.registry import register_op
+
+
+# ============================================================
+# Torch 内部导入（对外不可见）
+# ============================================================
+
+def _import_torch():
+    """延迟导入 torch"""
+    try:
+        import torch
+        return torch
+    except ImportError:
+        return None
+
+
+def _to_torch(x: np.ndarray):
+    """numpy -> torch tensor (fp32)"""
+    torch = _import_torch()
+    if torch is None:
+        return None
+    return torch.from_numpy(np.asarray(x, dtype=np.float32))
+
+
+def _to_numpy(t) -> np.ndarray:
+    """torch tensor -> numpy (fp32)"""
+    if t is None:
+        return None
+    return t.detach().cpu().numpy().astype(np.float32)
 
 
 # ============================================================
@@ -82,6 +110,20 @@ class Linear(Op):
         if bias is not None:
             y = y + bias.astype(np.float32)
         return y
+
+    def torch_reference(
+        self, input: np.ndarray, weight: np.ndarray, bias: np.ndarray = None
+    ) -> np.ndarray:
+        """Torch Reference: y = input @ weight.T + bias"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        import torch.nn.functional as torch_F
+        input_t = _to_torch(input)
+        weight_t = _to_torch(weight)
+        bias_t = _to_torch(bias) if bias is not None else None
+        y_t = torch_F.linear(input_t, weight_t, bias_t)
+        return _to_numpy(y_t)
 
 
 # ============================================================
@@ -205,6 +247,16 @@ class Softmax(Op):
 
         return y.reshape(original_shape)
 
+    def torch_reference(self, input: np.ndarray, dim: int = -1) -> np.ndarray:
+        """Torch Reference: softmax(input, dim)"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        import torch.nn.functional as torch_F
+        input_t = _to_torch(input)
+        y_t = torch_F.softmax(input_t, dim=dim)
+        return _to_numpy(y_t)
+
 
 # ============================================================
 # Normalization
@@ -289,6 +341,23 @@ class LayerNorm(Op):
         )
 
         return y.reshape(original_shape)
+
+    def torch_reference(
+        self, input: np.ndarray, normalized_shape: tuple,
+        weight: np.ndarray = None, bias: np.ndarray = None, eps: float = 1e-5
+    ) -> np.ndarray:
+        """Torch Reference: layer_norm(input, normalized_shape, weight, bias, eps)"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        import torch.nn.functional as torch_F
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        input_t = _to_torch(input)
+        weight_t = _to_torch(weight) if weight is not None else None
+        bias_t = _to_torch(bias) if bias is not None else None
+        y_t = torch_F.layer_norm(input_t, normalized_shape, weight_t, bias_t, eps)
+        return _to_numpy(y_t)
 
 
 @register_op(
@@ -460,6 +529,16 @@ class MatMul(Op):
             output_shape=(M, N),
         )
 
+    def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Torch Reference: c = a @ b"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        a_t = _to_torch(a)
+        b_t = _to_torch(b)
+        c_t = torch.matmul(a_t, b_t)
+        return _to_numpy(c_t)
+
 
 @register_op(
     inputs=["a", "b"],
@@ -554,6 +633,19 @@ class Transpose(Op):
             result = result.reshape(d1, d3, d2)
 
         return result
+
+    def torch_reference(self, x: np.ndarray, axes: tuple = None) -> np.ndarray:
+        """Torch Reference: transpose"""
+        torch = _import_torch()
+        if torch is None:
+            return None
+        x_t = _to_torch(x)
+        if axes is not None:
+            y_t = x_t.permute(*axes)
+        else:
+            # 默认交换最后两个维度
+            y_t = x_t.transpose(-2, -1)
+        return _to_numpy(y_t)
 
 
 # ============================================================

@@ -1,15 +1,15 @@
 """算子基础框架
 
 设计说明：
-- 每个算子实现 cpu_golden 或 gpu_golden 方法
-- Reference (torch fp16) 由劫持模式 (torch_backend) 提供
+- 每个算子实现 cpu_golden 或 gpu_golden 方法（C++ 实现）
+- 每个算子实现 torch_reference 方法（使用 torch 计算 reference）
+- torch 对外部不可见，用户只用自定义 API
 
 工作流：
-1. 使用 torch fp16 生成随机数据
-2. 使用 golden builder 量化数据
-3. 使用 cpu_golden/gpu_golden 计算 golden
-4. 使用 torch fp16 计算 reference (ground truth)
-5. 比对 golden 和 reference
+1. 用户调用 F.matmul, F.softmax 等自定义 API
+2. cpu_golden/gpu_golden 计算 golden（C++ 实现）
+3. torch_reference 计算 reference（torch fp32，作为 ground truth）
+4. 比对 golden 和 reference
 """
 
 from functools import wraps
@@ -427,6 +427,76 @@ class Op:
         """
         raise NotImplementedError(f"{self.name} 未实现 gpu_golden")
 
+    def torch_reference(self, *args, **kwargs) -> np.ndarray:
+        """
+        Torch Reference 实现（内部使用，外部不可见）
+
+        使用 torch 计算高精度参考结果，作为 ground truth。
+        子类应重写此方法提供 torch 实现。
+        """
+        raise NotImplementedError(f"{self.name} 未实现 torch_reference")
+
+    def _get_reference(self, *args, **kwargs) -> Optional[np.ndarray]:
+        """
+        获取 Reference 输出（内部使用 torch）
+
+        如果 torch_reference 未实现，返回 None
+        """
+        if (
+            hasattr(self.__class__, "torch_reference")
+            and self.__class__.torch_reference is not Op.torch_reference
+        ):
+            try:
+                return self.torch_reference(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"torch_reference 计算失败: {e}")
+                return None
+        return None
+
+    def _quantize_inputs(self, args: tuple, kwargs: dict) -> tuple:
+        """
+        对输入数据进行量化/反量化（模拟硬件精度损失）
+
+        流程: fp16 -> 量化格式 -> fp16
+        最高精度为 fp16，给 torch reference 计算
+        """
+        from aidevtools.ops.cpu_golden import get_cpu_golden_dtype
+
+        dtype = get_cpu_golden_dtype()
+
+        def quantize_array(x):
+            """量化单个数组，返回 fp16"""
+            if not isinstance(x, np.ndarray):
+                return x
+            # 先转 fp16（最高精度）
+            x = np.asarray(x, dtype=np.float16)
+            x_fp32 = x.astype(np.float32)  # gfloat 函数需要 fp32 输入
+
+            if dtype == "gfp16":
+                from aidevtools.formats.custom.gfloat.wrapper import (
+                    fp32_to_gfloat16, gfloat16_to_fp32, is_cpp_available,
+                )
+                if is_cpp_available():
+                    result = gfloat16_to_fp32(fp32_to_gfloat16(x_fp32))
+                    return result.astype(np.float16)
+            elif dtype == "gfp8":
+                from aidevtools.formats.custom.gfloat.wrapper import (
+                    fp32_to_gfloat8, gfloat8_to_fp32, is_cpp_available,
+                )
+                if is_cpp_available():
+                    result = gfloat8_to_fp32(fp32_to_gfloat8(x_fp32))
+                    return result.astype(np.float16)
+            # gfp4 或其他格式，返回 fp16
+            return x
+
+        # 量化位置参数
+        quantized_args = tuple(quantize_array(arg) for arg in args)
+
+        # 量化关键字参数
+        quantized_kwargs = {k: quantize_array(v) for k, v in kwargs.items()}
+
+        return quantized_args, quantized_kwargs
+
     def _get_golden(self, *args, **kwargs) -> np.ndarray:
         """
         获取 Golden 输出
@@ -463,9 +533,10 @@ class Op:
 
         执行流程：
         - profile-only 模式: 只生成 profile，不执行计算
-        - 正常模式: 执行 golden (cpu_golden 或 gpu_golden)
+        - 正常模式: 执行 golden + reference
 
-        注意：reference (torch fp16) 由劫持模式 (torch_backend) 提供
+        golden: cpu_golden/gpu_golden (C++ 实现)
+        reference: torch_reference (torch 内部计算，外部不可见)
         """
         # 计数
         idx = _counter.get(self.name, 0)
@@ -482,17 +553,26 @@ class Op:
             # 返回第一个输入（保持数据流）
             return args[0] if args else None
 
-        # 执行 golden
+        # 执行 golden (C++ 实现，接收原始 fp32，内部会做量化)
         golden_output = self._get_golden(*args, **kwargs)
         logger.debug(f"{full_name}: golden 执行完成")
+
+        # 对输入数据进行量化/反量化（模拟硬件精度损失）
+        quantized_args, quantized_kwargs = self._quantize_inputs(args, kwargs)
+
+        # 执行 reference (torch 计算，使用量化/反量化后的 fp32)
+        reference_output = self._get_reference(*quantized_args, **quantized_kwargs)
+        if reference_output is not None:
+            logger.debug(f"{full_name}: reference 执行完成")
 
         # 记录
         record = {
             "name": full_name,
             "op": self.name,
-            "input": args[0] if args else None,
+            "input": args[0] if args else None,  # 原始输入
             "weight": args[1] if len(args) > 1 else kwargs.get("weight"),
             "golden": golden_output,
+            "reference": reference_output,
         }
         _records.append(record)
 
@@ -556,6 +636,9 @@ def dump(output_dir: str = "./workspace", fmt: str = "raw") -> None:
         # 保存 golden
         if r.get("golden") is not None and _is_array_like(r["golden"]):
             save_data(str(path / f"{name}_golden.bin"), np.asarray(r["golden"]), fmt=fmt)
+        # 保存 reference
+        if r.get("reference") is not None and _is_array_like(r["reference"]):
+            save_data(str(path / f"{name}_reference.bin"), np.asarray(r["reference"]), fmt=fmt)
         # 保存输入
         if r.get("input") is not None and _is_array_like(r["input"]):
             save_data(str(path / f"{name}_input.bin"), np.asarray(r["input"]), fmt=fmt)

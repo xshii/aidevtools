@@ -3,6 +3,7 @@
 通过命令行接口进行端到端测试
 """
 import numpy as np
+import pytest
 
 
 class TestCompareSingleCmd:
@@ -152,12 +153,16 @@ class TestCompareClearCmd:
         from aidevtools.ops import _functional as F
         from aidevtools.commands.compare import cmd_compare
         from aidevtools.ops.base import clear, get_records
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         clear()
 
-        # 使用 F 触发记录
+        # 使用 F 触发记录 (使用有 cpu_golden 的算子)
         x = np.random.randn(2, 4).astype(np.float32)
-        F.relu(x)
+        F.softmax(x)
         assert len(get_records()) == 1
 
         ret = cmd_compare(action="clear")
@@ -187,12 +192,16 @@ class TestCompareDumpCmd:
         """导出数据"""
         from aidevtools.ops import _functional as F
         from aidevtools.commands.compare import cmd_compare
+        from aidevtools.ops.cpu_golden import is_cpu_golden_available
+
+        if not is_cpu_golden_available():
+            pytest.skip("CPU golden not available")
 
         x = np.random.randn(2, 4).astype(np.float32)
-        F.relu(x)
+        F.softmax(x)
 
         ret = cmd_compare(action="dump", output=str(tmp_path))
         assert ret == 0
 
         # 检查文件生成
-        assert (tmp_path / "relu_0_golden.bin").exists()
+        assert (tmp_path / "softmax_0_golden.bin").exists()
