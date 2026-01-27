@@ -12,7 +12,8 @@ demos/
 ├── 04_xlsx_basic/          # xlsx 双向工作流示例
 ├── 05_xlsx_transformer/    # xlsx Transformer 示例
 ├── 06_add_ops/             # 添加新算子指南
-└── 07_transpose/           # Transpose 多维度测试
+├── 07_transpose/           # Transpose 多维度测试
+└── 08_paper_analysis/      # Paper Analysis 时延分析
 ```
 
 ## Demo 说明
@@ -74,6 +75,18 @@ python demos/05_xlsx_transformer/run.py
 python demos/07_transpose/run.py
 ```
 
+### 08_paper_analysis - Paper Analysis 时延分析
+
+演示使用 PyTorch 风格 F API 定义模型，自动生成 OpProfile 进行 Paper Analysis：
+- 使用 F.matmul, F.layer_norm, F.softmax, F.gelu 等算子
+- 自动收集算子 profile (FLOPs, bytes, arithmetic intensity)
+- 基于 Roofline 模型分析时延瓶颈
+- 导出 xlsx/csv/json 报告
+
+```bash
+python demos/08_paper_analysis/main.py
+```
+
 ## 支持的算子
 
 | 算子 | 说明 | cpp_golden |
@@ -84,12 +97,12 @@ python demos/07_transpose/run.py
 | layernorm | Layer Normalization | ✓ |
 | rmsnorm | RMS Normalization (LLaMA) | - |
 | transpose | 转置 | ✓ |
-| relu | ReLU 激活 | - |
-| gelu | GELU 激活 | - |
-| silu | SiLU/Swish 激活 (LLaMA) | - |
-| sigmoid | Sigmoid 激活 | - |
-| tanh | Tanh 激活 | - |
-| add/mul/div | 逐元素运算 | - |
+| relu | ReLU 激活 | ✓ |
+| gelu | GELU 激活 | ✓ |
+| silu | SiLU/Swish 激活 (LLaMA) | ✓ |
+| sigmoid | Sigmoid 激活 | ✓ |
+| tanh | Tanh 激活 | ✓ |
+| add/mul/div | 逐元素运算 | ✓ |
 | attention | Scaled Dot-Product Attention | - |
 | embedding | Token 嵌入 | - |
 

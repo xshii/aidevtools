@@ -21,6 +21,12 @@
 """
 # 工具函数
 from aidevtools.ops.auto import get_seed, seed
+from aidevtools.ops.quantized_tensor import (
+    QuantizedTensor,
+    ensure_quantized,
+    quantize,
+    wrap_output,
+)
 from aidevtools.ops.base import (
     Op,
     clear,
@@ -50,6 +56,11 @@ __all__ = [
     "get_seed",
     "clear",
     "dump",
+    # 量化张量
+    "QuantizedTensor",
+    "quantize",
+    "ensure_quantized",
+    "wrap_output",
     # 配置
     "set_golden_mode",
     "get_golden_mode",

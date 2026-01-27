@@ -4,6 +4,7 @@
 - gfloat 格式转换
 - subprocess 通用执行函数
 - 全局配置（dtype 等）
+- QuantizedTensor 支持
 
 用法:
     from aidevtools.ops.cpu_golden import (
@@ -25,6 +26,16 @@
         output_size=M * N,
         output_shape=(M, N),
     )
+
+使用 QuantizedTensor:
+    from aidevtools.ops import quantize, QuantizedTensor
+
+    # 在数据源头量化一次
+    x = quantize(input_data, "gfp16")
+    w = quantize(weight_data, "gfp16")
+
+    # 后续计算自动保持精度状态
+    y = F.matmul(x.numpy(), w.numpy())
 """
 import subprocess
 import tempfile

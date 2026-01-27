@@ -121,13 +121,15 @@ class TestCpuGoldenMatmul:
         c = gfloat16_to_fp32(c_gfp).reshape(M, N)
 
         # 用量化后的输入计算参考值
+        # 注意: cpu_golden 的精度模拟会量化每个中间结果，
+        # 而 numpy matmul 用 fp32 计算，所以会有累积误差
         a_quant = gfloat16_to_fp32(a_gfp)
         b_quant = gfloat16_to_fp32(b_gfp)
         c_ref = np.matmul(a_quant, b_quant)
 
-        # 验证 (考虑 gfloat16 量化误差)
+        # 验证 (增加容差以适应精度模拟的累积误差)
         assert c.shape == (M, N)
-        assert np.allclose(c, c_ref, rtol=1e-2, atol=1e-2)
+        assert np.allclose(c, c_ref, rtol=5e-2, atol=5e-2)
 
     def test_matmul_gfp8(self):
         """MatMul gfloat8"""

@@ -32,6 +32,7 @@ using namespace cpu_golden::ops;
 void print_usage(const char* prog) {
     std::cerr << "CPU Golden CLI\n\n"
               << "Usage:\n"
+              << "  " << prog << " quantize <dtype> <input.bin> <output.bin> <size>\n"
               << "  " << prog << " matmul <dtype> <a.bin> <b.bin> <c.bin> <M> <K> <N>\n"
               << "  " << prog << " matmul_mixed <dtype_a> <dtype_b> <a.bin> <b.bin> <c.bin> <M> <K> <N> <dtype_out>\n"
               << "  " << prog << " softmax <dtype> <input.bin> <output.bin> <batch> <seq>\n"
@@ -48,7 +49,11 @@ void print_usage(const char* prog) {
               << "\n"
               << "dtype: gfp4, gfp8, gfp16 (or gfloat4, gfloat8, gfloat16, 4, 8, 16)\n"
               << "\n"
+              << "Note: quantize converts fp32 to target precision (stored as fp32).\n"
+              << "      Use this at data source to avoid repeated conversions.\n"
+              << "\n"
               << "Examples:\n"
+              << "  " << prog << " quantize gfp16 input.bin quantized.bin 1024\n"
               << "  " << prog << " matmul gfp16 a.bin b.bin c.bin 64 128 256\n"
               << "  " << prog << " softmax gfp8 input.bin output.bin 4 64\n"
               << "  " << prog << " layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256\n"
@@ -56,6 +61,45 @@ void print_usage(const char* prog) {
               << "  " << prog << " relu gfp16 x.bin y.bin 1024\n"
               << "  " << prog << " gelu gfp16 x.bin y.bin 1024\n"
               << "  " << prog << " add gfp16 a.bin b.bin c.bin 1024\n";
+}
+
+// ==================== Quantize 命令 ====================
+// 将 fp32 数据量化到目标精度（输出仍是 fp32，但值是量化后的）
+
+int run_quantize(int argc, char* argv[]) {
+    if (argc < 6) {
+        std::cerr << "Error: quantize requires 4 arguments\n";
+        return 1;
+    }
+
+    GFloatType dtype = parse_gfloat_type(argv[2]);
+    std::string input_path = argv[3];
+    std::string output_path = argv[4];
+    size_t size = std::stoull(argv[5]);
+
+    std::cerr << "[cpu_golden] quantize: " << gfloat_type_to_string(dtype)
+              << " [" << size << "]\n";
+
+    // 直接加载 fp32 文件
+    auto input_fp32 = load_fp32(input_path);
+
+    if (input_fp32.size() < size) {
+        std::cerr << "Error: input.bin size mismatch, expected " << size
+                  << ", got " << input_fp32.size() << "\n";
+        return 1;
+    }
+
+    // 原地量化到目标精度
+    quantize_inplace(input_fp32.data(), size, dtype);
+
+    // 保存为 fp32（值已量化）
+    if (!save_fp32(output_path, input_fp32.data(), size)) {
+        std::cerr << "Error: failed to save output to " << output_path << "\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden] quantize done: " << output_path << "\n";
+    return 0;
 }
 
 int run_matmul(int argc, char* argv[]) {
@@ -88,9 +132,9 @@ int run_matmul(int argc, char* argv[]) {
         return 1;
     }
 
-    // 调用算子 (纯 fp32 计算)
+    // 调用算子 (使用 gfloat 精度模拟硬件行为)
     std::vector<float> c_fp32(M * N);
-    matmul_fp32(a_fp32.data(), b_fp32.data(), c_fp32.data(), M, K, N);
+    matmul_gfloat(a_fp32.data(), b_fp32.data(), c_fp32.data(), M, K, N, dtype);
 
     // 保存输出 (格式转换在 I/O 层完成)
     if (!save_as_gfloat(c_fp32.data(), M * N, c_path, dtype)) {
@@ -136,7 +180,8 @@ int run_matmul_mixed(int argc, char* argv[]) {
     }
 
     std::vector<float> c_fp32(M * N);
-    matmul_fp32(a_fp32.data(), b_fp32.data(), c_fp32.data(), M, K, N);
+    // 混合精度: 使用输出类型作为计算精度
+    matmul_gfloat(a_fp32.data(), b_fp32.data(), c_fp32.data(), M, K, N, dtype_out);
 
     if (!save_as_gfloat(c_fp32.data(), M * N, c_path, dtype_out)) {
         std::cerr << "Error: failed to save output\n";
@@ -170,7 +215,7 @@ int run_softmax(int argc, char* argv[]) {
     }
 
     std::vector<float> output_fp32(batch * seq);
-    softmax_fp32(input_fp32.data(), output_fp32.data(), batch, seq);
+    softmax_gfloat(input_fp32.data(), output_fp32.data(), batch, seq, dtype);
 
     if (!save_as_gfloat(output_fp32.data(), batch * seq, output_path, dtype)) {
         std::cerr << "Error: failed to save output\n";
@@ -216,8 +261,8 @@ int run_layernorm(int argc, char* argv[]) {
     }
 
     std::vector<float> output_fp32(batch * hidden);
-    layernorm_fp32(input_fp32.data(), gamma_fp32.data(), beta_fp32.data(),
-                   output_fp32.data(), batch, hidden);
+    layernorm_gfloat(input_fp32.data(), gamma_fp32.data(), beta_fp32.data(),
+                     output_fp32.data(), batch, hidden, 1e-5f, dtype);
 
     if (!save_as_gfloat(output_fp32.data(), batch * hidden, output_path, dtype)) {
         std::cerr << "Error: failed to save output\n";
@@ -267,8 +312,9 @@ int run_transpose(int argc, char* argv[]) {
 }
 
 // ==================== 激活函数通用模板 ====================
+// 使用 gfloat 精度版本，模拟硬件行为
 
-template<void (*activation_fn)(const float*, float*, size_t)>
+template<void (*activation_fn)(const float*, float*, size_t, GFloatType)>
 int run_activation(int argc, char* argv[], const char* op_name) {
     if (argc < 6) {
         std::cerr << "Error: " << op_name << " requires 4 arguments\n";
@@ -281,7 +327,7 @@ int run_activation(int argc, char* argv[], const char* op_name) {
     size_t size = std::stoull(argv[5]);
 
     std::cerr << "[cpu_golden] " << op_name << ": " << gfloat_type_to_string(dtype)
-              << " [" << size << "]\n";
+              << " [" << size << "] (gfloat precision)\n";
 
     auto input_fp32 = load_gfloat_as_fp32(input_path, dtype);
 
@@ -291,7 +337,7 @@ int run_activation(int argc, char* argv[], const char* op_name) {
     }
 
     std::vector<float> output_fp32(size);
-    activation_fn(input_fp32.data(), output_fp32.data(), size);
+    activation_fn(input_fp32.data(), output_fp32.data(), size, dtype);
 
     if (!save_as_gfloat(output_fp32.data(), size, output_path, dtype)) {
         std::cerr << "Error: failed to save output\n";
@@ -303,8 +349,9 @@ int run_activation(int argc, char* argv[], const char* op_name) {
 }
 
 // ==================== 逐元素运算通用模板 ====================
+// 使用 gfloat 精度版本，模拟硬件行为
 
-template<void (*elementwise_fn)(const float*, const float*, float*, size_t)>
+template<void (*elementwise_fn)(const float*, const float*, float*, size_t, GFloatType)>
 int run_elementwise(int argc, char* argv[], const char* op_name) {
     if (argc < 7) {
         std::cerr << "Error: " << op_name << " requires 5 arguments\n";
@@ -318,7 +365,7 @@ int run_elementwise(int argc, char* argv[], const char* op_name) {
     size_t size = std::stoull(argv[6]);
 
     std::cerr << "[cpu_golden] " << op_name << ": " << gfloat_type_to_string(dtype)
-              << " [" << size << "]\n";
+              << " [" << size << "] (gfloat precision)\n";
 
     auto a_fp32 = load_gfloat_as_fp32(a_path, dtype);
     auto b_fp32 = load_gfloat_as_fp32(b_path, dtype);
@@ -329,7 +376,7 @@ int run_elementwise(int argc, char* argv[], const char* op_name) {
     }
 
     std::vector<float> c_fp32(size);
-    elementwise_fn(a_fp32.data(), b_fp32.data(), c_fp32.data(), size);
+    elementwise_fn(a_fp32.data(), b_fp32.data(), c_fp32.data(), size, dtype);
 
     if (!save_as_gfloat(c_fp32.data(), size, c_path, dtype)) {
         std::cerr << "Error: failed to save output\n";
@@ -349,7 +396,9 @@ int main(int argc, char* argv[]) {
     std::string op = argv[1];
 
     try {
-        if (op == "matmul") {
+        if (op == "quantize") {
+            return run_quantize(argc, argv);
+        } else if (op == "matmul") {
             return run_matmul(argc, argv);
         } else if (op == "matmul_mixed") {
             return run_matmul_mixed(argc, argv);
@@ -359,24 +408,24 @@ int main(int argc, char* argv[]) {
             return run_layernorm(argc, argv);
         } else if (op == "transpose") {
             return run_transpose(argc, argv);
-        // 激活函数
+        // 激活函数 (使用 gfloat 精度版本)
         } else if (op == "relu") {
-            return run_activation<relu_fp32>(argc, argv, "relu");
+            return run_activation<relu_gfloat>(argc, argv, "relu");
         } else if (op == "gelu") {
-            return run_activation<gelu_fp32>(argc, argv, "gelu");
+            return run_activation<gelu_gfloat>(argc, argv, "gelu");
         } else if (op == "sigmoid") {
-            return run_activation<sigmoid_fp32>(argc, argv, "sigmoid");
+            return run_activation<sigmoid_gfloat>(argc, argv, "sigmoid");
         } else if (op == "tanh") {
-            return run_activation<tanh_fp32>(argc, argv, "tanh");
+            return run_activation<tanh_gfloat>(argc, argv, "tanh");
         } else if (op == "silu") {
-            return run_activation<silu_fp32>(argc, argv, "silu");
-        // 逐元素运算
+            return run_activation<silu_gfloat>(argc, argv, "silu");
+        // 逐元素运算 (使用 gfloat 精度版本)
         } else if (op == "add") {
-            return run_elementwise<add_fp32>(argc, argv, "add");
+            return run_elementwise<add_gfloat>(argc, argv, "add");
         } else if (op == "mul") {
-            return run_elementwise<mul_fp32>(argc, argv, "mul");
+            return run_elementwise<mul_gfloat>(argc, argv, "mul");
         } else if (op == "div") {
-            return run_elementwise<div_fp32>(argc, argv, "div");
+            return run_elementwise<div_gfloat>(argc, argv, "div");
         } else if (op == "-h" || op == "--help" || op == "help") {
             print_usage(argv[0]);
             return 0;

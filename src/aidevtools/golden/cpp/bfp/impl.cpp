@@ -1,21 +1,23 @@
 /**
- * 算子实现 (默认参考实现)
+ * 算子实现 (BFP 版本)
  *
- * 这个文件包含所有算子的默认实现。
- * 你可以用自己的实现替换这个文件。
+ * 这个文件包含所有算子的 BFP 精度模拟实现。
+ * BFP (Block Floating Point) 使用块共享指数来减少存储和计算开销。
  *
- * 替换方法:
- *   1. 保留 ops_interface.h (接口定义)
- *   2. 用你自己的 ops_impl.cpp 替换这个文件
- *   3. 确保实现 ops_interface.h 中声明的所有函数
+ * 注意: 这个文件的函数是 BFP 专用版本，通过 bfp_main.cpp 调用。
+ * gfloat 版本在 gfloat/impl.cpp 中。
  */
 #include "../interface.h"
+#include "io.h"
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 
 namespace cpu_golden {
 namespace ops {
+
+// BFP 量化辅助宏
+#define QB(val, dtype) bfp_io::quantize_fp32_to_bfp_precision(val, dtype)
 
 // ==================== MatMul ====================
 
@@ -121,6 +123,145 @@ void transpose_2d_fp32(const float* input, float* output, size_t M, size_t N) {
         }
     }
 }
+
+// ==================== BFP 精度模拟版本 ====================
+// 以下函数模拟 BFP 硬件的低精度计算行为
+
+void matmul_bfp(const float* a, const float* b, float* c,
+                size_t M, size_t K, size_t N, bfp_io::BFPType dtype) {
+    std::memset(c, 0, M * N * sizeof(float));
+
+    for (size_t i = 0; i < M; ++i) {
+        for (size_t k = 0; k < K; ++k) {
+            float a_ik = a[i * K + k];
+            for (size_t j = 0; j < N; ++j) {
+                float prod = QB(a_ik * b[k * N + j], dtype);
+                c[i * N + j] = QB(c[i * N + j] + prod, dtype);
+            }
+        }
+    }
+}
+
+void softmax_bfp(const float* input, float* output,
+                 size_t batch, size_t seq, bfp_io::BFPType dtype) {
+    for (size_t b = 0; b < batch; ++b) {
+        const float* row = input + b * seq;
+        float* out_row = output + b * seq;
+
+        float max_val = row[0];
+        for (size_t i = 1; i < seq; ++i) {
+            max_val = std::max(max_val, row[i]);
+        }
+
+        float sum = 0.0f;
+        for (size_t i = 0; i < seq; ++i) {
+            float diff = QB(row[i] - max_val, dtype);
+            out_row[i] = QB(std::exp(diff), dtype);
+            sum = QB(sum + out_row[i], dtype);
+        }
+
+        for (size_t i = 0; i < seq; ++i) {
+            out_row[i] = QB(out_row[i] / sum, dtype);
+        }
+    }
+}
+
+void layernorm_bfp(const float* input, const float* gamma, const float* beta,
+                   float* output, size_t batch, size_t hidden, float eps, bfp_io::BFPType dtype) {
+    for (size_t b = 0; b < batch; ++b) {
+        const float* row = input + b * hidden;
+        float* out_row = output + b * hidden;
+
+        float mean = 0.0f;
+        for (size_t i = 0; i < hidden; ++i) {
+            mean = QB(mean + row[i], dtype);
+        }
+        mean = QB(mean / static_cast<float>(hidden), dtype);
+
+        float var = 0.0f;
+        for (size_t i = 0; i < hidden; ++i) {
+            float diff = QB(row[i] - mean, dtype);
+            var = QB(var + QB(diff * diff, dtype), dtype);
+        }
+        var = QB(var / static_cast<float>(hidden), dtype);
+
+        float inv_std = QB(1.0f / std::sqrt(QB(var + eps, dtype)), dtype);
+        for (size_t i = 0; i < hidden; ++i) {
+            float norm = QB(QB(row[i] - mean, dtype) * inv_std, dtype);
+            out_row[i] = QB(QB(norm * gamma[i], dtype) + beta[i], dtype);
+        }
+    }
+}
+
+void relu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        output[i] = QB(std::max(0.0f, input[i]), dtype);
+    }
+}
+
+void gelu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
+    const float sqrt_2_pi = 0.7978845608f;
+    const float coef = 0.044715f;
+
+    for (size_t i = 0; i < size; ++i) {
+        float x = input[i];
+        float x2 = QB(x * x, dtype);
+        float x3 = QB(x2 * x, dtype);
+        float term1 = QB(coef * x3, dtype);
+        float term2 = QB(x + term1, dtype);
+        float inner = QB(sqrt_2_pi * term2, dtype);
+        float tanh_val = QB(std::tanh(inner), dtype);
+        float sum = QB(1.0f + tanh_val, dtype);
+        float half_x = QB(0.5f * x, dtype);
+        output[i] = QB(half_x * sum, dtype);
+    }
+}
+
+void sigmoid_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        float neg_x = QB(-input[i], dtype);
+        float exp_val = QB(std::exp(neg_x), dtype);
+        float denom = QB(1.0f + exp_val, dtype);
+        output[i] = QB(1.0f / denom, dtype);
+    }
+}
+
+void tanh_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        output[i] = QB(std::tanh(input[i]), dtype);
+    }
+}
+
+void silu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        float x = input[i];
+        float neg_x = QB(-x, dtype);
+        float exp_val = QB(std::exp(neg_x), dtype);
+        float denom = QB(1.0f + exp_val, dtype);
+        float sig = QB(1.0f / denom, dtype);
+        output[i] = QB(x * sig, dtype);
+    }
+}
+
+void add_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = QB(a[i] + b[i], dtype);
+    }
+}
+
+void mul_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = QB(a[i] * b[i], dtype);
+    }
+}
+
+void div_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
+    for (size_t i = 0; i < size; ++i) {
+        c[i] = QB(a[i] / b[i], dtype);
+    }
+}
+
+#undef QB
 
 }  // namespace ops
 }  // namespace cpu_golden

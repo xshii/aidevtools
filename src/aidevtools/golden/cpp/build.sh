@@ -22,12 +22,14 @@ make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # 复制到 golden 目录
 cp cpu_golden "$SCRIPT_DIR/../"
+cp cpu_golden_bfp "$SCRIPT_DIR/../"
 
 echo ""
 echo "=== Build complete ==="
-echo "Executable: $SCRIPT_DIR/../cpu_golden"
+echo "Executables:"
+echo "  $SCRIPT_DIR/../cpu_golden      (GFloat: gfp4/gfp8/gfp16)"
+echo "  $SCRIPT_DIR/../cpu_golden_bfp  (BFP: bfp4/bfp8/bfp16)"
 echo ""
 echo "Usage:"
 echo "  ./cpu_golden matmul gfp16 a.bin b.bin c.bin 64 128 256"
-echo "  ./cpu_golden softmax gfp8 input.bin output.bin 4 64"
-echo "  ./cpu_golden layernorm gfp16 x.bin gamma.bin beta.bin y.bin 4 256"
+echo "  ./cpu_golden_bfp matmul bfp8 a.bin b.bin c.bin 64 128 256"

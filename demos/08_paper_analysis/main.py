@@ -3,22 +3,28 @@
 Transformer 模型时延分析 Demo
 
 演示如何使用 PyTorch 风格 F API 定义模型，自动生成 OpProfile 进行 Paper Analysis。
-注意: 仅使用有 cpu_golden 实现的算子 (matmul, softmax, layernorm, transpose, linear)
+
+有 cpu_golden 实现的算子:
+  - 矩阵运算: matmul, linear
+  - 归一化: layernorm, softmax
+  - 激活函数: relu, gelu, sigmoid, tanh, silu
+  - 逐元素: add, mul, div
+  - 其他: transpose
 
 使用方式:
-1. 调用 F.matmul, F.layer_norm, F.softmax 等有 cpu_golden 的算子
+1. 调用 F.matmul, F.layer_norm, F.softmax, F.gelu 等有 cpu_golden 的算子
 2. 调用 ops.get_profiles() 获取自动生成的 profiles
 3. 使用 PaperAnalyzer 分析时延
 
 Usage:
-    python transformer_analysis_demo.py
+    python demos/08_paper_analysis/main.py
 """
 
 import numpy as np
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools import ops
 from aidevtools.ops import _functional as F
@@ -100,8 +106,8 @@ def transformer_layer_ops(
     w_ffn1 = np.random.randn(hidden, ffn_hidden).astype(np.float32) * 0.02
     h = F.matmul(x_norm, w_ffn1)
 
-    # Activation (使用 softmax 代替 GELU，因为 GELU 没有 cpu_golden)
-    h = F.softmax(h, dim=-1)
+    # GELU Activation
+    h = F.gelu(h)
 
     # FFN2: ffn_hidden -> hidden
     w_ffn2 = np.random.randn(ffn_hidden, hidden).astype(np.float32) * 0.02

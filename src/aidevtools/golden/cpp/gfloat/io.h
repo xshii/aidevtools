@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -131,6 +132,42 @@ void gfloat4_to_fp32(const uint8_t* input, size_t size, float* output);
 // 计算打包后的字节数
 inline size_t gfloat4_packed_size(size_t element_count) {
     return (element_count + 1) / 2;  // 向上取整
+}
+
+// ==================== 量化辅助函数 (用于模拟硬件精度) ====================
+
+/**
+ * 将单个 fp32 值量化到 gfloat 精度
+ * 这用于模拟硬件中间计算使用低精度的行为
+ */
+inline float quantize_fp32_to_gfloat_precision(float val, GFloatType type) {
+    uint32_t bits;
+    std::memcpy(&bits, &val, sizeof(float));
+
+    switch (type) {
+        case GFloatType::GFLOAT4:
+            bits &= 0xF0000000u;  // 保留高 4 位
+            break;
+        case GFloatType::GFLOAT8:
+            bits &= 0xFF000000u;  // 保留高 8 位
+            break;
+        case GFloatType::GFLOAT16:
+            bits &= 0xFFFF0000u;  // 保留高 16 位
+            break;
+    }
+
+    float result;
+    std::memcpy(&result, &bits, sizeof(float));
+    return result;
+}
+
+/**
+ * 原地将 fp32 数组量化到 gfloat 精度
+ */
+inline void quantize_inplace(float* data, size_t size, GFloatType type) {
+    for (size_t i = 0; i < size; ++i) {
+        data[i] = quantize_fp32_to_gfloat_precision(data[i], type);
+    }
 }
 
 // ==================== 通用高级接口 ====================

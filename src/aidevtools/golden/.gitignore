@@ -1,3 +1,4 @@
 # Build artifacts
 cpu_golden
+cpu_golden_bfp
 cpp/build/
