@@ -4,7 +4,7 @@
 - gfloat 格式转换
 - subprocess 通用执行函数
 - 全局配置（dtype 等）
-- QuantizedTensor 支持
+- TracedTensor 支持
 
 用法:
     from aidevtools.ops.cpu_golden import (
@@ -27,8 +27,8 @@
         output_shape=(M, N),
     )
 
-使用 QuantizedTensor:
-    from aidevtools.ops import quantize, QuantizedTensor
+使用 TracedTensor:
+    from aidevtools.ops import quantize, TracedTensor
 
     # 在数据源头量化一次
     x = quantize(input_data, "gfp16")
@@ -215,6 +215,9 @@ def _get_bfp_params(dtype: str) -> Tuple[int, int]:
 def _fp32_to_bfp(x: np.ndarray, dtype: str) -> np.ndarray:
     """fp32 转换为 BFP 格式（单文件格式）
 
+    通过调用 C++ encode 命令实现：
+        ./cpu_golden_bfp encode <dtype> <input_fp32.bin> <output_packed.bin> <size>
+
     文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
 
     Args:
@@ -224,43 +227,38 @@ def _fp32_to_bfp(x: np.ndarray, dtype: str) -> np.ndarray:
     Returns:
         打包后的 int8 数组（exp + mantissa）
     """
-    block_size, mantissa_bits = _get_bfp_params(dtype)
-    max_mantissa = (1 << (mantissa_bits - 1)) - 1
+    _check_cpu_golden(dtype)
+    executable = _get_executable(dtype)
 
     flat = x.astype(np.float32).flatten()
     size = flat.size
-    num_blocks = (size + block_size - 1) // block_size
 
-    mantissas = np.zeros(size, dtype=np.int8)
-    shared_exps = np.zeros(num_blocks, dtype=np.int8)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_path = tmpdir / "input.bin"
+        output_path = tmpdir / "output.bin"
 
-    for b in range(num_blocks):
-        start = b * block_size
-        end = min(start + block_size, size)
-        block = flat[start:end]
+        # 保存 fp32 输入
+        flat.tofile(input_path)
 
-        # 找块内最大绝对值
-        max_abs = np.max(np.abs(block))
-        if max_abs < 1e-10:
-            shared_exp = -127
-        else:
-            shared_exp = int(np.floor(np.log2(max_abs))) + 1
+        # 调用 C++ encode
+        cmd = [str(executable), "encode", dtype, str(input_path), str(output_path), str(size)]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-        shared_exps[b] = np.int8(shared_exp)
+        if result.returncode != 0:
+            raise RuntimeError(f"BFP encode failed: {result.stderr}")
 
-        # 量化每个元素
-        scale = 2.0 ** (mantissa_bits - 1 - shared_exp)
-        for i in range(start, end):
-            rounded = int(np.round(flat[i] * scale))
-            rounded = max(-max_mantissa, min(max_mantissa, rounded))
-            mantissas[i] = np.int8(rounded)
+        # 读取打包后的 BFP 数据
+        packed = np.fromfile(output_path, dtype=np.int8)
 
-    # 打包: [exps][mantissas]
-    return np.concatenate([shared_exps, mantissas])
+    return packed
 
 
 def _bfp_to_fp32(packed: np.ndarray, dtype: str, size: int) -> np.ndarray:
     """BFP 格式转换为 fp32（单文件格式）
+
+    通过调用 C++ decode 命令实现：
+        ./cpu_golden_bfp decode <dtype> <input_packed.bin> <output_fp32.bin> <size>
 
     文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
 
@@ -272,23 +270,26 @@ def _bfp_to_fp32(packed: np.ndarray, dtype: str, size: int) -> np.ndarray:
     Returns:
         fp32 数组
     """
-    block_size, mantissa_bits = _get_bfp_params(dtype)
-    num_blocks = (size + block_size - 1) // block_size
+    _check_cpu_golden(dtype)
+    executable = _get_executable(dtype)
 
-    # 解包
-    shared_exps = packed[:num_blocks]
-    mantissas = packed[num_blocks:num_blocks + size]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_path = tmpdir / "input.bin"
+        output_path = tmpdir / "output.bin"
 
-    output = np.zeros(size, dtype=np.float32)
+        # 保存打包的 BFP 数据
+        packed.tofile(input_path)
 
-    for b in range(num_blocks):
-        start = b * block_size
-        end = min(start + block_size, size)
-        shared_exp = int(shared_exps[b])
+        # 调用 C++ decode
+        cmd = [str(executable), "decode", dtype, str(input_path), str(output_path), str(size)]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-        inv_scale = 2.0 ** (shared_exp - (mantissa_bits - 1))
-        for i in range(start, end):
-            output[i] = float(mantissas[i]) * inv_scale
+        if result.returncode != 0:
+            raise RuntimeError(f"BFP decode failed: {result.stderr}")
+
+        # 读取 fp32 输出
+        output = np.fromfile(output_path, dtype=np.float32)
 
     return output
 

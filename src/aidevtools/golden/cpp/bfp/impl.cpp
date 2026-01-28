@@ -17,7 +17,7 @@ namespace cpu_golden {
 namespace ops {
 
 // BFP 量化辅助宏
-#define QB(val, dtype) bfp_io::quantize_fp32_to_bfp_precision(val, dtype)
+#define BFP_QUANTIZE(val, dtype) bfp_io::quantize_fp32_to_bfp_precision(val, dtype)
 
 // ==================== MatMul ====================
 
@@ -135,8 +135,8 @@ void matmul_bfp(const float* a, const float* b, float* c,
         for (size_t k = 0; k < K; ++k) {
             float a_ik = a[i * K + k];
             for (size_t j = 0; j < N; ++j) {
-                float prod = QB(a_ik * b[k * N + j], dtype);
-                c[i * N + j] = QB(c[i * N + j] + prod, dtype);
+                float prod = BFP_QUANTIZE(a_ik * b[k * N + j], dtype);
+                c[i * N + j] = BFP_QUANTIZE(c[i * N + j] + prod, dtype);
             }
         }
     }
@@ -155,13 +155,13 @@ void softmax_bfp(const float* input, float* output,
 
         float sum = 0.0f;
         for (size_t i = 0; i < seq; ++i) {
-            float diff = QB(row[i] - max_val, dtype);
-            out_row[i] = QB(std::exp(diff), dtype);
-            sum = QB(sum + out_row[i], dtype);
+            float diff = BFP_QUANTIZE(row[i] - max_val, dtype);
+            out_row[i] = BFP_QUANTIZE(std::exp(diff), dtype);
+            sum = BFP_QUANTIZE(sum + out_row[i], dtype);
         }
 
         for (size_t i = 0; i < seq; ++i) {
-            out_row[i] = QB(out_row[i] / sum, dtype);
+            out_row[i] = BFP_QUANTIZE(out_row[i] / sum, dtype);
         }
     }
 }
@@ -174,28 +174,28 @@ void layernorm_bfp(const float* input, const float* gamma, const float* beta,
 
         float mean = 0.0f;
         for (size_t i = 0; i < hidden; ++i) {
-            mean = QB(mean + row[i], dtype);
+            mean = BFP_QUANTIZE(mean + row[i], dtype);
         }
-        mean = QB(mean / static_cast<float>(hidden), dtype);
+        mean = BFP_QUANTIZE(mean / static_cast<float>(hidden), dtype);
 
         float var = 0.0f;
         for (size_t i = 0; i < hidden; ++i) {
-            float diff = QB(row[i] - mean, dtype);
-            var = QB(var + QB(diff * diff, dtype), dtype);
+            float diff = BFP_QUANTIZE(row[i] - mean, dtype);
+            var = BFP_QUANTIZE(var + BFP_QUANTIZE(diff * diff, dtype), dtype);
         }
-        var = QB(var / static_cast<float>(hidden), dtype);
+        var = BFP_QUANTIZE(var / static_cast<float>(hidden), dtype);
 
-        float inv_std = QB(1.0f / std::sqrt(QB(var + eps, dtype)), dtype);
+        float inv_std = BFP_QUANTIZE(1.0f / std::sqrt(BFP_QUANTIZE(var + eps, dtype)), dtype);
         for (size_t i = 0; i < hidden; ++i) {
-            float norm = QB(QB(row[i] - mean, dtype) * inv_std, dtype);
-            out_row[i] = QB(QB(norm * gamma[i], dtype) + beta[i], dtype);
+            float norm = BFP_QUANTIZE(BFP_QUANTIZE(row[i] - mean, dtype) * inv_std, dtype);
+            out_row[i] = BFP_QUANTIZE(BFP_QUANTIZE(norm * gamma[i], dtype) + beta[i], dtype);
         }
     }
 }
 
 void relu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        output[i] = QB(std::max(0.0f, input[i]), dtype);
+        output[i] = BFP_QUANTIZE(std::max(0.0f, input[i]), dtype);
     }
 }
 
@@ -205,63 +205,63 @@ void gelu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dt
 
     for (size_t i = 0; i < size; ++i) {
         float x = input[i];
-        float x2 = QB(x * x, dtype);
-        float x3 = QB(x2 * x, dtype);
-        float term1 = QB(coef * x3, dtype);
-        float term2 = QB(x + term1, dtype);
-        float inner = QB(sqrt_2_pi * term2, dtype);
-        float tanh_val = QB(std::tanh(inner), dtype);
-        float sum = QB(1.0f + tanh_val, dtype);
-        float half_x = QB(0.5f * x, dtype);
-        output[i] = QB(half_x * sum, dtype);
+        float x2 = BFP_QUANTIZE(x * x, dtype);
+        float x3 = BFP_QUANTIZE(x2 * x, dtype);
+        float term1 = BFP_QUANTIZE(coef * x3, dtype);
+        float term2 = BFP_QUANTIZE(x + term1, dtype);
+        float inner = BFP_QUANTIZE(sqrt_2_pi * term2, dtype);
+        float tanh_val = BFP_QUANTIZE(std::tanh(inner), dtype);
+        float sum = BFP_QUANTIZE(1.0f + tanh_val, dtype);
+        float half_x = BFP_QUANTIZE(0.5f * x, dtype);
+        output[i] = BFP_QUANTIZE(half_x * sum, dtype);
     }
 }
 
 void sigmoid_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        float neg_x = QB(-input[i], dtype);
-        float exp_val = QB(std::exp(neg_x), dtype);
-        float denom = QB(1.0f + exp_val, dtype);
-        output[i] = QB(1.0f / denom, dtype);
+        float neg_x = BFP_QUANTIZE(-input[i], dtype);
+        float exp_val = BFP_QUANTIZE(std::exp(neg_x), dtype);
+        float denom = BFP_QUANTIZE(1.0f + exp_val, dtype);
+        output[i] = BFP_QUANTIZE(1.0f / denom, dtype);
     }
 }
 
 void tanh_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        output[i] = QB(std::tanh(input[i]), dtype);
+        output[i] = BFP_QUANTIZE(std::tanh(input[i]), dtype);
     }
 }
 
 void silu_bfp(const float* input, float* output, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
         float x = input[i];
-        float neg_x = QB(-x, dtype);
-        float exp_val = QB(std::exp(neg_x), dtype);
-        float denom = QB(1.0f + exp_val, dtype);
-        float sig = QB(1.0f / denom, dtype);
-        output[i] = QB(x * sig, dtype);
+        float neg_x = BFP_QUANTIZE(-x, dtype);
+        float exp_val = BFP_QUANTIZE(std::exp(neg_x), dtype);
+        float denom = BFP_QUANTIZE(1.0f + exp_val, dtype);
+        float sig = BFP_QUANTIZE(1.0f / denom, dtype);
+        output[i] = BFP_QUANTIZE(x * sig, dtype);
     }
 }
 
 void add_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        c[i] = QB(a[i] + b[i], dtype);
+        c[i] = BFP_QUANTIZE(a[i] + b[i], dtype);
     }
 }
 
 void mul_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        c[i] = QB(a[i] * b[i], dtype);
+        c[i] = BFP_QUANTIZE(a[i] * b[i], dtype);
     }
 }
 
 void div_bfp(const float* a, const float* b, float* c, size_t size, bfp_io::BFPType dtype) {
     for (size_t i = 0; i < size; ++i) {
-        c[i] = QB(a[i] / b[i], dtype);
+        c[i] = BFP_QUANTIZE(a[i] / b[i], dtype);
     }
 }
 
-#undef QB
+#undef BFP_QUANTIZE
 
 }  // namespace ops
 }  // namespace cpu_golden

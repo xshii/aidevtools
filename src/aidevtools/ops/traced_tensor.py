@@ -397,10 +397,6 @@ def wrap_traced_output(
     )
 
 
-# 兼容 QuantizedTensor 的别名
-QuantizedTensor = TracedTensor
-
-
 def quantize(
     data: Union[np.ndarray, TracedTensor],
     dtype: QuantizedType,

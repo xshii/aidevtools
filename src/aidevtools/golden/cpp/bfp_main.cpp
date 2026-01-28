@@ -39,6 +39,8 @@ void print_usage(const char* prog) {
     std::cerr << "CPU Golden CLI (BFP)\n\n"
               << "Usage:\n"
               << "  " << prog << " quantize <dtype> <input.bin> <output.bin> <size>\n"
+              << "  " << prog << " encode <dtype> <input_fp32.bin> <output_packed.bin> <size>\n"
+              << "  " << prog << " decode <dtype> <input_packed.bin> <output_fp32.bin> <size>\n"
               << "  " << prog << " matmul <dtype> <a.bin> <b.bin> <c.bin> <M> <K> <N>\n"
               << "  " << prog << " matmul_mixed <dtype_a> <dtype_b> <a.bin> <b.bin> <c.bin> <M> <K> <N>\n"
               << "  " << prog << " softmax <dtype> <input.bin> <output.bin> <batch> <seq>\n"
@@ -94,6 +96,68 @@ int run_quantize(int argc, char* argv[]) {
     }
 
     std::cerr << "[cpu_golden_bfp] quantize done: " << output_path << "\n";
+    return 0;
+}
+
+// ==================== Encode 命令 (fp32 -> BFP packed) ====================
+
+int run_encode(int argc, char* argv[]) {
+    if (argc < 6) {
+        std::cerr << "Error: encode requires 4 arguments\n";
+        return 1;
+    }
+
+    BFPType dtype = parse_bfp_type(argv[2]);
+    std::string input_path = argv[3];
+    std::string output_path = argv[4];
+    size_t size = std::stoull(argv[5]);
+
+    std::cerr << "[cpu_golden_bfp] encode: " << bfp_type_to_string(dtype)
+              << " [" << size << "] fp32 -> packed\n";
+
+    // 读取 fp32
+    auto input_fp32 = load_fp32(input_path);
+    if (input_fp32.size() < size) {
+        std::cerr << "Error: input size mismatch\n";
+        return 1;
+    }
+
+    // 保存为 BFP packed 格式
+    if (!save_as_bfp_packed(input_fp32.data(), size, output_path, dtype)) {
+        std::cerr << "Error: failed to save output\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden_bfp] encode done: " << output_path << "\n";
+    return 0;
+}
+
+// ==================== Decode 命令 (BFP packed -> fp32) ====================
+
+int run_decode(int argc, char* argv[]) {
+    if (argc < 6) {
+        std::cerr << "Error: decode requires 4 arguments\n";
+        return 1;
+    }
+
+    BFPType dtype = parse_bfp_type(argv[2]);
+    std::string input_path = argv[3];
+    std::string output_path = argv[4];
+    size_t size = std::stoull(argv[5]);
+
+    std::cerr << "[cpu_golden_bfp] decode: " << bfp_type_to_string(dtype)
+              << " [" << size << "] packed -> fp32\n";
+
+    // 读取 BFP packed
+    auto output_fp32 = load_bfp_packed_as_fp32(input_path, dtype, size);
+
+    // 保存为 fp32
+    if (!save_fp32(output_path, output_fp32.data(), size)) {
+        std::cerr << "Error: failed to save output\n";
+        return 1;
+    }
+
+    std::cerr << "[cpu_golden_bfp] decode done: " << output_path << "\n";
     return 0;
 }
 
@@ -351,6 +415,10 @@ int main(int argc, char* argv[]) {
     try {
         if (op == "quantize") {
             return run_quantize(argc, argv);
+        } else if (op == "encode") {
+            return run_encode(argc, argv);
+        } else if (op == "decode") {
+            return run_decode(argc, argv);
         } else if (op == "matmul") {
             return run_matmul(argc, argv);
         } else if (op == "matmul_mixed") {

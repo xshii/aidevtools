@@ -31,9 +31,6 @@ from aidevtools.ops.cpu_golden import (
 from aidevtools.ops.traced_tensor import TracedTensor
 from aidevtools.ops.registry import register_op
 
-# 兼容旧代码：QuantizedTensor 是 TracedTensor 的别名
-QuantizedTensor = TracedTensor
-
 
 # ============================================================
 # Torch 内部导入（对外不可见）
@@ -69,13 +66,13 @@ def _to_numpy(t) -> np.ndarray:
 
 
 def _extract_data(x, target_dtype: str) -> np.ndarray:
-    """从输入提取数据，支持 TracedTensor 和 QuantizedTensor
+    """从输入提取数据，支持 TracedTensor 和 TracedTensor
 
     如果输入是 TracedTensor 且精度匹配，直接返回内部数据（跳过转换）。
     否则转换为 fp32。
 
     Args:
-        x: 输入数据 (np.ndarray, TracedTensor, 或 QuantizedTensor)
+        x: 输入数据 (np.ndarray, TracedTensor, 或 TracedTensor)
         target_dtype: 目标精度 (gfp4/gfp8/gfp16)
 
     Returns:
@@ -99,7 +96,7 @@ def _unary_cpu_golden(op_name: str, x) -> np.ndarray:
 
     Args:
         op_name: 算子名称 (对应 C++ golden 命令)
-        x: 输入数组 (np.ndarray 或 QuantizedTensor)
+        x: 输入数组 (np.ndarray 或 TracedTensor)
 
     Returns:
         输出数组 (shape 与输入相同)
@@ -129,8 +126,8 @@ def _binary_cpu_golden(op_name: str, a, b) -> np.ndarray:
 
     Args:
         op_name: 算子名称 (对应 C++ golden 命令)
-        a: 第一个输入数组 (np.ndarray 或 QuantizedTensor)
-        b: 第二个输入数组 (np.ndarray 或 QuantizedTensor)
+        a: 第一个输入数组 (np.ndarray 或 TracedTensor)
+        b: 第二个输入数组 (np.ndarray 或 TracedTensor)
 
     Returns:
         输出数组 (shape 与 a 相同)
