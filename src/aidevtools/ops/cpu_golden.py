@@ -49,9 +49,24 @@ from aidevtools.core.config import get_config, set_config
 # CPU Golden 可执行文件路径 (在 golden 目录)
 _GOLDEN_DIR = Path(__file__).parent.parent / "golden"
 _CPU_GOLDEN_PATH = _GOLDEN_DIR / "cpu_golden"
+_CPU_GOLDEN_BFP_PATH = _GOLDEN_DIR / "cpu_golden_bfp"
 _CPP_DIR = _GOLDEN_DIR / "cpp"
 
 GFloatType = Literal["gfp4", "gfp8", "gfp16"]
+BFPType = Literal["bfp4", "bfp8", "bfp16"]
+QuantizedType = Literal["gfp4", "gfp8", "gfp16", "bfp4", "bfp8", "bfp16"]
+
+
+def _is_bfp_type(dtype: str) -> bool:
+    """判断是否是 BFP 类型"""
+    return dtype in ("bfp4", "bfp8", "bfp16")
+
+
+def _get_executable(dtype: str) -> Path:
+    """根据 dtype 获取对应的可执行文件"""
+    if _is_bfp_type(dtype):
+        return _CPU_GOLDEN_BFP_PATH
+    return _CPU_GOLDEN_PATH
 
 
 # ============================================================
@@ -59,23 +74,26 @@ GFloatType = Literal["gfp4", "gfp8", "gfp16"]
 # ============================================================
 
 def set_cpu_golden_dtype(
-    dtype: GFloatType = "gfp16",
-    dtype_matmul_a: Optional[GFloatType] = None,
-    dtype_matmul_b: Optional[GFloatType] = None,
-    dtype_matmul_out: Optional[GFloatType] = None,
+    dtype: QuantizedType = "gfp16",
+    dtype_matmul_a: Optional[QuantizedType] = None,
+    dtype_matmul_b: Optional[QuantizedType] = None,
+    dtype_matmul_out: Optional[QuantizedType] = None,
 ):
     """
     设置 CPU Golden 全局 dtype 配置
 
     Args:
-        dtype: 默认 gfloat 类型
+        dtype: 量化类型 (gfp4/gfp8/gfp16/bfp4/bfp8/bfp16)
         dtype_matmul_a: matmul 的 A 矩阵类型 (混合精度)
         dtype_matmul_b: matmul 的 B 矩阵类型 (混合精度)
         dtype_matmul_out: matmul 的输出类型 (混合精度)
 
     用法:
-        # 同精度
+        # GFloat 精度
         set_cpu_golden_dtype("gfp16")
+
+        # BFP 精度
+        set_cpu_golden_dtype("bfp8")
 
         # 混合精度 matmul: A 用 gfp8, B 用 gfp4, 输出用 gfp16
         set_cpu_golden_dtype(
@@ -117,16 +135,28 @@ def get_matmul_dtypes() -> Tuple[GFloatType, GFloatType, GFloatType]:
 # ============================================================
 
 def is_cpu_golden_available() -> bool:
-    """检查 cpu_golden 是否可用"""
+    """检查 cpu_golden (GFloat) 是否可用"""
     return _CPU_GOLDEN_PATH.exists()
 
 
-def _check_cpu_golden():
-    """检查 cpu_golden 是否存在"""
+def is_bfp_available() -> bool:
+    """检查 cpu_golden_bfp (BFP) 是否可用"""
+    return _CPU_GOLDEN_BFP_PATH.exists()
+
+
+def _check_cpu_golden(dtype: str = "gfp16"):
+    """检查 cpu_golden 是否存在
+
+    Args:
+        dtype: 精度类型，用于选择正确的可执行文件
+    """
     import os
     import stat
 
-    if not _CPU_GOLDEN_PATH.exists():
+    executable = _get_executable(dtype)
+    exe_name = "cpu_golden_bfp" if _is_bfp_type(dtype) else "cpu_golden"
+
+    if not executable.exists():
         # 检查目录是否存在
         if not _GOLDEN_DIR.exists():
             detail = f"目录不存在: {_GOLDEN_DIR}"
@@ -138,10 +168,10 @@ def _check_cpu_golden():
             detail = f"目录存在但缺少可执行文件\n  目录内容: {[f.name for f in files]}"
 
         raise FileNotFoundError(
-            f"CPU Golden 可执行文件未找到\n"
+            f"CPU Golden 可执行文件未找到 ({exe_name})\n"
             f"{'=' * 50}\n"
             f"原因: {detail}\n"
-            f"期望路径: {_CPU_GOLDEN_PATH}\n"
+            f"期望路径: {executable}\n"
             f"{'=' * 50}\n"
             f"解决方法:\n"
             f"  cd {_CPP_DIR}\n"
@@ -149,26 +179,126 @@ def _check_cpu_golden():
         )
 
     # 检查是否可执行
-    if not os.access(_CPU_GOLDEN_PATH, os.X_OK):
-        file_stat = os.stat(_CPU_GOLDEN_PATH)
+    if not os.access(executable, os.X_OK):
+        file_stat = os.stat(executable)
         mode = stat.filemode(file_stat.st_mode)
         raise PermissionError(
-            f"CPU Golden 文件存在但没有执行权限\n"
+            f"CPU Golden 文件存在但没有执行权限 ({exe_name})\n"
             f"{'=' * 50}\n"
-            f"文件: {_CPU_GOLDEN_PATH}\n"
+            f"文件: {executable}\n"
             f"权限: {mode}\n"
             f"{'=' * 50}\n"
             f"解决方法:\n"
-            f"  chmod +x {_CPU_GOLDEN_PATH}\n"
+            f"  chmod +x {executable}\n"
         )
 
 
 # ============================================================
-# gfloat 格式转换
+# 格式转换 (GFloat 和 BFP)
 # ============================================================
 
-def _fp32_to_gfloat(x: np.ndarray, dtype: GFloatType) -> np.ndarray:
-    """fp32 转换为 gfloat 格式"""
+def _get_bfp_params(dtype: str) -> Tuple[int, int]:
+    """获取 BFP 参数
+
+    Returns:
+        (block_size, mantissa_bits)
+    """
+    if dtype == "bfp4":
+        return 64, 2
+    if dtype == "bfp8":
+        return 32, 4
+    if dtype == "bfp16":
+        return 16, 8
+    raise ValueError(f"Unknown BFP dtype: {dtype}")
+
+
+def _fp32_to_bfp(x: np.ndarray, dtype: str) -> np.ndarray:
+    """fp32 转换为 BFP 格式（单文件格式）
+
+    文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
+
+    Args:
+        x: 输入 fp32 数组
+        dtype: BFP 类型 (bfp4/bfp8/bfp16)
+
+    Returns:
+        打包后的 int8 数组（exp + mantissa）
+    """
+    block_size, mantissa_bits = _get_bfp_params(dtype)
+    max_mantissa = (1 << (mantissa_bits - 1)) - 1
+
+    flat = x.astype(np.float32).flatten()
+    size = flat.size
+    num_blocks = (size + block_size - 1) // block_size
+
+    mantissas = np.zeros(size, dtype=np.int8)
+    shared_exps = np.zeros(num_blocks, dtype=np.int8)
+
+    for b in range(num_blocks):
+        start = b * block_size
+        end = min(start + block_size, size)
+        block = flat[start:end]
+
+        # 找块内最大绝对值
+        max_abs = np.max(np.abs(block))
+        if max_abs < 1e-10:
+            shared_exp = -127
+        else:
+            shared_exp = int(np.floor(np.log2(max_abs))) + 1
+
+        shared_exps[b] = np.int8(shared_exp)
+
+        # 量化每个元素
+        scale = 2.0 ** (mantissa_bits - 1 - shared_exp)
+        for i in range(start, end):
+            rounded = int(np.round(flat[i] * scale))
+            rounded = max(-max_mantissa, min(max_mantissa, rounded))
+            mantissas[i] = np.int8(rounded)
+
+    # 打包: [exps][mantissas]
+    return np.concatenate([shared_exps, mantissas])
+
+
+def _bfp_to_fp32(packed: np.ndarray, dtype: str, size: int) -> np.ndarray:
+    """BFP 格式转换为 fp32（单文件格式）
+
+    文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
+
+    Args:
+        packed: 打包的 int8 数组（exp + mantissa）
+        dtype: BFP 类型
+        size: 输出元素数量
+
+    Returns:
+        fp32 数组
+    """
+    block_size, mantissa_bits = _get_bfp_params(dtype)
+    num_blocks = (size + block_size - 1) // block_size
+
+    # 解包
+    shared_exps = packed[:num_blocks]
+    mantissas = packed[num_blocks:num_blocks + size]
+
+    output = np.zeros(size, dtype=np.float32)
+
+    for b in range(num_blocks):
+        start = b * block_size
+        end = min(start + block_size, size)
+        shared_exp = int(shared_exps[b])
+
+        inv_scale = 2.0 ** (shared_exp - (mantissa_bits - 1))
+        for i in range(start, end):
+            output[i] = float(mantissas[i]) * inv_scale
+
+    return output
+
+
+def _fp32_to_gfloat(x: np.ndarray, dtype: str) -> np.ndarray:
+    """fp32 转换为 gfloat 格式
+
+    注意: 此函数只处理 GFloat 格式，BFP 使用 _fp32_to_bfp
+    """
+    # GFloat 格式转换
     bits = x.astype(np.float32).view(np.uint32)
     if dtype == "gfp16":
         return (bits >> 16).astype(np.uint16)
@@ -189,8 +319,12 @@ def _fp32_to_gfloat(x: np.ndarray, dtype: GFloatType) -> np.ndarray:
     raise ValueError(f"Unknown dtype: {dtype}")
 
 
-def _gfloat_to_fp32(data: np.ndarray, dtype: GFloatType, size: Optional[int] = None) -> np.ndarray:
-    """gfloat 格式转换为 fp32"""
+def _gfloat_to_fp32(data: np.ndarray, dtype: str, size: Optional[int] = None) -> np.ndarray:
+    """gfloat 格式转换为 fp32
+
+    注意: 此函数只处理 GFloat 格式，BFP 使用 _bfp_to_fp32
+    """
+    # GFloat 格式转换
     if dtype == "gfp16":
         bits = data.astype(np.uint32) << 16
         return bits.view(np.float32)
@@ -213,7 +347,7 @@ def _gfloat_to_fp32(data: np.ndarray, dtype: GFloatType, size: Optional[int] = N
     raise ValueError(f"Unknown dtype: {dtype}")
 
 
-def _get_gfloat_numpy_dtype(dtype: GFloatType):
+def _get_gfloat_numpy_dtype(dtype: str):
     """获取 gfloat 对应的 numpy dtype"""
     if dtype == "gfp16":
         return np.uint16
@@ -227,9 +361,9 @@ def _get_gfloat_numpy_dtype(dtype: GFloatType):
 def run_cpu_golden(
     op_name: str,
     cmd_args: List[str],
-    inputs: Dict[str, Tuple[np.ndarray, GFloatType]],
+    inputs: Dict[str, Tuple[np.ndarray, str]],
     output_name: str,
-    output_dtype: GFloatType,
+    output_dtype: str,
     output_size: int,
     output_shape: Tuple[int, ...],
 ) -> np.ndarray:
@@ -241,14 +375,19 @@ def run_cpu_golden(
         cmd_args: 命令行参数 (不含输入输出文件路径)
         inputs: 输入数据 {文件名: (数组, dtype)}
         output_name: 输出文件名
-        output_dtype: 输出数据的 gfloat 类型
+        output_dtype: 输出数据的精度类型 (gfp4/gfp8/gfp16/bfp4/bfp8/bfp16)
         output_size: 输出元素数量
         output_shape: 输出 shape
 
     Returns:
         输出数组
     """
-    _check_cpu_golden()
+    # 判断是用 GFloat 还是 BFP 可执行文件
+    use_bfp = _is_bfp_type(output_dtype)
+    primary_dtype = output_dtype
+
+    _check_cpu_golden(primary_dtype)
+    executable = _get_executable(primary_dtype)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -257,20 +396,23 @@ def run_cpu_golden(
         input_paths = {}
         for name, (arr, dtype) in inputs.items():
             path = tmpdir / name
-            _fp32_to_gfloat(arr, dtype).tofile(path)
+            if _is_bfp_type(dtype):
+                # BFP: 单文件格式 [exps][mantissas]
+                _fp32_to_bfp(arr, dtype).tofile(path)
+            else:
+                # GFloat: 压缩格式
+                _fp32_to_gfloat(arr, dtype).tofile(path)
             input_paths[name] = str(path)
 
         # 输出路径
         output_path = tmpdir / output_name
 
         # 构建完整命令 (替换占位符)
-        full_cmd = [str(_CPU_GOLDEN_PATH)]
+        full_cmd = [str(executable)]
         for arg in cmd_args:
             if arg == "@output":
-                # @output -> 输出文件路径
                 full_cmd.append(str(output_path))
             elif arg.startswith("@"):
-                # @input_name -> 对应输入文件的路径
                 full_cmd.append(input_paths.get(arg[1:], str(tmpdir / arg[1:])))
             else:
                 full_cmd.append(arg)
@@ -282,8 +424,14 @@ def run_cpu_golden(
             raise RuntimeError(f"cpu_golden {op_name} failed: {result.stderr}")
 
         # 读取输出
-        np_dtype = _get_gfloat_numpy_dtype(output_dtype)
-        out_gfp = np.fromfile(output_path, dtype=np_dtype)
-        out = _gfloat_to_fp32(out_gfp, output_dtype, output_size)
+        if use_bfp:
+            # BFP: 读取单文件格式 [exps][mantissas]
+            packed = np.fromfile(output_path, dtype=np.int8)
+            out = _bfp_to_fp32(packed, output_dtype, output_size)
+        else:
+            # GFloat: 读取压缩格式
+            np_dtype = _get_gfloat_numpy_dtype(output_dtype)
+            out_gfp = np.fromfile(output_path, dtype=np_dtype)
+            out = _gfloat_to_fp32(out_gfp, output_dtype, output_size)
 
     return out.reshape(output_shape)

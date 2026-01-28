@@ -139,7 +139,7 @@ void bfp_to_fp32(const int8_t* mantissas, const int8_t* shared_exps,
 // ==================== 高级接口 ====================
 
 /**
- * fp32 数组转换为 BFP 并保存
+ * fp32 数组转换为 BFP 并保存（双文件格式，已废弃）
  *
  * @param input fp32 输入数据
  * @param size 数据大小
@@ -154,7 +154,7 @@ bool save_as_bfp(const float* input, size_t size,
                  BFPType type);
 
 /**
- * 从文件加载 BFP 并转换为 fp32
+ * 从文件加载 BFP 并转换为 fp32（双文件格式，已废弃）
  *
  * @param mantissa_path mantissa 文件路径
  * @param exponent_path shared exponent 文件路径
@@ -166,12 +166,42 @@ std::vector<float> load_bfp_as_fp32(const std::string& mantissa_path,
                                      BFPType type);
 
 /**
- * 从文件加载 BFP 并转换为 fp32 (指定元素数量)
+ * 从文件加载 BFP 并转换为 fp32（双文件格式，已废弃，指定元素数量）
  */
 std::vector<float> load_bfp_as_fp32(const std::string& mantissa_path,
                                      const std::string& exponent_path,
                                      BFPType type,
                                      size_t element_count);
+
+// ==================== 单文件格式接口（推荐） ====================
+
+/**
+ * fp32 数组转换为 BFP 并保存（单文件格式）
+ *
+ * 文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
+ *
+ * @param input fp32 输入数据
+ * @param size 数据大小
+ * @param path 输出文件路径
+ * @param type BFP 格式类型
+ * @return 是否成功
+ */
+bool save_as_bfp_packed(const float* input, size_t size,
+                        const std::string& path, BFPType type);
+
+/**
+ * 从单文件加载 BFP 并转换为 fp32
+ *
+ * 文件格式: [shared_exps (num_blocks 个 int8)] [mantissas (size 个 int8)]
+ *
+ * @param path 文件路径
+ * @param type BFP 格式类型
+ * @param element_count 元素数量（用于计算 num_blocks）
+ * @return fp32 数据
+ */
+std::vector<float> load_bfp_packed_as_fp32(const std::string& path,
+                                            BFPType type,
+                                            size_t element_count);
 
 // ==================== BFP 精度模拟辅助函数 ====================
 

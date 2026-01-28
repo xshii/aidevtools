@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from aidevtools.core.constants import (
+    BFP_TYPES,
     DEFAULT_ATOL,
     DEFAULT_GFLOAT_TYPE,
     DEFAULT_MIN_COSINE,
@@ -11,6 +12,9 @@ from aidevtools.core.constants import (
     DEFAULT_RTOL,
     GFLOAT_TYPES,
 )
+
+# 合并所有量化类型
+ALL_QUANTIZED_TYPES = GFLOAT_TYPES + BFP_TYPES
 
 
 @dataclass
@@ -56,8 +60,8 @@ class GlobalConfig:
             raise ValueError(f"golden_mode must be 'python' or 'cpp', got '{self.golden_mode}'")
         if self.precision not in ("pure", "quant"):
             raise ValueError(f"precision must be 'pure' or 'quant', got '{self.precision}'")
-        if self.cpu_golden.dtype not in GFLOAT_TYPES:
-            raise ValueError(f"cpu_golden.dtype must be one of {GFLOAT_TYPES}")
+        if self.cpu_golden.dtype not in ALL_QUANTIZED_TYPES:
+            raise ValueError(f"cpu_golden.dtype must be one of {ALL_QUANTIZED_TYPES}")
 
 
 # 全局配置实例 (线程安全)

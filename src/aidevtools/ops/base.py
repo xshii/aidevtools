@@ -10,16 +10,56 @@
 2. cpu_golden/gpu_golden 计算 golden（C++ 实现）
 3. torch_reference 计算 reference（torch fp32，作为 ground truth）
 4. 比对 golden 和 reference
+
+比对模式：
+- SINGLE_OP: 每个算子独立比对（默认）
+- FULL_GRAPH: 只比对最终输出
+- MIXED: 自动生成单算子 + 双算子组合测试
 """
 
+from dataclasses import dataclass, field
+from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
 from aidevtools.core.config import get_config, set_config
 from aidevtools.core.log import logger
+
+
+# ============================================================
+# 比对模式
+# ============================================================
+
+
+class CompareMode(Enum):
+    """比对模式
+
+    - SINGLE_OP: 每个算子独立比对（默认，当前行为）
+    - FULL_GRAPH: 只比对最终输出
+    - MIXED: 自动生成单算子 + 双算子组合测试
+    """
+    SINGLE_OP = "single_op"
+    FULL_GRAPH = "full_graph"
+    MIXED = "mixed"
+
+
+@dataclass
+class OpNode:
+    """计算图中的算子节点"""
+    name: str           # 算子全名（如 "matmul_0"）
+    op_type: str        # 算子类型（如 "matmul"）
+    inputs: List[str] = field(default_factory=list)   # 输入节点名（source_op）
+    input_data: Dict[str, Any] = field(default_factory=dict)  # 输入数据快照
+    output_data: Optional[np.ndarray] = None  # 输出数据
+
+
+# 全局状态
+_compare_mode: CompareMode = CompareMode.SINGLE_OP
+_graph: Dict[str, OpNode] = {}  # 计算图：op_name -> OpNode
+_compare_points: set = set()    # 标记需要比对的算子
 
 
 def fp32_reference(func: Callable) -> Callable:
@@ -149,10 +189,14 @@ def get_records() -> List[Dict[str, Any]]:
 
 
 def clear() -> None:
-    """清空记录和 profiles"""
+    """清空记录、profiles 和计算图，重置比对模式"""
+    global _compare_mode  # pylint: disable=global-statement
     _records.clear()
     _counter.clear()
     _profiles.clear()
+    _graph.clear()
+    _compare_points.clear()
+    _compare_mode = CompareMode.SINGLE_OP  # 重置为默认模式
 
 
 def set_profile_enabled(enabled: bool) -> None:
@@ -272,6 +316,171 @@ def get_profiles() -> List[Any]:
         result = analyzer.analyze()
     """
     return _profiles.copy()
+
+
+# ============================================================
+# 比对模式 API
+# ============================================================
+
+
+def set_compare_mode(mode: CompareMode) -> None:
+    """设置比对模式
+
+    Args:
+        mode: CompareMode 枚举值
+            - SINGLE_OP: 每个算子独立比对（默认）
+            - FULL_GRAPH: 只比对最终输出
+            - MIXED: 自动生成单算子 + 双算子组合测试
+
+    Example:
+        >>> from aidevtools.ops.base import CompareMode
+        >>> import aidevtools.ops as ops
+        >>>
+        >>> ops.set_compare_mode(CompareMode.MIXED)
+        >>> ops.clear()
+        >>>
+        >>> y = F.matmul(x, w)
+        >>> y = F.gelu(y)
+        >>>
+        >>> test_cases = ops.generate_test_cases()
+    """
+    global _compare_mode  # pylint: disable=global-statement
+    _compare_mode = mode
+    logger.info(f"设置 compare_mode = {mode.value}")
+
+
+def get_compare_mode() -> CompareMode:
+    """获取当前比对模式"""
+    return _compare_mode
+
+
+def mark_compare_point(op_name: str) -> None:
+    """标记需要比对的算子
+
+    在 FULL_GRAPH 模式下，可以用此函数标记中间需要比对的算子。
+
+    Args:
+        op_name: 算子名（如 "matmul_0"）
+    """
+    _compare_points.add(op_name)
+
+
+def get_graph() -> Dict[str, OpNode]:
+    """获取计算图
+
+    Returns:
+        算子名到 OpNode 的映射
+    """
+    return _graph.copy()
+
+
+def get_graph_ops() -> List[str]:
+    """获取计算图中所有算子名（按执行顺序）
+
+    Returns:
+        算子名列表
+    """
+    return list(_graph.keys())
+
+
+def _should_compare(op_name: str) -> bool:
+    """判断当前算子是否需要比对
+
+    Args:
+        op_name: 算子全名（如 "matmul_0"）
+
+    Returns:
+        是否需要比对
+    """
+    if _compare_mode == CompareMode.SINGLE_OP:
+        # 单算子模式：每个算子都比对
+        return True
+    elif _compare_mode == CompareMode.FULL_GRAPH:
+        # 完整图模式：只比对标记点（如果有），否则不比对
+        return op_name in _compare_points
+    else:
+        # 混合模式：记录但不比对，由 generate_test_cases 生成测试
+        return False
+
+
+def _extract_source_ops(args: tuple, kwargs: dict) -> List[str]:
+    """从参数中提取来源算子
+
+    Args:
+        args: 位置参数
+        kwargs: 关键字参数
+
+    Returns:
+        来源算子名列表
+    """
+    from aidevtools.ops.traced_tensor import TracedTensor
+
+    source_ops = []
+    for arg in args:
+        if isinstance(arg, TracedTensor) and arg.source_op is not None:
+            source_ops.append(arg.source_op)
+    for v in kwargs.values():
+        if isinstance(v, TracedTensor) and v.source_op is not None:
+            source_ops.append(v.source_op)
+    return source_ops
+
+
+def _record_graph_node(
+    full_name: str,
+    op_name: str,
+    args: tuple,
+    kwargs: dict,
+    output_data: np.ndarray,
+) -> None:
+    """记录计算图节点
+
+    Args:
+        full_name: 算子全名（如 "matmul_0"）
+        op_name: 算子类型（如 "matmul"）
+        args: 位置参数
+        kwargs: 关键字参数
+        output_data: 输出数据
+    """
+    from aidevtools.ops.traced_tensor import TracedTensor
+
+    # 提取来源算子
+    source_ops = _extract_source_ops(args, kwargs)
+
+    # 收集输入数据快照（用于后续重放）
+    input_data = {}
+    for i, arg in enumerate(args):
+        if isinstance(arg, TracedTensor):
+            input_data[f"arg_{i}"] = arg.data.copy()
+        elif isinstance(arg, np.ndarray):
+            input_data[f"arg_{i}"] = arg.copy()
+    for k, v in kwargs.items():
+        if isinstance(v, TracedTensor):
+            input_data[k] = v.data.copy()
+        elif isinstance(v, np.ndarray):
+            input_data[k] = v.copy()
+
+    # 创建节点
+    node = OpNode(
+        name=full_name,
+        op_type=op_name,
+        inputs=source_ops,
+        input_data=input_data,
+        output_data=output_data.copy() if output_data is not None else None,
+    )
+    _graph[full_name] = node
+
+
+def compare_final() -> Optional[Dict[str, Any]]:
+    """比对最终输出（FULL_GRAPH 模式）
+
+    返回最后一个算子的比对结果。
+
+    Returns:
+        比对结果字典，包含 golden、reference、diff 等
+    """
+    if not _records:
+        return None
+    return _records[-1]
 
 
 def _parse_param_values(args: tuple, kwargs: dict, param_names: list) -> dict:
@@ -527,7 +736,7 @@ class Op:
             f"请实现 cpu_golden 或 gpu_golden 方法"
         )
 
-    def __call__(self, *args, **kwargs) -> np.ndarray:
+    def __call__(self, *args, **kwargs) -> Union[np.ndarray, "TracedTensor"]:
         """
         调用算子
 
@@ -535,13 +744,38 @@ class Op:
         - profile-only 模式: 只生成 profile，不执行计算
         - 正常模式: 执行 golden + reference
 
+        返回值：
+        - 如果输入包含 TracedTensor，返回 TracedTensor（带溯源信息）
+        - 否则返回 np.ndarray（兼容旧行为）
+
         golden: cpu_golden/gpu_golden (C++ 实现)
         reference: torch_reference (torch 内部计算，外部不可见)
         """
+        from aidevtools.ops.traced_tensor import TracedTensor, wrap_traced_output
+
         # 计数
         idx = _counter.get(self.name, 0)
         _counter[self.name] = idx + 1
         full_name = f"{self.name}_{idx}"
+
+        # 检查输入是否包含 TracedTensor（用于决定输出类型）
+        has_traced_input = any(
+            isinstance(arg, TracedTensor) for arg in args
+        ) or any(
+            isinstance(v, TracedTensor) for v in kwargs.values()
+        )
+
+        # 获取输入的 dtype（如果有 TracedTensor）
+        input_dtype = None
+        for arg in args:
+            if isinstance(arg, TracedTensor) and arg.dtype is not None:
+                input_dtype = arg.dtype
+                break
+        if input_dtype is None:
+            for v in kwargs.values():
+                if isinstance(v, TracedTensor) and v.dtype is not None:
+                    input_dtype = v.dtype
+                    break
 
         # profile-only 模式：只生成 profile，跳过计算
         if _profile_only:
@@ -551,21 +785,35 @@ class Op:
                     _profiles.append(profile)
                     logger.debug(f"{full_name}: profile 生成完成 (profile-only)")
             # 返回第一个输入（保持数据流）
-            return args[0] if args else None
+            first_input = args[0] if args else None
+            if has_traced_input and first_input is not None:
+                if isinstance(first_input, TracedTensor):
+                    return first_input.with_source(full_name)
+                return wrap_traced_output(np.asarray(first_input), input_dtype, full_name)
+            return first_input
 
         # 执行 golden (C++ 实现，接收原始 fp32，内部会做量化)
         golden_output = self._get_golden(*args, **kwargs)
         logger.debug(f"{full_name}: golden 执行完成")
 
-        # 对输入数据进行量化/反量化（模拟硬件精度损失）
-        quantized_args, quantized_kwargs = self._quantize_inputs(args, kwargs)
+        # 根据比对模式决定是否执行 reference 和比对
+        should_compare = _should_compare(full_name)
 
-        # 执行 reference (torch 计算，使用量化/反量化后的 fp32)
-        reference_output = self._get_reference(*quantized_args, **quantized_kwargs)
-        if reference_output is not None:
-            logger.debug(f"{full_name}: reference 执行完成")
+        reference_output = None
+        if should_compare:
+            # 对输入数据进行量化/反量化（模拟硬件精度损失）
+            quantized_args, quantized_kwargs = self._quantize_inputs(args, kwargs)
 
-        # 记录
+            # 执行 reference (torch 计算，使用量化/反量化后的 fp32)
+            reference_output = self._get_reference(*quantized_args, **quantized_kwargs)
+            if reference_output is not None:
+                logger.debug(f"{full_name}: reference 执行完成")
+
+        # 记录计算图节点（用于 MIXED 模式）
+        if _compare_mode in (CompareMode.FULL_GRAPH, CompareMode.MIXED):
+            _record_graph_node(full_name, self.name, args, kwargs, golden_output)
+
+        # 记录（所有模式都记录，但 reference 可能为 None）
         record = {
             "name": full_name,
             "op": self.name,
@@ -583,6 +831,9 @@ class Op:
                 _profiles.append(profile)
                 logger.debug(f"{full_name}: profile 生成完成")
 
+        # 返回 TracedTensor（如果输入包含 TracedTensor）或 np.ndarray
+        if has_traced_input:
+            return wrap_traced_output(golden_output, input_dtype, full_name)
         return golden_output
 
     def __repr__(self):

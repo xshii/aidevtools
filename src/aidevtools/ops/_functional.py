@@ -28,7 +28,11 @@ from aidevtools.ops.cpu_golden import (
     get_matmul_dtypes,
     run_cpu_golden,
 )
+from aidevtools.ops.traced_tensor import TracedTensor
 from aidevtools.ops.registry import register_op
+
+# 兼容旧代码：QuantizedTensor 是 TracedTensor 的别名
+QuantizedTensor = TracedTensor
 
 
 # ============================================================
@@ -57,6 +61,97 @@ def _to_numpy(t) -> np.ndarray:
     if t is None:
         return None
     return t.detach().cpu().numpy().astype(np.float32)
+
+
+# ============================================================
+# 通用 cpu_golden 辅助函数
+# ============================================================
+
+
+def _extract_data(x, target_dtype: str) -> np.ndarray:
+    """从输入提取数据，支持 TracedTensor 和 QuantizedTensor
+
+    如果输入是 TracedTensor 且精度匹配，直接返回内部数据（跳过转换）。
+    否则转换为 fp32。
+
+    Args:
+        x: 输入数据 (np.ndarray, TracedTensor, 或 QuantizedTensor)
+        target_dtype: 目标精度 (gfp4/gfp8/gfp16)
+
+    Returns:
+        fp32 numpy array
+    """
+    if isinstance(x, TracedTensor):
+        # TracedTensor: 检查精度是否匹配
+        if x.dtype == target_dtype:
+            # 精度匹配，直接使用（已量化的 fp32 表示）
+            return x.data
+        # 精度不匹配，使用原始数据
+        return np.asarray(x.data, dtype=np.float32)
+    # 普通数组，转为 fp32
+    return np.asarray(x, dtype=np.float32)
+
+
+def _unary_cpu_golden(op_name: str, x) -> np.ndarray:
+    """单目运算的通用 cpu_golden 实现
+
+    适用于: relu, gelu, sigmoid, tanh, silu 等激活函数
+
+    Args:
+        op_name: 算子名称 (对应 C++ golden 命令)
+        x: 输入数组 (np.ndarray 或 QuantizedTensor)
+
+    Returns:
+        输出数组 (shape 与输入相同)
+    """
+    dtype = get_cpu_golden_dtype()
+    data = _extract_data(x, dtype)
+    original_shape = data.shape
+    size = data.size
+
+    y = run_cpu_golden(
+        op_name=op_name,
+        cmd_args=[op_name, dtype, "@input.bin", "@output", str(size)],
+        inputs={"input.bin": (data.flatten(), dtype)},
+        output_name="output.bin",
+        output_dtype=dtype,
+        output_size=size,
+        output_shape=(size,),
+    )
+
+    return y.reshape(original_shape)
+
+
+def _binary_cpu_golden(op_name: str, a, b) -> np.ndarray:
+    """双目运算的通用 cpu_golden 实现
+
+    适用于: add, mul, div 等逐元素运算
+
+    Args:
+        op_name: 算子名称 (对应 C++ golden 命令)
+        a: 第一个输入数组 (np.ndarray 或 QuantizedTensor)
+        b: 第二个输入数组 (np.ndarray 或 QuantizedTensor)
+
+    Returns:
+        输出数组 (shape 与 a 相同)
+    """
+    dtype = get_cpu_golden_dtype()
+    a_data = _extract_data(a, dtype)
+    b_data = _extract_data(b, dtype)
+    original_shape = a_data.shape
+    size = a_data.size
+
+    c = run_cpu_golden(
+        op_name=op_name,
+        cmd_args=[op_name, dtype, "@a.bin", "@b.bin", "@output", str(size)],
+        inputs={"a.bin": (a_data.flatten(), dtype), "b.bin": (b_data.flatten(), dtype)},
+        output_name="output.bin",
+        output_dtype=dtype,
+        output_size=size,
+        output_shape=(size,),
+    )
+
+    return c.reshape(original_shape)
 
 
 # ============================================================
@@ -105,10 +200,16 @@ class Linear(Op):
     def cpu_golden(
         self, input: np.ndarray, weight: np.ndarray, bias: np.ndarray = None
     ) -> np.ndarray:
-        """C++ Golden 实现"""
+        """C++ Golden 实现
+
+        Linear = MatMul + Add，拆成两个量化操作
+        """
         y = MatMul().cpu_golden(input, weight.T)
         if bias is not None:
-            y = y + bias.astype(np.float32)
+            # bias 需要 broadcast 到 y 的 shape，用量化 add
+            # 注意：_binary_cpu_golden 要求 shape 相同，需要先 broadcast
+            bias_broadcast = np.broadcast_to(bias, y.shape)
+            y = _binary_cpu_golden("add", y, bias_broadcast)
         return y
 
     def torch_reference(
@@ -147,22 +248,7 @@ class ReLU(Op):
         return s.get("x_size", 0)
 
     def cpu_golden(self, x: np.ndarray, inplace: bool = False) -> np.ndarray:  # pylint: disable=unused-argument
-        dtype = get_cpu_golden_dtype()
-        x = np.asarray(x, dtype=np.float32)
-        original_shape = x.shape
-        size = x.size
-
-        y = run_cpu_golden(
-            op_name="relu",
-            cmd_args=["relu", dtype, "@input.bin", "@output", str(size)],
-            inputs={"input.bin": (x.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return y.reshape(original_shape)
+        return _unary_cpu_golden("relu", x)
 
     def torch_reference(self, x: np.ndarray, inplace: bool = False) -> np.ndarray:
         """Torch Reference: relu"""
@@ -190,22 +276,7 @@ class GELU(Op):
         return 10 * s.get("x_size", 0)
 
     def cpu_golden(self, x: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        x = np.asarray(x, dtype=np.float32)
-        original_shape = x.shape
-        size = x.size
-
-        y = run_cpu_golden(
-            op_name="gelu",
-            cmd_args=["gelu", dtype, "@input.bin", "@output", str(size)],
-            inputs={"input.bin": (x.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return y.reshape(original_shape)
+        return _unary_cpu_golden("gelu", x)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: gelu"""
@@ -233,22 +304,7 @@ class Sigmoid(Op):
         return 4 * s.get("x_size", 0)
 
     def cpu_golden(self, x: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        x = np.asarray(x, dtype=np.float32)
-        original_shape = x.shape
-        size = x.size
-
-        y = run_cpu_golden(
-            op_name="sigmoid",
-            cmd_args=["sigmoid", dtype, "@input.bin", "@output", str(size)],
-            inputs={"input.bin": (x.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return y.reshape(original_shape)
+        return _unary_cpu_golden("sigmoid", x)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: sigmoid"""
@@ -276,22 +332,7 @@ class Tanh(Op):
         return 6 * s.get("x_size", 0)
 
     def cpu_golden(self, x: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        x = np.asarray(x, dtype=np.float32)
-        original_shape = x.shape
-        size = x.size
-
-        y = run_cpu_golden(
-            op_name="tanh",
-            cmd_args=["tanh", dtype, "@input.bin", "@output", str(size)],
-            inputs={"input.bin": (x.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return y.reshape(original_shape)
+        return _unary_cpu_golden("tanh", x)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: tanh"""
@@ -319,22 +360,7 @@ class SiLU(Op):
         return 5 * s.get("x_size", 0)
 
     def cpu_golden(self, x: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        x = np.asarray(x, dtype=np.float32)
-        original_shape = x.shape
-        size = x.size
-
-        y = run_cpu_golden(
-            op_name="silu",
-            cmd_args=["silu", dtype, "@input.bin", "@output", str(size)],
-            inputs={"input.bin": (x.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return y.reshape(original_shape)
+        return _unary_cpu_golden("silu", x)
 
     def torch_reference(self, x: np.ndarray) -> np.ndarray:
         """Torch Reference: silu"""
@@ -696,23 +722,7 @@ class Add(Op):
         return s.get("a_size", 0)
 
     def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        a = np.asarray(a, dtype=np.float32)
-        b = np.asarray(b, dtype=np.float32)
-        original_shape = a.shape
-        size = a.size
-
-        c = run_cpu_golden(
-            op_name="add",
-            cmd_args=["add", dtype, "@a.bin", "@b.bin", "@output", str(size)],
-            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return c.reshape(original_shape)
+        return _binary_cpu_golden("add", a, b)
 
     def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Torch Reference: a + b"""
@@ -741,23 +751,7 @@ class Mul(Op):
         return s.get("a_size", 0)
 
     def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        a = np.asarray(a, dtype=np.float32)
-        b = np.asarray(b, dtype=np.float32)
-        original_shape = a.shape
-        size = a.size
-
-        c = run_cpu_golden(
-            op_name="mul",
-            cmd_args=["mul", dtype, "@a.bin", "@b.bin", "@output", str(size)],
-            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return c.reshape(original_shape)
+        return _binary_cpu_golden("mul", a, b)
 
     def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Torch Reference: a * b"""
@@ -786,23 +780,7 @@ class Div(Op):
         return s.get("a_size", 0)
 
     def cpu_golden(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        dtype = get_cpu_golden_dtype()
-        a = np.asarray(a, dtype=np.float32)
-        b = np.asarray(b, dtype=np.float32)
-        original_shape = a.shape
-        size = a.size
-
-        c = run_cpu_golden(
-            op_name="div",
-            cmd_args=["div", dtype, "@a.bin", "@b.bin", "@output", str(size)],
-            inputs={"a.bin": (a.flatten(), dtype), "b.bin": (b.flatten(), dtype)},
-            output_name="output.bin",
-            output_dtype=dtype,
-            output_size=size,
-            output_shape=(size,),
-        )
-
-        return c.reshape(original_shape)
+        return _binary_cpu_golden("div", a, b)
 
     def torch_reference(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Torch Reference: a / b"""

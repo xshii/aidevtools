@@ -171,4 +171,57 @@ std::vector<float> load_bfp_as_fp32(const std::string& mantissa_path,
     return output;
 }
 
+// ==================== 单文件格式接口 ====================
+
+bool save_as_bfp_packed(const float* input, size_t size,
+                        const std::string& path, BFPType type) {
+
+    int block_size = bfp_block_size(type);
+    int mantissa_bits = bfp_mantissa_bits(type);
+    size_t n_blocks = num_blocks(size, block_size);
+
+    std::vector<int8_t> mantissas(size);
+    std::vector<int8_t> shared_exps(n_blocks);
+
+    fp32_to_bfp(input, size, block_size, mantissa_bits,
+                mantissas.data(), shared_exps.data());
+
+    // 写入单文件: [exps][mantissas]
+    std::ofstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(shared_exps.data()), n_blocks);
+    file.write(reinterpret_cast<const char*>(mantissas.data()), size);
+    return file.good();
+}
+
+std::vector<float> load_bfp_packed_as_fp32(const std::string& path,
+                                            BFPType type,
+                                            size_t element_count) {
+
+    int block_size = bfp_block_size(type);
+    int mantissa_bits = bfp_mantissa_bits(type);
+    size_t n_blocks = num_blocks(element_count, block_size);
+
+    // 读取单文件
+    std::vector<int8_t> packed = load_binary<int8_t>(path);
+
+    if (packed.size() < n_blocks + element_count) {
+        throw std::runtime_error("BFP packed file too small: expected " +
+                                  std::to_string(n_blocks + element_count) +
+                                  " bytes, got " + std::to_string(packed.size()));
+    }
+
+    // 解包: [exps (n_blocks)][mantissas (element_count)]
+    const int8_t* shared_exps = packed.data();
+    const int8_t* mantissas = packed.data() + n_blocks;
+
+    std::vector<float> output(element_count);
+    bfp_to_fp32(mantissas, shared_exps,
+                element_count, block_size, mantissa_bits, output.data());
+
+    return output;
+}
+
 }  // namespace bfp_io

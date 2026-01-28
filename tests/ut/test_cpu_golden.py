@@ -671,3 +671,125 @@ class TestMixedPrecisionCppMode:
         records = get_records()
         assert len(records) == 1
         assert records[0]["golden"] is not None
+
+
+# ==================== TracedTensor 支持测试 ====================
+
+class TestTracedTensorSupport:
+    """TracedTensor 输入支持测试"""
+
+    def setup_method(self):
+        skip_if_not_available()
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+        set_cpu_golden_dtype("gfp16")
+
+    def test_unary_op_with_quantized_tensor(self):
+        """单目运算支持 TracedTensor 输入"""
+        from aidevtools.ops import _functional as F
+        from aidevtools.ops.traced_tensor import TracedTensor
+
+        x = np.random.randn(4, 8).astype(np.float32)
+
+        # 创建已量化的 TracedTensor
+        qt = TracedTensor(data=x, dtype="gfp16")
+
+        # 使用 TracedTensor 调用 relu
+        y = F.ReLU().cpu_golden(qt)
+
+        assert y.shape == (4, 8)
+        assert y.dtype == np.float32
+
+    def test_unary_op_with_ndarray(self):
+        """单目运算支持普通 ndarray 输入"""
+        from aidevtools.ops import _functional as F
+
+        x = np.random.randn(4, 8).astype(np.float32)
+
+        y = F.GELU().cpu_golden(x)
+
+        assert y.shape == (4, 8)
+        assert y.dtype == np.float32
+
+    def test_binary_op_with_quantized_tensor(self):
+        """双目运算支持 TracedTensor 输入"""
+        from aidevtools.ops import _functional as F
+        from aidevtools.ops.traced_tensor import TracedTensor
+
+        a = np.random.randn(4, 8).astype(np.float32)
+        b = np.random.randn(4, 8).astype(np.float32)
+
+        # 两个都是 TracedTensor
+        qt_a = TracedTensor(data=a, dtype="gfp16")
+        qt_b = TracedTensor(data=b, dtype="gfp16")
+
+        c = F.Add().cpu_golden(qt_a, qt_b)
+
+        assert c.shape == (4, 8)
+        assert c.dtype == np.float32
+
+    def test_binary_op_mixed_input(self):
+        """双目运算支持混合输入 (TracedTensor + ndarray)"""
+        from aidevtools.ops import _functional as F
+        from aidevtools.ops.traced_tensor import TracedTensor
+
+        a = np.random.randn(4, 8).astype(np.float32)
+        b = np.random.randn(4, 8).astype(np.float32)
+
+        # a 是 TracedTensor，b 是普通数组
+        qt_a = TracedTensor(data=a, dtype="gfp16")
+
+        c = F.Mul().cpu_golden(qt_a, b)
+
+        assert c.shape == (4, 8)
+        assert c.dtype == np.float32
+
+    def test_quantized_tensor_dtype_mismatch(self):
+        """TracedTensor 精度不匹配时正常工作"""
+        from aidevtools.ops import _functional as F
+        from aidevtools.ops.traced_tensor import TracedTensor
+        from aidevtools.ops.cpu_golden import set_cpu_golden_dtype
+
+        # 全局设置 gfp16
+        set_cpu_golden_dtype("gfp16")
+
+        x = np.random.randn(4, 8).astype(np.float32)
+
+        # 创建 gfp8 的 TracedTensor，但全局是 gfp16
+        qt = TracedTensor(data=x, dtype="gfp8")
+
+        # 应该正常工作（会进行转换）
+        y = F.Sigmoid().cpu_golden(qt)
+
+        assert y.shape == (4, 8)
+        assert y.dtype == np.float32
+
+    def test_quantized_tensor_preserves_precision(self):
+        """验证 TracedTensor 跳过重复转换
+
+        当 TracedTensor.dtype 与全局 dtype 匹配时，
+        应该直接使用内部数据，不进行额外转换。
+        """
+        from aidevtools.ops._functional import _extract_data
+        from aidevtools.ops.traced_tensor import TracedTensor
+
+        x = np.array([1.5, 2.5, 3.5], dtype=np.float32)
+
+        # 创建匹配精度的 TracedTensor
+        qt = TracedTensor(data=x, dtype="gfp16")
+
+        # _extract_data 应该返回同一个数组对象（跳过转换）
+        extracted = _extract_data(qt, "gfp16")
+
+        # 验证是同一个对象（未复制）
+        assert extracted is qt.data
+
+    def test_extract_data_with_ndarray(self):
+        """_extract_data 对普通数组的处理"""
+        from aidevtools.ops._functional import _extract_data
+
+        x = np.array([1.5, 2.5, 3.5], dtype=np.float32)
+
+        extracted = _extract_data(x, "gfp16")
+
+        assert extracted.dtype == np.float32
+        np.testing.assert_array_equal(extracted, x)
