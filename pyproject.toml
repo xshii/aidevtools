@@ -41,7 +41,7 @@ aidev = "aidevtools.cli:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aidevtools"]
+packages = ["aidevtools"]
 
 [tool.pylint.messages_control]
 disable = [
