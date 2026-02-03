@@ -30,8 +30,11 @@ cpp = [
 vscode = [
     "websocket-client>=1.6.0",
 ]
+toolchain = [
+    "httpx>=0.24.0",
+]
 all = [
-    "aidevtools[xlsx,cpp]",
+    "aidevtools[xlsx,cpp,toolchain]",
 ]
 
 [project.scripts]
