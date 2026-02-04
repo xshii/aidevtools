@@ -16,7 +16,7 @@ pip install -q -e ".[dev]"
 
 echo ""
 echo "[1/3] Lint 检查..."
-ruff check src/ tests/ || true
+ruff check aidevtools/ tests/ demos/ || true
 
 echo ""
 echo "[2/3] 运行测试..."

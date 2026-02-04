@@ -2,29 +2,96 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "编译 C++ Golden",
+      "label": "安装依赖",
+      "type": "shell",
+      "command": ".venv/bin/pip",
+      "args": ["install", "-e", ".[dev,all]"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "编译 C++ Golden (全部)",
       "type": "shell",
       "command": "bash",
       "args": [
         "-c",
-        "echo '=== 编译 CPU Golden ===' && cd ${workspaceFolder}/src/aidevtools/golden/cpp && ./build.sh && echo '=== 编译 BFP Golden ===' && cd ${workspaceFolder}/src/aidevtools/formats/custom/bfp/cpp && PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES bfp.cpp bfp_pybind.cpp -o ../bfp_golden$SUFFIX && echo '=== 编译完成 ==='"
+        "PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && echo '=== 编译 CPU Golden ===' && cd ${workspaceFolder}/aidevtools/golden/cpp && mkdir -p build && cd build && cmake .. && make -j$(sysctl -n hw.ncpu) && cp cpu_golden cpu_golden_bfp ../.. && echo '=== 编译 BFP Golden ===' && cd ${workspaceFolder}/aidevtools/formats/custom/bfp/cpp && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES bfp.cpp bfp_pybind.cpp -o ../bfp_golden$SUFFIX && echo '=== 编译 GFloat Golden ===' && cd ${workspaceFolder}/aidevtools/formats/custom/gfloat/cpp && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES gfloat.cpp gfloat_pybind.cpp -o ../gfloat_golden$SUFFIX && echo '=== 编译完成 ==='"
       ],
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": "$gcc"
     },
     {
+      "label": "编译 BFP Golden",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && cd ${workspaceFolder}/aidevtools/formats/custom/bfp/cpp && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES bfp.cpp bfp_pybind.cpp -o ../bfp_golden$SUFFIX && echo 'BFP 编译完成'"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "编译 GFloat Golden",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "PYTHON=${workspaceFolder}/.venv/bin/python && INCLUDES=$($PYTHON -m pybind11 --includes) && SUFFIX=$($PYTHON -c \"import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))\") && cd ${workspaceFolder}/aidevtools/formats/custom/gfloat/cpp && c++ -O3 -Wall -shared -std=c++17 -undefined dynamic_lookup $INCLUDES gfloat.cpp gfloat_pybind.cpp -o ../gfloat_golden$SUFFIX && echo 'GFloat 编译完成'"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "编译 CPU Golden",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ${workspaceFolder}/aidevtools/golden/cpp && mkdir -p build && cd build && cmake .. && make -j$(sysctl -n hw.ncpu) && cp cpu_golden cpu_golden_bfp ../.. && echo 'CPU Golden 编译完成'"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "运行全部测试",
+      "type": "shell",
+      "command": ".venv/bin/python",
+      "args": ["-m", "pytest", "tests/ut/", "-v"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "运行测试 (快速)",
+      "type": "shell",
+      "command": ".venv/bin/python",
+      "args": ["-m", "pytest", "tests/ut/", "-x", "--tb=short"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Ruff 检查",
+      "type": "shell",
+      "command": ".venv/bin/ruff",
+      "args": ["check", "aidevtools/"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Ruff 检查并修复",
+      "type": "shell",
+      "command": ".venv/bin/ruff",
+      "args": ["check", "aidevtools/", "--fix"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
       "label": "Pylint",
       "type": "shell",
       "command": ".venv/bin/pylint",
-      "args": ["src/aidevtools"],
-      "group": "test"
-    },
-    {
-      "label": "Ruff",
-      "type": "shell",
-      "command": ".venv/bin/ruff",
-      "args": ["check", "src/aidevtools"],
-      "group": "test"
+      "args": ["aidevtools/"],
+      "group": "test",
+      "problemMatcher": []
     }
   ]
 }

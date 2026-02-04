@@ -9,8 +9,8 @@ AI Dev Tools 是一套用于自研芯片算子验证的工具集，提供从 Gol
 - **Golden 生成**：支持 Python/C++ 双模式算子实现
 - **量化格式**：BFP (Block Floating Point)、GFloat 等自定义格式
 - **精度模式**：pure (纯 fp32) / quant (量化感知) 双轨验证
-- **三列比对**：exact (精确) + fuzzy_pure (模糊-纯fp32) + fuzzy_qnt (模糊-量化)
-- **状态判定**：PERFECT → PASS → QUANT_ISSUE → FAIL
+- **四状态判定**：PASS / GOLDEN_SUSPECT / DUT_ISSUE / BOTH_SUSPECT
+- **Golden 自检**：自动检测 Golden 数据有效性
 
 ## 2. 架构总览
 
@@ -28,18 +28,18 @@ AI Dev Tools 是一套用于自研芯片算子验证的工具集，提供从 Gol
 └─────────────────────────────────────┬───────────────────────────────────────┘
                                       │
 ┌─────────────────────────────────────▼───────────────────────────────────────┐
-│                              核心层 (Core)                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   config     │  │    tensor    │  │      op      │  │    engine    │    │
-│  │   全局配置   │  │  统一张量    │  │  算子注册    │  │   执行引擎   │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
+│                              前端层 (Frontend)                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                      │
+│  │    types     │  │   datagen    │  │   compile    │                      │
+│  │  统一类型    │  │  数据生成    │  │  编译封装    │                      │
+│  └──────────────┘  └──────────────┘  └──────────────┘                      │
 └─────────────────────────────────────┬───────────────────────────────────────┘
                                       │
 ┌─────────────────────────────────────▼───────────────────────────────────────┐
-│                              工具层 (Tools)                                  │
+│                              比对层 (Compare)                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   compare    │  │    trace     │  │    xlsx      │  │   archive    │    │
-│  │  三列比对    │  │   插桩捕获   │  │  表格解析    │  │   打包导出   │    │
+│  │    exact     │  │    fuzzy     │  │    sanity    │  │    engine    │    │
+│  │  精确比对    │  │  模糊比对    │  │  Golden自检  │  │  比对引擎    │    │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
 └─────────────────────────────────────┬───────────────────────────────────────┘
                                       │
@@ -54,52 +54,84 @@ AI Dev Tools 是一套用于自研芯片算子验证的工具集，提供从 Gol
 
 ## 3. 核心模块详解
 
-### 3.1 config - 全局配置
+### 3.1 compare - 比对模块
 
 ```python
-@dataclass
-class GlobalConfig:
-    golden_mode: str = "python"    # python | cpp
-    precision: str = "quant"       # pure | quant
-    seed: int = 42
-    exact: ExactConfig             # 精确比对配置
-    fuzzy: FuzzyConfig             # 模糊比对配置
+from aidevtools.compare import (
+    CompareEngine,
+    CompareConfig,
+    CompareResult,
+    CompareStatus,
+)
 
-@dataclass
-class ExactConfig:
-    max_abs: float = 0.0           # 允许的最大绝对误差
-    max_count: int = 0             # 允许的最大不匹配数
+# 配置
+config = CompareConfig(
+    exact_max_abs=0.0,           # 精确比对最大绝对误差
+    exact_max_count=0,           # 精确比对最大不匹配数
+    fuzzy_atol=1e-5,             # 模糊比对绝对容差
+    fuzzy_rtol=1e-3,             # 模糊比对相对容差
+    fuzzy_min_qsnr=30.0,         # 最小 QSNR (dB)
+    fuzzy_min_cosine=0.999,      # 最小余弦相似度
+    sanity_min_qsnr=20.0,        # Golden 自检最小 QSNR
+)
 
-@dataclass
-class FuzzyConfig:
-    atol: float = 1e-5             # 绝对容差
-    rtol: float = 1e-3             # 相对容差
-    min_qsnr: float = 30.0         # 最小 QSNR (dB)
-    min_cosine: float = 0.99       # 最小余弦相似度
+# 创建引擎
+engine = CompareEngine(config)
+
+# 执行比对
+result = engine.compare(
+    dut_output=dut,
+    golden_pure=golden_fp32,
+    golden_qnt=golden_qnt,
+    name="matmul_0",
+)
+
+print(f"Status: {result.status.value}")
 ```
 
-### 3.2 tensor - 统一张量
+### 3.2 frontend - 前端模块
+
+```python
+from aidevtools.frontend import (
+    DataGenerator,
+    DType,
+    DistType,
+    Tensor,
+    Compiler,
+)
+
+# 数据生成
+gen = DataGenerator(seed=42)
+x = gen.gen_input(shape=(2, 64), dtype=DType.BFP16, dist=DistType.NORMAL)
+w = gen.gen_weight(shape=(64, 128), dtype=DType.BFP16, init=DistType.XAVIER)
+
+# 编译封装
+compiler = Compiler()
+result = compiler.compile_python(source="model.py", output="model.bin")
+```
+
+### 3.3 tensor - 统一张量
 
 ```python
 @dataclass
 class Tensor:
-    fp32: np.ndarray                    # 最高精度数据
-    quantized: Optional[np.ndarray]     # 量化后数据
-    meta: Dict[str, Any]                # 量化元信息
-    qtype: str                          # 量化类型
+    data: np.ndarray                    # fp32 数据
+    quant_data: Optional[bytes]         # 量化后数据
+    meta: TensorMeta                    # 元信息
 
     @classmethod
-    def from_fp32(cls, data, qtype) -> "Tensor":
-        """从 fp32 创建 Tensor，自动量化"""
+    def from_numpy(cls, data, name, dtype) -> "Tensor":
+        """从 numpy 创建"""
 
-    def quantize_dequantize(self) -> "Tensor":
-        """量化-反量化，模拟精度损失"""
+    def save(self, path):
+        """保存到文件"""
 
-    def to_qtype(self, qtype) -> "Tensor":
-        """转换量化类型"""
+    @classmethod
+    def load(cls, path) -> "Tensor":
+        """从文件加载"""
 ```
 
-**支持的量化类型：**
+**支持的数据类型：**
 | 类型 | 说明 | 存储 |
 |------|------|------|
 | float32 | 原始精度 | fp32 |
@@ -111,69 +143,32 @@ class Tensor:
 | gfloat8 | 自定义 8 位 (1+4+3) | uint8 |
 | gfloat4 | 自定义 4 位 (1+2+1) | uint8 |
 
-### 3.3 op - 算子注册
+### 3.4 ops - 算子模块
 
 ```python
-@dataclass
-class OpSpec:
-    name: str
-    num_inputs: int = 1
-    num_weights: int = 0
-    supported_qtypes: List[str]
+from aidevtools.ops import _functional as F
 
-    def python_golden(self, *args, **kwargs) -> np.ndarray:
-        """Python 实现的 Golden"""
+# PyTorch 风格 API
+y = F.matmul(x, w)
+y = F.layer_norm(y, normalized_shape=(hidden,))
+y = F.softmax(y, dim=-1)
+y = F.gelu(y)
 
-    def cpp_golden(self, *args, **kwargs) -> np.ndarray:
-        """C++ 实现的 Golden (可选)"""
-
-# 注册算子
-@register_op("linear")
-class LinearOp(OpSpec):
-    num_inputs = 1
-    num_weights = 2  # weight + bias
-
-    def python_golden(self, x, w, b=None):
-        y = np.matmul(x, w)
-        if b is not None:
-            y = y + b
-        return y
+# 获取记录
+for r in ops.get_records():
+    print(f"{r.op_name}: {r.golden.shape}")
 ```
 
 **内置算子：**
 - linear, matmul, relu, gelu, softmax
 - layernorm, attention, add, mul, embedding
+- transpose, sigmoid, tanh, silu
 
-### 3.4 engine - 执行引擎
-
-```python
-@dataclass
-class OpRecord:
-    id: int                              # 算子实例 ID
-    op_name: str                         # 算子名称
-    qtype: str                           # 量化类型
-    inputs: List[Tensor]                 # 输入张量
-    weights: List[Tensor]                # 权重张量
-    output: Tensor                       # 输出张量
-    golden_pure: np.ndarray              # 纯 fp32 Golden
-    golden_quant: np.ndarray             # 量化感知 Golden
-
-class ExecutionEngine:
-    def run_op(self, op_name, inputs, weights, qtype, **kwargs) -> Tensor:
-        """执行算子并记录结果"""
-
-    def get_records(self) -> List[OpRecord]:
-        """获取所有执行记录"""
-
-    def dump(self, output_dir, format="raw"):
-        """导出所有数据"""
-```
-
-## 4. 三列比对机制
+## 4. 四状态判定机制
 
 ![比对流程](images/compare_flow.svg)
 
-### 4.1 比对结构
+### 4.1 判定矩阵
 
 ```
                     ┌─────────────┐
@@ -185,11 +180,12 @@ class ExecutionEngine:
            │               │               │
            ▼               ▼               ▼
     ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-    │   Exact     │ │ Fuzzy Pure  │ │ Fuzzy Quant │
-    │  精确比对   │ │ vs 纯fp32   │ │ vs 量化感知 │
+    │   Exact     │ │ Fuzzy Qnt   │ │   Sanity    │
+    │  精确比对   │ │ 模糊比对    │ │ Golden自检  │
     └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
            │               │               │
-           ▼               ▼               ▼
+           └───────────────┼───────────────┘
+                           ▼
     ┌─────────────────────────────────────────────┐
     │              状态判定 (Status)               │
     └─────────────────────────────────────────────┘
@@ -197,25 +193,32 @@ class ExecutionEngine:
 
 ### 4.2 状态判定规则
 
-| 状态 | 条件 | 含义 |
-|------|------|------|
-| **PERFECT** | exact ✓ | 完全一致 (bit-level) |
-| **PASS** | fuzzy_qnt ✓ | 误差在量化容差内 |
-| **QUANT_ISSUE** | fuzzy_pure ✓ 且 fuzzy_qnt ✗ | 量化导致的误差 |
-| **FAIL** | fuzzy_pure ✗ 且 fuzzy_qnt ✗ | 算法实现错误 |
+| DUT vs Golden | Golden 自检 | 判定状态 | 含义 |
+|---------------|-------------|----------|------|
+| PASS | PASS | **PASS** | DUT 正确，Golden 有效 |
+| PASS | FAIL | **GOLDEN_SUSPECT** | DUT 匹配，但 Golden 可疑 |
+| FAIL | PASS | **DUT_ISSUE** | Golden 有效，DUT 有问题 |
+| FAIL | FAIL | **BOTH_SUSPECT** | 都可疑，需人工排查 |
 
-### 4.3 比对结果示例
+### 4.3 Golden 自检项
+
+- **non_zero**: 数据非全零
+- **no_nan_inf**: 无 NaN/Inf
+- **range_valid**: 数值范围合理
+- **qsnr_valid**: golden_qnt vs golden_pure QSNR >= 阈值
+
+### 4.4 比对结果示例
 
 ```
-====================================================================================================
-op_name          exact  f_pure   f_qnt     max_abs     qsnr   cosine    status
-----------------------------------------------------------------------------------------------------
-linear_0           ✓       ✓       ✓      0.00e+00      inf 1.000000   PERFECT
-relu_0             ✗       ✓       ✓      9.54e-07    129.2 1.000000     PASS
-softmax_0          ✗       ✓       ✗      1.00e-01     29.0 0.999896 QUANT_ISSUE
-matmul_0           ✗       ✗       ✗      1.00e+00      8.8 0.993808     FAIL
-====================================================================================================
-Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
+==============================================================================================================
+name            exact  f_pure   f_qnt   sanity     max_abs     qsnr   cosine        status
+--------------------------------------------------------------------------------------------------------------
+matmul_0           Y       Y       Y       Y     0.00e+00      inf 1.000000          PASS
+layernorm_0        N       Y       Y       Y     2.52e-01    17.54 0.991358          PASS
+softmax_0          N       Y       N       N     2.63e-02    14.54 0.982997   BOTH_SUSPECT
+conv_0             N       N       N       Y     1.00e+00      8.8 0.993808      DUT_ISSUE
+==============================================================================================================
+Summary: 2 PASS, 0 GOLDEN_SUSPECT, 1 DUT_ISSUE, 1 BOTH_SUSPECT (total: 4)
 ```
 
 ## 5. 数据流
@@ -227,7 +230,7 @@ Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │  生成输入   │ ──▶ │  执行算子   │ ──▶ │  记录结果   │
-│ (Tensor)    │     │ (Engine)    │     │ (OpRecord)  │
+│ (Tensor)    │     │ (F API)     │     │ (OpRecord)  │
 └─────────────┘     └─────────────┘     └─────────────┘
       │                   │                   │
       │                   │                   │
@@ -243,14 +246,14 @@ Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   加载      │ ──▶ │  三列比对   │ ──▶ │  生成报告   │
-│ Golden+DUT  │     │ compare_3col│     │ print_table │
+│   加载      │ ──▶ │  比对引擎   │ ──▶ │  生成报告   │
+│ Golden+DUT  │     │CompareEngine│     │ report.py   │
 └─────────────┘     └─────────────┘     └─────────────┘
                           │
           ┌───────────────┼───────────────┐
           ▼               ▼               ▼
     ┌───────────┐   ┌───────────┐   ┌───────────┐
-    │   exact   │   │fuzzy_pure │   │fuzzy_quant│
+    │   exact   │   │   fuzzy   │   │  sanity   │
     │   result  │   │   result  │   │   result  │
     └───────────┘   └───────────┘   └───────────┘
 ```
@@ -259,14 +262,27 @@ Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
 
 ```
 aidevtools/
-├── src/aidevtools/
+├── aidevtools/
 │   ├── core/                    # 核心模块
 │   │   ├── __init__.py          # 统一导出
 │   │   ├── config.py            # 全局配置
-│   │   ├── tensor.py            # 统一 Tensor
-│   │   ├── op.py                # 算子注册
-│   │   ├── engine.py            # 执行引擎
 │   │   └── log.py               # 日志
+│   │
+│   ├── compare/                 # 比对模块 (新)
+│   │   ├── __init__.py          # 统一导出
+│   │   ├── types.py             # 类型定义
+│   │   ├── metrics.py           # 指标计算
+│   │   ├── exact.py             # 精确比对
+│   │   ├── fuzzy.py             # 模糊比对
+│   │   ├── sanity.py            # Golden 自检
+│   │   ├── engine.py            # 比对引擎
+│   │   └── report.py            # 报告生成
+│   │
+│   ├── frontend/                # 前端模块 (新)
+│   │   ├── __init__.py          # 统一导出
+│   │   ├── types.py             # 统一类型
+│   │   ├── datagen.py           # 数据生成
+│   │   └── compile.py           # 编译封装
 │   │
 │   ├── formats/                 # 数据格式
 │   │   ├── base.py              # 格式基类
@@ -275,89 +291,117 @@ aidevtools/
 │   │   ├── quantize.py          # 量化注册表
 │   │   └── custom/              # 自定义格式
 │   │       ├── bfp/             # 块浮点
-│   │       │   ├── golden.py    # Python 实现
-│   │       │   └── _cpp/        # C++ 扩展
 │   │       └── gfloat/          # 自定义浮点
-│   │           └── golden.py
+│   │
+│   ├── ops/                     # 算子模块
+│   │   ├── __init__.py
+│   │   ├── _functional.py       # F API
+│   │   ├── base.py              # 基础函数
+│   │   └── cpu_golden.py        # CPU Golden
+│   │
+│   ├── golden/                  # Golden 实现
+│   │   ├── cpu_golden           # C++ CLI
+│   │   └── cpp/                 # C++ 源码
 │   │
 │   ├── tools/                   # 工具集
-│   │   ├── compare/             # 比对工具
-│   │   │   ├── diff.py          # 三列比对
-│   │   │   ├── report.py        # 报告生成
-│   │   │   └── export.py        # 失败导出
-│   │   └── ...
+│   │   └── compare/             # 比对工具 (旧)
 │   │
 │   ├── trace/                   # 插桩工具
-│   │   ├── tracer.py            # @trace 装饰器
-│   │   └── recorder.py          # 数据记录器
+│   │   └── tracer.py
 │   │
 │   └── xlsx/                    # Excel 工作流
-│       ├── parser.py            # 表格解析
-│       └── runner.py            # 执行器
+│       ├── export.py
+│       ├── import_.py
+│       └── run.py
 │
 ├── demos/                       # 示例
-│   └── unified_workflow_demo.py # 统一工作流演示
+│   ├── 01_basic_ops/
+│   ├── 02_mini_transformer/
+│   ├── 03_transformer/
+│   ├── 04_xlsx_basic/
+│   ├── 05_xlsx_transformer/
+│   ├── 07_transpose/
+│   └── 08_paper_analysis/
 │
 ├── tests/                       # 测试
-│   ├── ut/                      # 单元测试
-│   ├── it/                      # 集成测试
-│   └── st/                      # 系统测试
+│   └── ut/                      # 单元测试
 │
 └── docs/                        # 文档
     ├── architecture.md          # 架构设计
-    └── tools/                   # 工具指南
+    └── compare_guide.md         # 比对指南
 ```
 
 ## 7. 使用示例
 
-### 7.1 基础使用
+### 7.1 PyTorch 风格 API
 
 ```python
-from aidevtools.core import (
-    set_config, get_config, reset_config,
-    Tensor, generate_random, generate_weight,
-    get_engine, clear, list_ops,
-)
-from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+import numpy as np
+from aidevtools import ops
+from aidevtools.ops import _functional as F
 
-# 1. 配置
-set_config(golden_mode="python", precision="quant", seed=42)
+# 清空记录
+ops.clear()
 
-# 2. 生成数据
-x = generate_random(shape=(2, 4, 64), qtype="bfp8", seed=42)
-w = generate_weight(shape=(64, 128), qtype="bfp8", seed=43)
+# 使用 F API 执行算子
+x = np.random.randn(2, 8, 64).astype(np.float32)
+w = np.random.randn(64, 128).astype(np.float32)
 
-# 3. 执行算子
-engine = get_engine()
-y = engine.run_op("linear", inputs=[x], weights=[w], qtype="bfp8")
+y = F.matmul(x, w)
+y = F.layer_norm(y, (128,))
+y = F.softmax(y, dim=-1)
 
-# 4. 比对验证
-config = get_config()
-for r in engine.get_records():
-    result = compare_3col(
-        op_name=r.op_name, op_id=r.id,
-        result=dut_output,
-        golden_pure=r.golden_pure,
-        golden_qnt=r.golden_quant,
-        exact_max_abs=config.exact.max_abs,
-        fuzzy_atol=config.fuzzy.atol,
-        fuzzy_rtol=config.fuzzy.rtol,
-        fuzzy_min_qsnr=config.fuzzy.min_qsnr,
-        fuzzy_min_cosine=config.fuzzy.min_cosine,
-    )
-    print(f"{r.op_name}: {result.status}")
+# 获取 Golden 记录
+for r in ops.get_records():
+    print(f"{r.op_name}: input={r.input.shape}, golden={r.golden.shape}")
 ```
 
-### 7.2 Excel 工作流
+### 7.2 比对 API
+
+```python
+from aidevtools.compare import CompareEngine, CompareConfig
+
+# 创建比对引擎
+config = CompareConfig(
+    fuzzy_min_qsnr=30.0,
+    fuzzy_min_cosine=0.999,
+)
+engine = CompareEngine(config)
+
+# 执行比对
+result = engine.compare(
+    dut_output=dut,
+    golden_pure=golden_fp32,
+    golden_qnt=golden_qnt,
+    name="matmul_0",
+)
+print(f"Status: {result.status.value}")
+```
+
+### 7.3 数据生成 API
+
+```python
+from aidevtools.frontend import DataGenerator, DType
+
+gen = DataGenerator(seed=42)
+
+# 生成输入数据
+x = gen.gen_input(shape=(2, 64), dtype="bfp16", dist="normal")
+
+# 生成权重数据
+w = gen.gen_weight(shape=(64, 128), dtype="bfp16", init="xavier")
+```
+
+### 7.4 Excel 工作流
 
 ```bash
 # 生成模板
-aidevtools xlsx template model.xlsx
+python -c "from aidevtools.xlsx import create_template; create_template('model.xlsx')"
 
 # 编辑 model.xlsx，定义算子序列
 
 # 执行并比对
-aidevtools xlsx run model.xlsx --output results/
+python -c "from aidevtools.xlsx import run_xlsx; run_xlsx('model.xlsx', 'results/')"
 ```
 
 ## 8. 扩展指南
@@ -365,16 +409,12 @@ aidevtools xlsx run model.xlsx --output results/
 ### 8.1 添加新算子
 
 ```python
-from aidevtools.core.op import register_op, OpSpec
+from aidevtools.ops.base import register_op
 
 @register_op("my_op")
-class MyOp(OpSpec):
-    num_inputs = 2
-    num_weights = 1
-    supported_qtypes = ["float32", "bfp16", "bfp8"]
-
-    def python_golden(self, x1, x2, w):
-        return (x1 + x2) @ w
+def my_op_impl(x, w, **kwargs):
+    """自定义算子实现"""
+    return (x + 1) @ w
 ```
 
 ### 8.2 添加新量化格式
@@ -397,5 +437,6 @@ def from_my_format(data: np.ndarray, meta: dict):
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v3.0 | 2025-02 | 四状态判定模型，compare/frontend 模块，目录扁平化 |
 | v2.0 | 2025-01 | 统一工作流架构，三列比对 |
 | v1.0 | 2024-01 | 初始版本，trace + compare |

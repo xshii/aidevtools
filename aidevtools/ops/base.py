@@ -17,11 +17,13 @@
 - MIXED: 自动生成单算子 + 双算子组合测试
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -736,7 +738,7 @@ class Op:
             f"请实现 cpu_golden 或 gpu_golden 方法"
         )
 
-    def __call__(self, *args, **kwargs) -> Union[np.ndarray, "TracedTensor"]:
+    def __call__(self, *args, **kwargs) -> Union[np.ndarray, "TracedTensor"]:  # noqa: F821
         """
         调用算子
 

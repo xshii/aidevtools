@@ -283,9 +283,11 @@ def compare_isclose(
     # 计算绝对误差
     abs_error = np.abs(r - g)
 
-    # 计算相对误差 (避免除零)
+    # 计算相对误差 (避免除零警告)
     g_abs = np.abs(g)
-    rel_error = np.where(g_abs > 1e-12, abs_error / g_abs, 0.0)
+    rel_error = np.zeros_like(abs_error)
+    nonzero_mask = g_abs > 1e-12
+    np.divide(abs_error, g_abs, out=rel_error, where=nonzero_mask)
 
     # 计算综合门限: atol + rtol * |golden|
     threshold = atol + rtol * g_abs

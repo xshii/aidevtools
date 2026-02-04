@@ -192,7 +192,6 @@ class Downloader:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 下载（带重试）
-        last_error = None
         for attempt in range(self.retries):
             try:
                 with httpx.Client(**self._client_kwargs) as client:
@@ -202,8 +201,7 @@ class Downloader:
                             for chunk in resp.iter_bytes(chunk_size=8192):
                                 f.write(chunk)
                 break
-            except httpx.HTTPError as e:
-                last_error = e
+            except httpx.HTTPError:
                 if attempt < self.retries - 1:
                     continue
                 raise

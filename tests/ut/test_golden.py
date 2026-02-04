@@ -3,9 +3,19 @@ import pytest
 import numpy as np
 
 
+def _is_gfloat_cpp_available():
+    """检查 GFloat C++ 是否可用"""
+    try:
+        from aidevtools.formats.custom.gfloat.wrapper import is_cpp_available
+        return is_cpp_available()
+    except ImportError:
+        return False
+
+
 class TestGfloatGolden:
     """GFloat Golden API 测试"""
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_fp32_to_gfloat16(self):
         """fp32 -> gfloat16 转换"""
         from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16
@@ -20,6 +30,7 @@ class TestGfloatGolden:
         expected = (data.view(np.uint32) >> 16).astype(np.uint16)
         assert np.array_equal(result, expected)
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_gfloat16_to_fp32(self):
         """gfloat16 -> fp32 转换"""
         from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16, gfloat16_to_fp32
@@ -32,6 +43,7 @@ class TestGfloatGolden:
         # 往返后应该接近原值 (有精度损失)
         assert np.allclose(restored, original, rtol=1e-2)
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_fp32_to_gfloat8(self):
         """fp32 -> gfloat8 转换"""
         from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat8
@@ -46,6 +58,7 @@ class TestGfloatGolden:
         expected = (data.view(np.uint32) >> 24).astype(np.uint8)
         assert np.array_equal(result, expected)
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_gfloat8_to_fp32(self):
         """gfloat8 -> fp32 转换"""
         from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat8, gfloat8_to_fp32
@@ -59,6 +72,7 @@ class TestGfloatGolden:
         assert np.sign(restored[0]) == np.sign(original[0])
         assert np.sign(restored[2]) == np.sign(original[2])
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_multidim_array(self):
         """多维数组测试"""
         from aidevtools.formats.custom.gfloat.wrapper import fp32_to_gfloat16, gfloat16_to_fp32
@@ -104,6 +118,7 @@ class TestGfloatGolden:
 class TestGfloatGoldenRegister:
     """Golden 注册测试"""
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_register_golden(self):
         """注册 golden 实现"""
         from aidevtools.formats.custom.gfloat import register_gfloat_golden
@@ -115,6 +130,7 @@ class TestGfloatGoldenRegister:
         assert "gfloat16_golden" in qtypes
         assert "gfloat8_golden" in qtypes
 
+    @pytest.mark.skipif(not _is_gfloat_cpp_available(), reason="GFloat C++ 扩展未编译")
     def test_use_golden_quantize(self):
         """使用 golden 量化"""
         from aidevtools.formats.custom.gfloat import register_gfloat_golden

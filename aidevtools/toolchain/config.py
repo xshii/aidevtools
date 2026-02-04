@@ -49,12 +49,6 @@ class ToolchainConfig:
                 return cls._from_file(path)
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        # 查找 toolchain.yaml
-        search_paths = [
-            Path.cwd() / "toolchain.yaml",
-            Path.cwd() / "toolchain.yml",
-        ]
-
         # 向上查找到项目根目录
         current = Path.cwd()
         for _ in range(10):  # 最多向上 10 级

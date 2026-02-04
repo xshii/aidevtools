@@ -9,17 +9,11 @@
     import torch.nn.functional as F
     y = F.linear(x, w)  # 自动走 golden
 """
-import sys
-from pathlib import Path
-
 import torch
 
-# 添加 src 到 path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-
-import aidevtools.golden as golden  # noqa: E402  # 导入即启用劫持
-from aidevtools import ops  # noqa: E402
-import torch.nn.functional as F  # noqa: E402
+import aidevtools.golden as golden  # 导入即启用劫持
+from aidevtools import ops
+import torch.nn.functional as F
 
 
 def main():

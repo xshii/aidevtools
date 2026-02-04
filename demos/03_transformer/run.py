@@ -8,11 +8,9 @@
     cd demos/03_transformer
     python run.py
 """
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-
 import numpy as np
+from pathlib import Path
+
 from aidevtools import ops
 from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records

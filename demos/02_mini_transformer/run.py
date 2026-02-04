@@ -7,11 +7,9 @@
 3. 构造假的 DUT 数据（模拟 bfp 格式处理）
 4. 比对 golden 与 DUT
 """
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-
 import numpy as np
+from pathlib import Path
+
 from aidevtools import ops
 from aidevtools.ops import _functional as F
 from aidevtools.ops import get_records

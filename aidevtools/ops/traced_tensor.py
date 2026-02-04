@@ -24,7 +24,7 @@
 import subprocess
 import tempfile
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Tuple, Union
 

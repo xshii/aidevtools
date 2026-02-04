@@ -11,11 +11,7 @@
     cd demos/05_xlsx_transformer
     python run.py
 """
-import sys
 from pathlib import Path
-
-# 添加 src 到 path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from aidevtools.ops.base import set_golden_mode
 

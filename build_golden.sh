@@ -16,7 +16,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/src/aidevtools"
+SRC_DIR="$SCRIPT_DIR/aidevtools"
 
 # 颜色输出
 RED='\033[0;31m'

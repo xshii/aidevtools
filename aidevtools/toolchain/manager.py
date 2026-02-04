@@ -2,7 +2,6 @@
 工具链管理器
 """
 
-import os
 import stat
 from pathlib import Path
 from typing import Dict, List, Optional

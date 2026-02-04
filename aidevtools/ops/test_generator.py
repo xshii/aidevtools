@@ -29,7 +29,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -171,7 +171,6 @@ def run_test_cases(
     Returns:
         测试结果列表
     """
-    from aidevtools.ops.base import clear, get_graph, get_records, set_compare_mode, CompareMode
 
     results = []
 

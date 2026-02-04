@@ -6,8 +6,8 @@ AI 算子开发工具集，用于自研芯片算子的 Golden 生成与精度验
 
 - **统一 Tensor 格式**：同时包含 fp32 (最高精度) 和 quantized (量化) 数据
 - **双轨 Golden 验证**：pure (纯 fp32) / quant (量化感知) 两种精度模式
-- **三列比对机制**：exact + fuzzy_pure + fuzzy_qnt，精确定位误差来源
-- **状态判定**：PERFECT → PASS → QUANT_ISSUE → FAIL
+- **四状态判定**：PASS / GOLDEN_SUSPECT / DUT_ISSUE / BOTH_SUSPECT
+- **Golden 自检**：自动检测 Golden 数据有效性（非零、无 NaN/Inf、QSNR 阈值）
 - **多种量化格式**：BFP (块浮点)、GFloat、float16 等
 - **Python/C++ 双模式**：Golden 算子同时支持 Python 和 C++ 实现
 
@@ -31,32 +31,62 @@ pytest tests/ -v
 
 ## 基础使用
 
+### PyTorch 风格 API
+
 ```python
-from aidevtools.core import (
-    set_config, get_config,
-    Tensor, generate_random, generate_weight,
-    get_engine, clear, list_ops,
+import numpy as np
+from aidevtools import ops
+from aidevtools.ops import _functional as F
+
+# 清空记录
+ops.clear()
+
+# 使用 F API 执行算子
+x = np.random.randn(2, 8, 64).astype(np.float32)
+w = np.random.randn(64, 128).astype(np.float32)
+
+y = F.matmul(x, w)           # 矩阵乘法
+y = F.layer_norm(y, (128,))  # LayerNorm
+y = F.softmax(y, dim=-1)     # Softmax
+
+# 获取 Golden 记录
+for r in ops.get_records():
+    print(f"{r.op_name}: input={r.input.shape}, golden={r.golden.shape}")
+```
+
+### 比对 API
+
+```python
+from aidevtools.compare import CompareEngine, CompareConfig
+
+# 创建比对引擎
+config = CompareConfig(
+    fuzzy_min_qsnr=30.0,
+    fuzzy_min_cosine=0.999,
 )
-from aidevtools.tools.compare.diff import compare_3col, print_compare_table
+engine = CompareEngine(config)
 
-# 1. 配置全局参数
-set_config(
-    golden_mode="python",  # python | cpp
-    precision="quant",     # pure | quant
-    seed=42,
+# 执行比对
+result = engine.compare(
+    dut_output=dut,           # DUT 输出
+    golden_pure=golden_fp32,  # 纯 fp32 Golden
+    golden_qnt=golden_qnt,    # 量化感知 Golden
 )
+print(f"Status: {result.status.value}")
+```
 
-# 2. 生成测试数据
-x = generate_random(shape=(2, 4, 64), qtype="bfp8", seed=42)
-w = generate_weight(shape=(64, 128), qtype="bfp8", seed=43)
+### 数据生成 API
 
-# 3. 执行算子
-engine = get_engine()
-y = engine.run_op("linear", inputs=[x], weights=[w], qtype="bfp8")
+```python
+from aidevtools.frontend import DataGenerator, DType
 
-# 4. 获取 Golden 结果
-for r in engine.get_records():
-    print(f"{r.op_name}: golden_pure={r.golden_pure.shape}, golden_quant={r.golden_quant.shape}")
+gen = DataGenerator(seed=42)
+
+# 生成输入数据
+x = gen.gen_input(shape=(2, 64), dtype="bfp16", dist="normal")
+
+# 生成权重数据
+w = gen.gen_weight(shape=(64, 128), dtype="bfp16", init="xavier")
 ```
 
 ## 架构概览
@@ -68,13 +98,13 @@ for r in engine.get_records():
 └─────────────────────────────────┬───────────────────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────────────────┐
-│                            核心层 (Core)                                 │
-│   config (全局配置)  │  tensor (统一张量)  │  op (算子)  │  engine (引擎) │
+│                            前端层 (Frontend)                             │
+│   types (统一类型)  │  datagen (数据生成)  │  compile (编译封装)          │
 └─────────────────────────────────┬───────────────────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────────────────┐
-│                            工具层 (Tools)                                │
-│   compare (三列比对)  │  trace (插桩)  │  xlsx (表格)  │  archive (打包) │
+│                            比对层 (Compare)                              │
+│   exact (精确)  │  fuzzy (模糊)  │  sanity (自检)  │  engine (引擎)       │
 └─────────────────────────────────┬───────────────────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────────────────┐
@@ -83,35 +113,33 @@ for r in engine.get_records():
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 三列比对
+## 四状态判定模型
 
-| 列 | 说明 |
-|----|------|
-| **exact** | 精确比对 (bit-level 或阈值内) |
-| **fuzzy_pure** | 模糊比对 vs 纯 fp32 Golden |
-| **fuzzy_qnt** | 模糊比对 vs 量化感知 Golden |
+| DUT vs Golden | Golden 自检 | 判定状态 | 含义 |
+|---------------|-------------|----------|------|
+| PASS | PASS | **PASS** | DUT 正确，Golden 有效 |
+| PASS | FAIL | **GOLDEN_SUSPECT** | DUT 匹配，但 Golden 可疑 |
+| FAIL | PASS | **DUT_ISSUE** | Golden 有效，DUT 有问题 |
+| FAIL | FAIL | **BOTH_SUSPECT** | 都可疑，需人工排查 |
 
-### 状态判定
+### Golden 自检项
 
-| 状态 | 条件 | 含义 |
-|------|------|------|
-| PERFECT | exact ✓ | 完全一致 |
-| PASS | fuzzy_qnt ✓ | 误差在容差内 |
-| QUANT_ISSUE | fuzzy_pure ✓ 且 fuzzy_qnt ✗ | 量化引入的误差 |
-| FAIL | 都 ✗ | 算法实现错误 |
+- **non_zero**: 数据非全零
+- **no_nan_inf**: 无 NaN/Inf
+- **range_valid**: 数值范围合理
+- **qsnr_valid**: golden_qnt vs golden_pure QSNR >= 阈值
 
 ### 输出示例
 
 ```
-====================================================================================================
-op_name          exact  f_pure   f_qnt     max_abs     qsnr   cosine    status
-----------------------------------------------------------------------------------------------------
-linear_0           ✓       ✓       ✓      0.00e+00      inf 1.000000   PERFECT
-relu_0             ✗       ✓       ✓      9.54e-07    129.2 1.000000     PASS
-softmax_0          ✗       ✓       ✗      1.00e-01     29.0 0.999896 QUANT_ISSUE
-matmul_0           ✗       ✗       ✗      1.00e+00      8.8 0.993808     FAIL
-====================================================================================================
-Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
+==============================================================================================================
+name            exact  f_pure   f_qnt   sanity     max_abs     qsnr   cosine        status
+--------------------------------------------------------------------------------------------------------------
+matmul_0           Y       Y       Y       Y     0.00e+00      inf 1.000000          PASS
+layernorm_0        N       Y       Y       Y     2.52e-01    17.54 0.991358          PASS
+softmax_0          N       N       N       N     2.63e-02    14.54 0.982997   BOTH_SUSPECT
+==============================================================================================================
+Summary: 2 PASS, 0 GOLDEN_SUSPECT, 0 DUT_ISSUE, 1 BOTH_SUSPECT (total: 3)
 ```
 
 ## 支持的量化格式
@@ -134,48 +162,53 @@ Summary: 1 PERFECT, 1 PASS, 1 QUANT_ISSUE, 1 FAIL (total: 4)
 | **线性变换** | linear | ✓ | y = x @ W + b |
 | | matmul | ✓ | 矩阵乘法 (支持混合精度) |
 | | transpose | ✓ | 转置 (2D/3D/4D) |
-| **激活函数** | relu | - | ReLU |
-| | gelu | - | GELU |
-| | silu | - | SiLU/Swish (LLaMA FFN) |
-| | sigmoid | - | Sigmoid |
-| | tanh | - | Tanh |
+| **激活函数** | relu | ✓ | ReLU |
+| | gelu | ✓ | GELU |
+| | silu | ✓ | SiLU/Swish (LLaMA FFN) |
+| | sigmoid | ✓ | Sigmoid |
+| | tanh | ✓ | Tanh |
 | | softmax | ✓ | Softmax |
 | **归一化** | layernorm | ✓ | Layer Normalization |
 | | rmsnorm | - | RMS Normalization (LLaMA/Mistral) |
 | | batchnorm | - | Batch Normalization |
 | **注意力** | attention | - | Scaled Dot-Product Attention |
-| **元素运算** | add, mul, div | - | 逐元素运算 |
+| **元素运算** | add, mul, div | ✓ | 逐元素运算 |
 | **嵌入** | embedding | - | Token 嵌入 |
 
 ## 目录结构
 
 ```
 aidevtools/
-├── src/aidevtools/
-│   ├── core/               # 核心: config, tensor, op, engine
+├── aidevtools/
+│   ├── core/               # 核心: config, tensor, log
+│   ├── compare/            # 比对: exact, fuzzy, sanity, engine, report
+│   ├── frontend/           # 前端: types, datagen, compile
 │   ├── formats/            # 格式: numpy, raw, bfp, gfloat
 │   ├── golden/             # Golden 实现
 │   │   ├── cpu_golden      # 编译后的 CLI 可执行文件
 │   │   └── cpp/            # C++ Golden 源码
-│   │       ├── gfloat/     # GFloat 格式 (io + impl)
-│   │       ├── bfp/        # BFP 格式 (io + impl)
-│   │       ├── interface.h # 算子接口定义
-│   │       └── main.cpp    # CLI 框架
-│   ├── tools/compare/      # 比对: diff, report, export
+│   ├── ops/                # 算子: functional API, cpu_golden
+│   ├── tools/compare/      # 工具: diff, report, export
 │   ├── trace/              # 插桩
 │   └── xlsx/               # Excel 工作流
 ├── demos/                  # 示例脚本
+│   ├── 01_basic_ops/       # 基础算子示例
+│   ├── 02_mini_transformer/# Mini Transformer
+│   ├── 03_transformer/     # 完整 Transformer
+│   ├── 04_xlsx_basic/      # xlsx 基础工作流
+│   ├── 05_xlsx_transformer/# xlsx Transformer
+│   ├── 07_transpose/       # Transpose 示例
+│   └── 08_paper_analysis/  # Paper Analysis
 ├── tests/                  # 测试用例
 └── docs/                   # 文档
-    └── architecture.md     # 架构设计
 ```
 
 ## 文档
 
 - [架构设计](docs/architecture.md) - 详细架构说明
 - [比数指南](docs/compare_guide.md) - 比对工具使用
-- [BFP 格式](src/aidevtools/formats/custom/bfp/guide.md) - 块浮点格式
-- [GFloat 格式](src/aidevtools/formats/custom/gfloat/guide.md) - 自定义浮点格式
+- [BFP 格式](aidevtools/formats/custom/bfp/guide.md) - 块浮点格式
+- [GFloat 格式](aidevtools/formats/custom/gfloat/guide.md) - 自定义浮点格式
 
 ## 开发
 
@@ -196,6 +229,10 @@ pytest tests/ -v
 # 运行覆盖率
 pytest tests/ --cov=aidevtools --cov-report=term-missing
 
+# 代码检查
+ruff check aidevtools/ tests/
+pylint aidevtools/
+
 # 一键 CI
 ./ci.sh
 ```
@@ -204,45 +241,18 @@ pytest tests/ --cov=aidevtools --cov-report=term-missing
 
 | 组件 | 类型 | 说明 |
 |------|------|------|
-| cpu_golden | CLI | 算子命令行工具 (matmul/softmax/layernorm/transpose) |
+| cpu_golden | CLI | 算子命令行工具 (matmul/softmax/layernorm/transpose 等) |
 | gfloat_golden | Python 扩展 | GFloat 格式量化/反量化 |
 | bfp_golden | Python 扩展 | BFP 块浮点格式量化/反量化 |
 
-### C++ Golden 模块化架构
+### 模块说明
 
-C++ Golden 采用 IO 与算子实现分离的模块化设计，方便替换自定义实现：
-
-```
-cpp/
-├── gfloat/              # GFloat 格式
-│   ├── io.h / io.cpp    # IO 层：文件读写、格式转换
-│   └── impl.cpp         # 算子实现 (可替换)
-├── bfp/                 # BFP 格式
-│   ├── io.h / io.cpp    # IO 层：文件读写、格式转换
-│   └── impl.cpp         # 算子实现 (可替换)
-├── interface.h          # 纯 fp32 算子接口
-├── main.cpp             # CLI 框架
-└── CMakeLists.txt       # FORMAT 变量选择格式
-```
-
-**替换自定义实现**：只需替换 `impl.cpp`，实现 `interface.h` 中定义的接口：
-
-```cpp
-// interface.h 定义的接口
-namespace cpu_golden::ops {
-    void matmul_fp32(const float* a, const float* b, float* c, size_t M, size_t K, size_t N);
-    void softmax_fp32(const float* input, float* output, size_t batch, size_t seq);
-    void layernorm_fp32(const float* input, const float* gamma, const float* beta,
-                        float* output, size_t batch, size_t hidden, float eps);
-    void transpose_4d_fp32(const float* input, float* output, size_t d0, size_t d1, size_t d2, size_t d3);
-}
-```
-
-**切换数据格式**：修改 `CMakeLists.txt` 中的 `FORMAT` 变量：
-
-```cmake
-set(FORMAT "gfloat")  # 或 "bfp"
-```
+| 模块 | 说明 |
+|------|------|
+| `aidevtools.compare` | 比对引擎，支持精确/模糊比对、Golden 自检、报告生成 |
+| `aidevtools.frontend` | 前端统一 API，数据生成、编译封装 |
+| `aidevtools.ops` | 算子实现，PyTorch 风格 F API |
+| `aidevtools.formats` | 数据格式，BFP/GFloat 量化 |
 
 ## 环境要求
 
