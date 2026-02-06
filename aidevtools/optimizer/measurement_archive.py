@@ -715,7 +715,7 @@ class MeasurementArchive:
             frequency_mhz: 频率
 
         示例:
-            from aidevtools.theory_optimizer import BenchmarkSuite
+            from aidevtools.optimizer import BenchmarkSuite
 
             suite = BenchmarkSuite()
             # suite 已包含预定义的 benchmarks

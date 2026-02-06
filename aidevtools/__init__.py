@@ -26,8 +26,8 @@
     gen = DataGenerator(seed=42)
     x = gen.gen_input(shape=(2, 64), dtype="bfp16")
 
-理论优化器:
-    from aidevtools.theory_optimizer import FusionEvaluator, Benchmark
+优化器:
+    from aidevtools.optimizer import FusionEvaluator, Benchmark
 
     evaluator = FusionEvaluator()
     result = evaluator.evaluate_suite("bert_ffn", seq_len=512, hidden=768, intermediate=3072)
@@ -41,4 +41,4 @@ from aidevtools import compare, frontend, ops
 # 便捷导出工具函数
 from aidevtools.ops import clear, dump, seed
 
-__all__ = ["ops", "compare", "frontend", "seed", "clear", "dump", "theory_optimizer"]
+__all__ = ["ops", "compare", "frontend", "seed", "clear", "dump", "optimizer"]

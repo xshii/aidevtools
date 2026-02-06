@@ -1,5 +1,5 @@
 """
-Theory Optimizer 理论优化器
+Optimizer 优化器
 
 用于融合策略评估和优化的框架。
 
@@ -26,7 +26,7 @@ Theory Optimizer 理论优化器
 
 使用示例:
 ```python
-from aidevtools.theory_optimizer import (
+from aidevtools.optimizer import (
     FusionEvaluator,
     Benchmark,
     BenchmarkSuite,
@@ -39,7 +39,7 @@ rules = get_fusion_rules()
 print(rules.summary())
 
 # 添加自定义规则
-from aidevtools.theory_optimizer import FusionRule
+from aidevtools.optimizer import FusionRule
 rules.add_rule(FusionRule(
     op_type_a="custom_op",
     op_type_b="matmul",
