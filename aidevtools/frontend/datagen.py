@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 
+from aidevtools.core.random import RandomGenerator
 from .types import DistType, DType, Tensor, TensorMeta
 
 
@@ -31,14 +32,14 @@ class DataGenerator:
             seed: 随机种子 (可选)
         """
         self.seed = seed
-        self._rng = np.random.default_rng(seed)
+        self._rand = RandomGenerator(seed)
         self._counter = 0
 
     def reset(self, seed: Optional[int] = None):
         """重置生成器"""
         if seed is not None:
             self.seed = seed
-        self._rng = np.random.default_rng(self.seed)
+        self._rand.reset(self.seed)
         self._counter = 0
 
     def gen_input(
@@ -291,159 +292,12 @@ class DataGenerator:
         context: Dict[str, Any],
         is_weight: bool,
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
-        """根据 auto_gen 策略生成数据"""
-        input_shape = context.get("input_shape", (1,))
-
-        # 简写策略
-        if strategy == "input":
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy == "random":
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy == "xavier":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            fan_in, fan_out = in_features, out_features
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy == "kaiming":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            std = np.sqrt(2.0 / in_features)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        elif strategy == "uniform":
-            shape = (context.get("out_features", input_shape[-1]),)
-            data = self._rng.uniform(-0.1, 0.1, shape).astype(np.float32)
-
-        # 带参数的策略
-        elif strategy.startswith("zeros:"):
-            shape = self._parse_shape(strategy[6:], context)
-            data = np.zeros(shape, dtype=np.float32)
-
-        elif strategy.startswith("ones:"):
-            shape = self._parse_shape(strategy[5:], context)
-            data = np.ones(shape, dtype=np.float32)
-
-        elif strategy.startswith("xavier:"):
-            shape = self._parse_shape(strategy[7:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            fan_out = shape[0] if len(shape) >= 2 else 1
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy.startswith("kaiming:"):
-            shape = self._parse_shape(strategy[8:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            std = np.sqrt(2.0 / fan_in)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        elif strategy.startswith("uniform:"):
-            parts = strategy[8:].split(",")
-            if len(parts) >= 3:
-                low, high = float(parts[0]), float(parts[1])
-                shape_spec = ",".join(parts[2:])
-            else:
-                low, high = -0.1, 0.1
-                shape_spec = ",".join(parts)
-            shape = self._parse_shape(shape_spec, context)
-            data = self._rng.uniform(low, high, shape).astype(np.float32)
-
-        elif strategy.startswith("same:"):
-            ref_param = strategy[5:]
-            ref_shape = context.get(f"{ref_param}_shape")
-            if ref_shape is None:
-                raise ValueError(f"same:{ref_param} 引用的参数未生成")
-            shape = ref_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy.startswith("normal:"):
-            parts = strategy[7:].split(",")
-            if len(parts) >= 2:
-                mean, std = float(parts[0]), float(parts[1])
-                shape_spec = ",".join(parts[2:]) if len(parts) > 2 else "-1"
-            else:
-                mean, std = 0.0, 1.0
-                shape_spec = parts[0]
-            shape = self._parse_shape(shape_spec, context)
-            data = self._rng.normal(mean, std, shape).astype(np.float32)
-
-        else:
-            raise ValueError(f"未知生成策略: {strategy}")
-
-        return data, shape
-
-    def _parse_shape(
-        self, spec: str, context: Dict[str, Any]
-    ) -> Tuple[int, ...]:
-        """解析 shape 规格"""
-        input_shape = context.get("input_shape", (1,))
-        parts = [p.strip() for p in spec.split(",")]
-        result = []
-
-        for part in parts:
-            if not part:
-                continue
-
-            if part.lstrip("-").isdigit():
-                idx = int(part)
-                if abs(idx) <= len(input_shape):
-                    result.append(input_shape[idx])
-                else:
-                    result.append(1)
-            elif part in context:
-                val = context[part]
-                if isinstance(val, (int, np.integer)):
-                    result.append(int(val))
-                elif isinstance(val, tuple):
-                    result.extend(val)
-                else:
-                    result.append(int(val))
-            else:
-                raise ValueError(f"无法解析 shape 规格: {part}")
-
-        return tuple(result)
+        """根据 auto_gen 策略生成数据（委托给 RandomGenerator）"""
+        return self._rand.generate_from_strategy(strategy, context)
 
     def _gen_data(
-        self, shape: Tuple[int, ...], dist: DistType, **kwargs
+        self, shape: Tuple[int, ...], dist: Union[str, DistType], **kwargs
     ) -> np.ndarray:
-        """根据分布生成数据"""
-        if dist == DistType.NORMAL:
-            mean = kwargs.get("mean", 0.0)
-            std = kwargs.get("std", 1.0)
-            data = self._rng.normal(mean, std, shape).astype(np.float32)
-
-        elif dist == DistType.UNIFORM:
-            low = kwargs.get("low", -1.0)
-            high = kwargs.get("high", 1.0)
-            data = self._rng.uniform(low, high, shape).astype(np.float32)
-
-        elif dist == DistType.ZEROS:
-            data = np.zeros(shape, dtype=np.float32)
-
-        elif dist == DistType.ONES:
-            data = np.ones(shape, dtype=np.float32)
-
-        elif dist == DistType.XAVIER:
-            # Xavier/Glorot 初始化
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            fan_out = shape[0] if len(shape) >= 2 else 1
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif dist == DistType.KAIMING:
-            # Kaiming/He 初始化
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            std = np.sqrt(2.0 / fan_in)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        else:
-            raise ValueError(f"Unknown distribution: {dist}")
-
-        return data
+        """根据分布生成数据（委托给 RandomGenerator）"""
+        method = dist.value if isinstance(dist, DistType) else dist
+        return self._rand.generate(shape, method=method, **kwargs)

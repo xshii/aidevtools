@@ -33,6 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from aidevtools.core.random import RandomGenerator
+
 
 @dataclass
 class GeneratedTensor:
@@ -83,7 +85,7 @@ class DataGenerator:
         self.l2_base = l2_base
         self.alignment = alignment
         self.qtype = qtype
-        self._rng = np.random.default_rng(seed)
+        self._rand = RandomGenerator(seed)
         self._l2_offset = 0
         self._tensors: Dict[str, GeneratedTensor] = {}
         self._op_counter: Dict[str, int] = {}
@@ -92,7 +94,7 @@ class DataGenerator:
         """重置生成器"""
         if seed is not None:
             self.seed = seed
-        self._rng = np.random.default_rng(self.seed)
+        self._rand.reset(self.seed)
         self._l2_offset = 0
         self._tensors.clear()
         self._op_counter.clear()
@@ -197,7 +199,7 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """正态分布随机数"""
-        array = self._rng.standard_normal(shape).astype(np.float32)
+        array = self._rand.normal(shape)
         name = name or self._auto_name("randn")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -211,7 +213,7 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """均匀分布"""
-        array = self._rng.uniform(low, high, shape).astype(np.float32)
+        array = self._rand.uniform(shape, low=low, high=high)
         name = name or self._auto_name("uniform")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -223,7 +225,7 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """全零"""
-        array = np.zeros(shape, dtype=np.float32)
+        array = self._rand.zeros(shape)
         name = name or self._auto_name("zeros")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -235,7 +237,7 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """全一"""
-        array = np.ones(shape, dtype=np.float32)
+        array = self._rand.ones(shape)
         name = name or self._auto_name("ones")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -246,10 +248,7 @@ class DataGenerator:
         qtype: Optional[str] = None,
     ) -> GeneratedTensor:
         """Xavier 初始化"""
-        fan_in = shape[-1] if len(shape) >= 1 else 1
-        fan_out = shape[0] if len(shape) >= 2 else 1
-        limit = np.sqrt(6.0 / (fan_in + fan_out))
-        array = self._rng.uniform(-limit, limit, shape).astype(np.float32)
+        array = self._rand.xavier(shape)
         name = name or self._auto_name("weight")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role="weight")
 
@@ -260,9 +259,7 @@ class DataGenerator:
         qtype: Optional[str] = None,
     ) -> GeneratedTensor:
         """Kaiming 初始化"""
-        fan_in = shape[-1] if len(shape) >= 1 else 1
-        std = np.sqrt(2.0 / fan_in)
-        array = self._rng.normal(0, std, shape).astype(np.float32)
+        array = self._rand.kaiming(shape)
         name = name or self._auto_name("weight")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role="weight")
 
@@ -408,83 +405,8 @@ class DataGenerator:
         strategy: str,
         context: Dict[str, Any],
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
-        """根据 auto_gen 策略生成数据"""
-        input_shape = context.get("input_shape", (1,))
-
-        if strategy == "input":
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy == "random":
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy == "xavier":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            limit = np.sqrt(6.0 / (in_features + out_features))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy == "kaiming":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            std = np.sqrt(2.0 / in_features)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        elif strategy == "uniform":
-            shape = (context.get("out_features", input_shape[-1]),)
-            data = self._rng.uniform(-0.1, 0.1, shape).astype(np.float32)
-
-        elif strategy.startswith("zeros:"):
-            shape = self._parse_shape(strategy[6:], context)
-            data = np.zeros(shape, dtype=np.float32)
-
-        elif strategy.startswith("ones:"):
-            shape = self._parse_shape(strategy[5:], context)
-            data = np.ones(shape, dtype=np.float32)
-
-        elif strategy.startswith("xavier:"):
-            shape = self._parse_shape(strategy[7:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            fan_out = shape[0] if len(shape) >= 2 else 1
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy.startswith("kaiming:"):
-            shape = self._parse_shape(strategy[8:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            std = np.sqrt(2.0 / fan_in)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        elif strategy.startswith("same:"):
-            ref = strategy[5:]
-            shape = context.get(f"{ref}_shape", input_shape)
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        else:
-            raise ValueError(f"未知策略: {strategy}")
-
-        return data, shape
-
-    def _parse_shape(self, spec: str, context: Dict[str, Any]) -> Tuple[int, ...]:
-        """解析 shape 规格"""
-        input_shape = context.get("input_shape", (1,))
-        parts = [p.strip() for p in spec.split(",") if p.strip()]
-        result = []
-
-        for part in parts:
-            if part.lstrip("-").isdigit():
-                idx = int(part)
-                result.append(input_shape[idx] if abs(idx) <= len(input_shape) else 1)
-            elif part in context:
-                val = context[part]
-                result.append(int(val) if isinstance(val, (int, np.integer)) else val)
-            else:
-                raise ValueError(f"无法解析: {part}")
-
-        return tuple(result)
+        """根据 auto_gen 策略生成数据（委托给 RandomGenerator）"""
+        return self._rand.generate_from_strategy(strategy, context)
 
 
 # ============================================================

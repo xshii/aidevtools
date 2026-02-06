@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 
+from aidevtools.core.random import RandomGenerator
 from aidevtools.ops._op_registry import get_op_meta
 from aidevtools.ops.registry import get_op_meta as get_meta
 
@@ -148,7 +149,7 @@ class OpDataGenerator:
         self.l2_base = l2_base
         self.dtype = dtype
         self.qtype = qtype
-        self._rng = np.random.default_rng(seed)
+        self._rand = RandomGenerator(seed)
         self._layout = L2MemoryLayout(alignment=alignment, l2_base=l2_base)
         self._generated: Dict[str, TensorInfo] = {}
         self._op_counter: Dict[str, int] = {}  # 算子计数器
@@ -157,7 +158,7 @@ class OpDataGenerator:
         """重置生成器"""
         if seed is not None:
             self.seed = seed
-        self._rng = np.random.default_rng(self.seed)
+        self._rand.reset(self.seed)
         self._layout = L2MemoryLayout(alignment=self.alignment, l2_base=self.l2_base)
         self._generated = {}
         self._op_counter = {}
@@ -255,148 +256,8 @@ class OpDataGenerator:
         context: Dict[str, Any],
         is_weight: bool,
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
-        """根据策略生成参数"""
-        input_shape = context.get("input_shape", (1,))
-
-        # 解析策略
-        if strategy == "input":
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy == "random":
-            # 默认与 input 相同 shape
-            shape = input_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy.startswith("zeros:"):
-            shape = self._parse_shape(strategy[6:], context)
-            data = np.zeros(shape, dtype=np.float32)
-
-        elif strategy.startswith("ones:"):
-            shape = self._parse_shape(strategy[5:], context)
-            data = np.ones(shape, dtype=np.float32)
-
-        elif strategy.startswith("xavier:"):
-            shape = self._parse_shape(strategy[7:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            fan_out = shape[0] if len(shape) >= 2 else 1
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy.startswith("kaiming:"):
-            shape = self._parse_shape(strategy[8:], context)
-            fan_in = shape[-1] if len(shape) >= 1 else 1
-            std = np.sqrt(2.0 / fan_in)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        elif strategy.startswith("same:"):
-            ref_param = strategy[5:]
-            ref_shape = context.get(f"{ref_param}_shape")
-            if ref_shape is None:
-                raise ValueError(f"same:{ref_param} 引用的参数未生成")
-            shape = ref_shape
-            data = self._rng.standard_normal(shape).astype(np.float32)
-
-        elif strategy.startswith("normal:"):
-            # normal:mean,std,shape_spec
-            parts = strategy[7:].split(",")
-            if len(parts) >= 2:
-                mean = float(parts[0])
-                std = float(parts[1])
-                shape_spec = ",".join(parts[2:]) if len(parts) > 2 else "-1"
-            else:
-                mean, std = 0.0, 1.0
-                shape_spec = parts[0]
-            shape = self._parse_shape(shape_spec, context)
-            data = self._rng.normal(mean, std, shape).astype(np.float32)
-
-        elif strategy.startswith("uniform:"):
-            # uniform:low,high,shape_spec  或  uniform:shape_spec
-            parts = strategy[8:].split(",")
-            if len(parts) >= 3:
-                low = float(parts[0])
-                high = float(parts[1])
-                shape_spec = ",".join(parts[2:])
-            elif len(parts) == 2 and parts[0].lstrip("-").replace(".", "").isdigit():
-                low = float(parts[0])
-                high = float(parts[1])
-                shape_spec = "-1"
-            else:
-                low, high = -0.1, 0.1
-                shape_spec = ",".join(parts)
-            shape = self._parse_shape(shape_spec, context)
-            data = self._rng.uniform(low, high, shape).astype(np.float32)
-
-        elif strategy == "uniform":
-            # 简写形式：uniform (用于 bias)
-            shape = (context.get("out_features", input_shape[-1]),)
-            data = self._rng.uniform(-0.1, 0.1, shape).astype(np.float32)
-
-        elif strategy == "xavier":
-            # 简写形式：xavier (用于 weight)
-            # 推断 shape: [out_features, in_features]
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            fan_in, fan_out = in_features, out_features
-            limit = np.sqrt(6.0 / (fan_in + fan_out))
-            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
-
-        elif strategy == "kaiming":
-            # 简写形式：kaiming (用于 weight)
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            std = np.sqrt(2.0 / in_features)
-            data = self._rng.normal(0, std, shape).astype(np.float32)
-
-        else:
-            raise ValueError(f"未知生成策略: {strategy}")
-
-        return data, shape
-
-    def _parse_shape(
-        self, spec: str, context: Dict[str, Any]
-    ) -> Tuple[int, ...]:
-        """
-        解析 shape 规格
-
-        支持:
-            "-1" -> input_shape[-1]
-            "-2,-1" -> (input_shape[-2], input_shape[-1])
-            "out_features" -> context["out_features"]
-            "-1,out_features" -> (input_shape[-1], out_features)
-        """
-        input_shape = context.get("input_shape", (1,))
-        parts = [p.strip() for p in spec.split(",")]
-        result = []
-
-        for part in parts:
-            if not part:
-                continue
-
-            # 数字索引 (如 -1, -2)
-            if part.lstrip("-").isdigit():
-                idx = int(part)
-                if abs(idx) <= len(input_shape):
-                    result.append(input_shape[idx])
-                else:
-                    result.append(1)
-
-            # 命名参数 (如 out_features, num_heads)
-            elif part in context:
-                val = context[part]
-                if isinstance(val, (int, np.integer)):
-                    result.append(int(val))
-                elif isinstance(val, tuple):
-                    result.extend(val)
-                else:
-                    result.append(int(val))
-
-            else:
-                raise ValueError(f"无法解析 shape 规格: {part}")
-
-        return tuple(result)
+        """根据策略生成参数（委托给 RandomGenerator）"""
+        return self._rand.generate_from_strategy(strategy, context)
 
     def generate_batch(
         self,
