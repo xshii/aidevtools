@@ -13,6 +13,18 @@
     ops.clear()        # 清空记录
     ops.dump("./out")  # 导出数据
 
+上下文管理 (支持并发):
+    from aidevtools.ops import ExecutionContext, get_context
+
+    # 方式 1: 使用上下文管理器
+    with ExecutionContext() as ctx:
+        ctx.clear()
+        # 执行操作...
+        profiles = ctx.get_profiles()
+
+    # 方式 2: 获取当前上下文
+    ctx = get_context()
+
 比对模式:
     from aidevtools.ops import CompareMode
 
@@ -26,17 +38,6 @@ TracedTensor:
     x = ops.traced(input_data, "gfp16")
     y = F.matmul(x, w)  # 输出也是 TracedTensor
     result = y.numpy()  # 获取 numpy 数组
-
-混合模式测试:
-    ops.set_compare_mode(CompareMode.MIXED)
-    ops.clear()
-
-    x = ops.traced(input_data, "gfp16")
-    y = F.matmul(x, w)
-    y = F.gelu(y)
-
-    test_cases = ops.generate_test_cases()
-    results = ops.run_test_cases(test_cases)
 """
 # 工具函数
 from aidevtools.ops.auto import get_seed, seed
@@ -46,6 +47,14 @@ from aidevtools.ops.traced_tensor import (
     traced,
     wrap_traced_output,
 )
+
+# 上下文管理
+from aidevtools.ops.context import (
+    ExecutionContext,
+    get_context,
+    execution_context,
+)
+
 from aidevtools.ops.base import (
     CompareMode,
     Op,
@@ -60,7 +69,6 @@ from aidevtools.ops.base import (
     get_graph_ops,
     get_profile_enabled,
     get_profile_only,
-    # Profile API
     get_profiles,
     get_records,
     has_golden_cpp,
@@ -99,6 +107,10 @@ __all__ = [
     "get_seed",
     "clear",
     "dump",
+    # 上下文管理
+    "ExecutionContext",
+    "get_context",
+    "execution_context",
     # TracedTensor
     "TracedTensor",
     "traced",

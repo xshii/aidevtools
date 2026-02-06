@@ -8,6 +8,13 @@ from aidevtools.core.config import (
     set_config,
 )
 from aidevtools.core.log import logger
+from aidevtools.core.memory_types import (
+    DMADirection,
+    DMAOp,
+    MemoryLevel,
+    MemoryRegion,
+    TensorAllocation,
+)
 
 __all__ = [
     # config
@@ -19,4 +26,10 @@ __all__ = [
     "reset_config",
     # log
     "logger",
+    # memory types
+    "MemoryLevel",
+    "DMADirection",
+    "MemoryRegion",
+    "TensorAllocation",
+    "DMAOp",
 ]

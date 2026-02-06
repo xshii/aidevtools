@@ -6,6 +6,11 @@
     1. datagen 生成数据 → 放入 L2 (初始位置)
     2. memory_plan 生成 DMA → L2 搬运到 L1
 
+依赖关系:
+    core.memory_types (基础类型)
+    └── ops.datagen (本模块)
+    不依赖 optimizer 模块
+
 用法:
     from aidevtools.ops.datagen import OpDataGenerator
 
@@ -13,35 +18,26 @@
 
     # 为 linear 算子生成数据 (自动放入 L2)
     data = gen.generate("linear", input_shape=(512, 768), out_features=3072)
-    # data = {
-    #     "input": TensorInfo(...),   # L2 offset=0x100000
-    #     "weight": TensorInfo(...),  # L2 offset=0x280000
-    #     "bias": TensorInfo(...),    # L2 offset=0xB80000
-    # }
 
     # 查看 L2 内存布局
     print(gen.memory_layout())
-    # L2 MemoryLayout (base=0x100000, alignment=256):
-    #   input:  offset=0x100000, size=1572864, shape=(512, 768)
-    #   weight: offset=0x280000, size=9437184, shape=(768, 3072)
-    #   bias:   offset=0xB80000, size=12288, shape=(3072,)
 
     # 导出为 DUT 格式
-    gen.export_dut("golden/", qtype="bfp16")
-
-    # 生成 DMA 计划 (L2 → L1)
-    from aidevtools.optimizer.memory_plan import MemoryPlan
-    plan = gen.create_memory_plan()
+    gen.export_dut("golden/")
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 
 from aidevtools.ops._op_registry import get_op_meta
 from aidevtools.ops.registry import get_op_meta as get_meta
+
+# 类型检查时导入（避免运行时循环依赖）
+if TYPE_CHECKING:
+    from aidevtools.optimizer.memory_plan import MemoryPlan
 
 
 @dataclass
@@ -398,9 +394,12 @@ class OpDataGenerator:
         self,
         l1_size: int = 256 * 1024,
         l2_size: int = 2 * 1024 * 1024,
-    ):
+    ) -> "MemoryPlan":
         """
         创建 MemoryPlan (用于 DMA 生成)
+
+        注意: 此方法会延迟导入 optimizer.memory_plan 模块。
+        如果不需要 DMA 规划，可以不调用此方法，避免引入 optimizer 依赖。
 
         Args:
             l1_size: L1 大小
@@ -409,7 +408,9 @@ class OpDataGenerator:
         Returns:
             MemoryPlan 对象
         """
-        from aidevtools.optimizer.memory_plan import MemoryPlan, MemoryLevel
+        # 延迟导入，避免模块级循环依赖
+        from aidevtools.optimizer.memory_plan import MemoryPlan
+        from aidevtools.core.memory_types import MemoryLevel
 
         plan = MemoryPlan(
             l1_size=l1_size,
@@ -556,7 +557,7 @@ def generate_op_data(
     seed: Optional[int] = None,
     alignment: int = 256,
     **kwargs,
-) -> Tuple[Dict[str, TensorInfo], MemoryLayout]:
+) -> Tuple[Dict[str, TensorInfo], L2MemoryLayout]:
     """
     便捷函数: 为算子生成数据
 
@@ -583,6 +584,6 @@ def generate_and_export(
     Returns:
         Dict[param_name, file_path]
     """
-    gen = OpDataGenerator(seed=seed, alignment=alignment)
+    gen = OpDataGenerator(seed=seed, alignment=alignment, qtype=qtype)
     gen.generate(op_name, input_shape, **kwargs)
-    return gen.export_dut(output_dir, qtype)
+    return gen.export_dut(output_dir)

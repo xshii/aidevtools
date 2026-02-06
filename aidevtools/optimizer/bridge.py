@@ -123,11 +123,15 @@ def _node_to_opspec(node: OpNode) -> Optional[OpSpec]:
 def extract_benchmark(name: str = "auto",
                       clear_graph: bool = False) -> Benchmark:
     """
-    从 ops 计算图自动提取 Benchmark
+    从 ops 计算图或记录自动提取 Benchmark
+
+    支持两种模式：
+    1. FULL_GRAPH/MIXED 模式: 从计算图提取（包含完整依赖关系）
+    2. SINGLE_OP 模式: 从记录提取（根据执行顺序）
 
     Args:
         name: Benchmark 名称
-        clear_graph: 提取后是否清空计算图
+        clear_graph: 提取后是否清空
 
     Returns:
         Benchmark 对象
@@ -143,29 +147,84 @@ def extract_benchmark(name: str = "auto",
         bm = extract_benchmark("my_ffn")
         print(bm.summary())
     """
-    from aidevtools.ops import clear as ops_clear
-
-    graph = get_graph()
-    ops_list = get_graph_ops()
+    from aidevtools.ops import clear as ops_clear, get_records
 
     bm = Benchmark(name)
 
-    for op_name in ops_list:
-        node = graph.get(op_name)
-        if node is None:
-            continue
+    # 优先从计算图提取（FULL_GRAPH/MIXED 模式）
+    graph = get_graph()
+    ops_list = get_graph_ops()
 
-        op_spec = _node_to_opspec(node)
-        if op_spec is None:
-            continue
+    if ops_list:
+        for op_name in ops_list:
+            node = graph.get(op_name)
+            if node is None:
+                continue
 
-        # 添加到 benchmark
-        bm.ops.append(op_spec)
+            op_spec = _node_to_opspec(node)
+            if op_spec is None:
+                continue
+
+            bm.ops.append(op_spec)
+    else:
+        # 从记录提取（SINGLE_OP 模式）
+        records = get_records()
+        for record in records:
+            op_spec = _record_to_opspec(record)
+            if op_spec is None:
+                continue
+            bm.ops.append(op_spec)
 
     if clear_graph:
         ops_clear()
 
     return bm
+
+
+def _record_to_opspec(record: Dict[str, Any]) -> Optional[OpSpec]:
+    """将 record 转换为 OpSpec"""
+    op_name = record.get("op", "")
+    full_name = record.get("name", "")
+
+    op_type = OP_TYPE_MAP.get(op_name.lower())
+    if op_type is None:
+        return None
+
+    # 推断 shapes
+    shapes = {}
+    input_data = record.get("input")
+    weight_data = record.get("weight")
+    golden_data = record.get("golden")
+
+    if input_data is not None and hasattr(input_data, 'shape'):
+        shape = input_data.shape
+        if len(shape) >= 2:
+            shapes["M"] = shape[-2]
+            shapes["K"] = shape[-1]
+
+    if weight_data is not None and hasattr(weight_data, 'shape'):
+        shape = weight_data.shape
+        if len(shape) >= 2:
+            shapes["K"] = shape[0]
+            shapes["N"] = shape[1]
+
+    if golden_data is not None and hasattr(golden_data, 'shape'):
+        shape = golden_data.shape
+        if len(shape) >= 2:
+            if "M" not in shapes:
+                shapes["M"] = shape[-2]
+            if "N" not in shapes:
+                shapes["N"] = shape[-1]
+
+    shapes.setdefault("M", 1)
+    shapes.setdefault("N", 1)
+    shapes.setdefault("K", shapes.get("N", 1))
+
+    return OpSpec(
+        name=full_name,
+        op_type=op_type,
+        shapes=shapes,
+    )
 
 
 def extract_and_evaluate(name: str = "auto",

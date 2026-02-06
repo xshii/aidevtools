@@ -34,6 +34,10 @@ class OpType(Enum):
     ADD = "add"
     MUL = "mul"
     REDUCE = "reduce"
+    TRANSPOSE = "transpose"
+    RESHAPE = "reshape"
+    EMBEDDING = "embedding"
+    ATTENTION = "attention"
 
 
 class ComputeUnit(Enum):
