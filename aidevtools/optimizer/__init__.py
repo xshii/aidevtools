@@ -3,78 +3,56 @@ Optimizer 优化器
 
 用于融合策略评估和优化的框架。
 
-设计模式:
-- Facade 模式: FusionEvaluator 提供统一入口
-- Strategy 模式: 可插拔的 Tiling 策略
-- Builder 模式: Benchmark 链式构建
-- Factory 模式: BenchmarkSuite 预定义用例
-- Singleton 模式: FusionRules 全局融合规则
-- Observer 模式: 参数更新通知
-- Composite 模式: CostParameters 参数组合
-- Template Method 模式: View 渲染流程
-- Registry 模式: 策略/视图注册
+两种前端方式:
+1. PyTorch 劫持 (推荐): 自动从计算图提取 Benchmark
+2. 手动构建: Benchmark 链式 API
 
-模块结构:
-- benchmark: Benchmark 定义和构建
-- fusion_rules: 全局融合规则配置
-- cost_model: 参数化成本模型
-- calibration: ML 校准框架
-- strategy: Tiling 策略
-- views: 可视化视图
-- memory_plan: 内存规划和 DMA 生成
-- evaluator: 评估门面
-
-使用示例:
+使用示例 (PyTorch 劫持方式):
 ```python
-from aidevtools.optimizer import (
-    FusionEvaluator,
-    Benchmark,
-    BenchmarkSuite,
-    FusionRules,
-    get_fusion_rules,
-)
+import aidevtools.golden as golden
+import torch.nn.functional as F
 
-# 查看/修改全局融合规则
-rules = get_fusion_rules()
-print(rules.summary())
+# 执行 PyTorch 代码 (自动被劫持)
+x = torch.randn(512, 768)
+y = F.linear(x, w1)
+y = F.gelu(y)
+y = F.linear(y, w2)
 
-# 添加自定义规则
-from aidevtools.optimizer import FusionRule
-rules.add_rule(FusionRule(
-    op_type_a="custom_op",
-    op_type_b="matmul",
-    ratio=0.95,
-    fuse_speedup=1.2,
-))
-
-# 使用预定义 suite (融合规则自动从全局获取)
-evaluator = FusionEvaluator()
-result = evaluator.evaluate_suite("bert_ffn", seq_len=512, hidden=768, intermediate=3072)
+# 自动提取为 Benchmark 并评估
+from aidevtools.optimizer import extract_and_evaluate
+result = extract_and_evaluate("my_ffn")
 print(result.summary())
+```
 
-# 自定义 benchmark (融合规则自动匹配)
-benchmark = (
-    Benchmark("custom")
-    .add_op("matmul1", "matmul", M=512, N=768, K=768)
-    .add_op("gelu", "gelu", M=512, N=768)
-    .add_op("matmul2", "matmul", M=512, N=768, K=768)
-    # 可选：覆盖特定算子对的规则
-    .override_pair("matmul1", "gelu", ratio=0.92, fuse_speedup=1.35)
+使用示例 (手动构建方式):
+```python
+from aidevtools.optimizer import Benchmark, FusionEvaluator
+
+# 链式构建
+bm = (
+    Benchmark("my_ffn")
+    .add_op("mm1", "matmul", M=512, N=3072, K=768)
+    .add_op("gelu", "gelu", M=512, N=3072)
+    .add_op("mm2", "matmul", M=512, N=768, K=3072)
 )
-print(benchmark.summary())
 
-# 策略比较
-compare = evaluator.compare(benchmark, strategies=["baseline", "efficiency_aware", "fuse_speedup"])
-print(compare.summary())
+# 评估
+evaluator = FusionEvaluator()
+result = evaluator.evaluate(bm)
+print(result.summary())
+```
 
-# 生成视图
-roofline = evaluator.generate_view(result.tiling_result, "roofline")
-print(roofline.content)
+ML 校准示例:
+```python
+from aidevtools.optimizer import MeasurementArchive, calibrate_and_compare
 
-# 校准
-evaluator.import_measurements("measurements.csv")
-evaluator.calibrate(method="layered")
-evaluator.save_calibration("calibrated_params.json")
+# 导入实测数据
+archive = MeasurementArchive()
+archive.import_results([("bm1", 125.5), ("bm2", 98.2)], suite)
+
+# 校准并对比
+result = calibrate_and_compare(archive)
+print(result.summary())
 ```
 """
 
@@ -199,6 +177,14 @@ from .comparison import (
     calibrate_and_compare,
 )
 
+# Bridge (PyTorch 劫持 → Benchmark)
+from .bridge import (
+    extract_benchmark,
+    extract_and_evaluate,
+    trace_and_extract,
+    TracedBenchmark,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -299,4 +285,10 @@ __all__ = [
     "CalibrateAndCompareResult",
     "compare_methods",
     "calibrate_and_compare",
+
+    # Bridge (PyTorch → Benchmark)
+    "extract_benchmark",
+    "extract_and_evaluate",
+    "trace_and_extract",
+    "TracedBenchmark",
 ]
