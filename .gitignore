@@ -54,5 +54,10 @@ failed_cases/
 # C++ build artifacts
 src/aidevtools/formats/custom/*/cpp/build/
 src/aidevtools/formats/custom/*/*.so
+aidevtools/formats/custom/*/cpp/build/
+aidevtools/formats/custom/*/*.so
+aidevtools/golden/cpu_golden
+aidevtools/golden/cpu_golden_bfp
+aidevtools/golden/cpp/build/
 
 demos/output/
