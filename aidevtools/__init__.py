@@ -38,7 +38,7 @@ PyTorch 劫持:
 __version__ = "0.1.0"
 
 # 统一数据生成器 (推荐入口)
-from aidevtools.datagen import DataGenerator, GeneratedTensor
+from aidevtools.datagen import DataGenerator, GeneratedTensor, Model, ModelTensor
 
 # 模块级导入
 from aidevtools import compare, frontend, ops
@@ -50,6 +50,9 @@ __all__ = [
     # 数据生成
     "DataGenerator",
     "GeneratedTensor",
+    # Model DSL
+    "Model",
+    "ModelTensor",
     # 模块
     "ops",
     "compare",

@@ -6,27 +6,25 @@
 - Golden 计算
 - DUT 格式导出
 
-用法:
+用法 1: DataGenerator (显式生成)
     from aidevtools import DataGenerator
 
     gen = DataGenerator(seed=42)
-
-    # 方式 1: 自动生成 (读取 @register_op 配置)
     data = gen.generate("linear", input_shape=(512, 768), out_features=3072)
-    # data["input"].array, data["weight"].array, data["bias"].array
-
-    # 方式 2: 生成 + golden
-    data, golden = gen.generate_with_golden("linear", input_shape=(512, 768), out_features=3072)
-
-    # 方式 3: 手动生成
-    x = gen.randn((512, 768), name="x")
-    w = gen.xavier((3072, 768), name="weight")
-
-    # L2 内存布局
-    print(gen.memory_summary())
-
-    # 导出 DUT
     gen.export("./golden/")
+
+用法 2: Model DSL (自动生成权重)
+    from aidevtools import Model
+
+    with Model(seed=42) as m:
+        x = m.input((512, 768))
+        y = m.linear(x, out_features=3072)  # 自动生成 weight, bias
+        y = m.gelu(y)
+        y = m.linear(y, out_features=768)
+
+    print(m.tensors)   # 所有生成的数据
+    print(m.outputs)   # golden 输出
+    m.export("./golden/")
 """
 
 from dataclasses import dataclass, field
@@ -487,3 +485,232 @@ class DataGenerator:
                 raise ValueError(f"无法解析: {part}")
 
         return tuple(result)
+
+
+# ============================================================
+# Model DSL - 自动生成权重
+# ============================================================
+
+
+class ModelTensor:
+    """DSL 中的 Tensor，记录 shape 用于后续算子推断"""
+
+    def __init__(self, shape: Tuple[int, ...], name: str, golden: Optional[np.ndarray] = None):
+        self.shape = shape
+        self.name = name
+        self.golden = golden
+
+    def __repr__(self):
+        return f"ModelTensor({self.name}, shape={self.shape})"
+
+
+class Model:
+    """
+    Model DSL - 自动根据 @register_op 生成权重
+
+    用法:
+        with Model(seed=42) as m:
+            x = m.input((512, 768))
+            y = m.linear(x, out_features=3072)  # 自动生成 weight, bias
+            y = m.gelu(y)
+            y = m.linear(y, out_features=768)
+
+        # 获取所有数据
+        for name, t in m.tensors.items():
+            print(f"{name}: {t.shape}")
+
+        # 导出
+        m.export("./golden/")
+    """
+
+    def __init__(
+        self,
+        seed: Optional[int] = None,
+        l2_base: int = 0x100000,
+        alignment: int = 256,
+        qtype: str = "bfp16",
+    ):
+        self._gen = DataGenerator(seed=seed, l2_base=l2_base, alignment=alignment, qtype=qtype)
+        self._outputs: List[ModelTensor] = []
+        self._op_counter: Dict[str, int] = {}
+
+    def __enter__(self) -> "Model":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    # ============================================================
+    # 输入
+    # ============================================================
+
+    def input(
+        self,
+        shape: Tuple[int, ...],
+        name: Optional[str] = None,
+        qtype: Optional[str] = None,
+    ) -> ModelTensor:
+        """定义输入"""
+        name = name or self._next_name("input")
+        t = self._gen.randn(shape, name=name, qtype=qtype, role="input")
+        return ModelTensor(shape=t.shape, name=name, golden=t.array)
+
+    # ============================================================
+    # 算子 (自动生成权重)
+    # ============================================================
+
+    def linear(self, x: ModelTensor, out_features: int, **kwargs) -> ModelTensor:
+        """Linear: 自动生成 weight, bias"""
+        return self._call_op("linear", x, out_features=out_features, **kwargs)
+
+    def gelu(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """GELU 激活"""
+        return self._call_op("gelu", x, **kwargs)
+
+    def relu(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """ReLU 激活"""
+        return self._call_op("relu", x, **kwargs)
+
+    def silu(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """SiLU 激活"""
+        return self._call_op("silu", x, **kwargs)
+
+    def softmax(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """Softmax"""
+        return self._call_op("softmax", x, **kwargs)
+
+    def layernorm(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """LayerNorm: 自动生成 gamma, beta"""
+        return self._call_op("layernorm", x, **kwargs)
+
+    def rmsnorm(self, x: ModelTensor, **kwargs) -> ModelTensor:
+        """RMSNorm: 自动生成 gamma"""
+        return self._call_op("rmsnorm", x, **kwargs)
+
+    def matmul(self, x: ModelTensor, y: ModelTensor, **kwargs) -> ModelTensor:
+        """MatMul (两个输入)"""
+        # matmul 特殊处理：两个输入都来自前面的 tensor
+        from aidevtools.ops.registry import get_op_instance
+
+        op_name = "matmul"
+        prefix = self._next_name(op_name)
+
+        op = get_op_instance(op_name)
+        if op is None:
+            raise ValueError(f"算子 '{op_name}' 未注册")
+
+        golden = op.cpu_golden(x.golden, y.golden)
+        out = ModelTensor(shape=golden.shape, name=f"{prefix}.output", golden=golden)
+        self._outputs.append(out)
+        return out
+
+    def add(self, x: ModelTensor, y: ModelTensor, **kwargs) -> ModelTensor:
+        """Add"""
+        from aidevtools.ops.registry import get_op_instance
+        op = get_op_instance("add")
+        golden = op.cpu_golden(x.golden, y.golden)
+        name = self._next_name("add")
+        out = ModelTensor(shape=golden.shape, name=f"{name}.output", golden=golden)
+        self._outputs.append(out)
+        return out
+
+    def mul(self, x: ModelTensor, y: ModelTensor, **kwargs) -> ModelTensor:
+        """Mul"""
+        from aidevtools.ops.registry import get_op_instance
+        op = get_op_instance("mul")
+        golden = op.cpu_golden(x.golden, y.golden)
+        name = self._next_name("mul")
+        out = ModelTensor(shape=golden.shape, name=f"{name}.output", golden=golden)
+        self._outputs.append(out)
+        return out
+
+    # ============================================================
+    # 通用算子调用
+    # ============================================================
+
+    def _call_op(self, op_name: str, x: ModelTensor, **kwargs) -> ModelTensor:
+        """调用算子，自动生成权重"""
+        from aidevtools.ops.registry import get_op_meta, get_op_instance
+
+        meta = get_op_meta(op_name)
+        if meta is None:
+            raise ValueError(f"算子 '{op_name}' 未注册")
+
+        prefix = self._next_name(op_name)
+        input_shape = x.shape
+
+        # 根据 auto_gen 生成权重
+        context = {"input_shape": input_shape, **kwargs}
+        args = [x.golden]  # 第一个参数是输入
+        kwargs_call = {}
+
+        for param, strategy in meta.auto_gen.items():
+            if param == meta.inputs[0]:
+                # 第一个输入已经有了
+                continue
+
+            is_weight = param in meta.weight_params
+            role = "weight" if is_weight else "input"
+
+            # 生成数据
+            array, shape = self._gen._gen_from_strategy(strategy, context)
+            tensor_name = f"{prefix}.{param}"
+            self._gen._add_tensor(tensor_name, array, qtype=self._gen.qtype, role=role)
+
+            # 更新 context
+            context[f"{param}_shape"] = shape
+            context[param] = array
+
+            # 添加到参数
+            if param in meta.inputs[1:]:
+                args.append(array)
+            elif param in meta.optional:
+                kwargs_call[param] = array
+
+        # 计算 golden
+        op = get_op_instance(op_name)
+        golden = op.cpu_golden(*args, **kwargs_call)
+
+        # 返回输出
+        out = ModelTensor(shape=golden.shape, name=f"{prefix}.output", golden=golden)
+        self._outputs.append(out)
+        return out
+
+    def _next_name(self, op_name: str) -> str:
+        """生成下一个算子名"""
+        idx = self._op_counter.get(op_name, 0)
+        self._op_counter[op_name] = idx + 1
+        return f"{op_name}_{idx}"
+
+    # ============================================================
+    # 访问器
+    # ============================================================
+
+    @property
+    def tensors(self) -> Dict[str, GeneratedTensor]:
+        """所有生成的 tensor (输入 + 权重)"""
+        return self._gen._tensors
+
+    @property
+    def outputs(self) -> List[ModelTensor]:
+        """所有算子的输出"""
+        return self._outputs
+
+    @property
+    def final_output(self) -> Optional[np.ndarray]:
+        """最终输出的 golden"""
+        if self._outputs:
+            return self._outputs[-1].golden
+        return None
+
+    def memory_summary(self) -> str:
+        """L2 内存摘要"""
+        return self._gen.memory_summary()
+
+    def export(self, output_dir: Union[str, Path], prefix: str = "") -> Dict[str, Path]:
+        """导出为 DUT 格式"""
+        return self._gen.export(output_dir, prefix)
+
+    def export_header(self, output_path: Union[str, Path], prefix: str = "DATA") -> Path:
+        """导出 C 头文件"""
+        return self._gen.export_header(output_path, prefix)
