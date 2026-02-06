@@ -187,6 +187,18 @@ from .evaluator import (
     quick_compare,
 )
 
+# Comparison (理论 vs 工程化)
+from .comparison import (
+    PredictMethod,
+    PredictionResult,
+    ComparisonMetrics,
+    MethodComparison,
+    MethodComparator,
+    CalibrateAndCompareResult,
+    compare_methods,
+    calibrate_and_compare,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -277,4 +289,14 @@ __all__ = [
     "FusionEvaluator",
     "quick_evaluate",
     "quick_compare",
+
+    # Comparison
+    "PredictMethod",
+    "PredictionResult",
+    "ComparisonMetrics",
+    "MethodComparison",
+    "MethodComparator",
+    "CalibrateAndCompareResult",
+    "compare_methods",
+    "calibrate_and_compare",
 ]

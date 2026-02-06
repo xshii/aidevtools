@@ -6,4 +6,5 @@ Optimizer Demos
     python -m aidevtools.optimizer.demos.02_calibration
     python -m aidevtools.optimizer.demos.03_fusion_rules
     python -m aidevtools.optimizer.demos.04_echarts
+    python -m aidevtools.optimizer.demos.05_comparison
 """
