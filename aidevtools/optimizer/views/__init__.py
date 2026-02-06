@@ -11,6 +11,12 @@ from .memory import MemoryFlowView
 from .compute import ComputeView
 from .roofline import RooflineView
 from .bandwidth import BandwidthPipelineView
+from .echarts import (
+    ChartType,
+    EChartsOption,
+    EChartsConverter,
+    to_echarts,
+)
 
 __all__ = [
     "View",
@@ -19,4 +25,9 @@ __all__ = [
     "ComputeView",
     "RooflineView",
     "BandwidthPipelineView",
+    # ECharts
+    "ChartType",
+    "EChartsOption",
+    "EChartsConverter",
+    "to_echarts",
 ]
