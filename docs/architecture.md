@@ -1,442 +1,366 @@
-# AI Dev Tools 架构设计
+# AIDevTools 完整架构设计
 
-## 1. 概述
-
-AI Dev Tools 是一套用于自研芯片算子验证的工具集，提供从 Golden 生成、数据量化、到精度比对的完整工作流。
-
-### 1.1 核心能力
-
-- **Golden 生成**：支持 Python/C++ 双模式算子实现
-- **量化格式**：BFP (Block Floating Point)、GFloat 等自定义格式
-- **精度模式**：pure (纯 fp32) / quant (量化感知) 双轨验证
-- **四状态判定**：PASS / GOLDEN_SUSPECT / DUT_ISSUE / BOTH_SUSPECT
-- **Golden 自检**：自动检测 Golden 数据有效性
-
-## 2. 架构总览
-
-![架构图](images/architecture.svg)
-
-### 2.1 分层架构
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              应用层 (Application)                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │  demos/      │  │  xlsx 工作流  │  │  Python API  │  │    CLI       │    │
-│  │  示例脚本    │  │  表格驱动     │  │  编程接口    │  │  命令行      │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-┌─────────────────────────────────────▼───────────────────────────────────────┐
-│                              前端层 (Frontend)                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                      │
-│  │    types     │  │   datagen    │  │   compile    │                      │
-│  │  统一类型    │  │  数据生成    │  │  编译封装    │                      │
-│  └──────────────┘  └──────────────┘  └──────────────┘                      │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-┌─────────────────────────────────────▼───────────────────────────────────────┐
-│                              比对层 (Compare)                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │    exact     │  │    fuzzy     │  │    sanity    │  │    engine    │    │
-│  │  精确比对    │  │  模糊比对    │  │  Golden自检  │  │  比对引擎    │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-┌─────────────────────────────────────▼───────────────────────────────────────┐
-│                              格式层 (Formats)                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │    numpy     │  │     raw      │  │  custom/bfp  │  │custom/gfloat │    │
-│  │   npy/npz    │  │   二进制     │  │  块浮点      │  │  自定义浮点  │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## 3. 核心模块详解
-
-### 3.1 compare - 比对模块
-
-```python
-from aidevtools.compare import (
-    CompareEngine,
-    CompareConfig,
-    CompareResult,
-    CompareStatus,
-)
-
-# 配置
-config = CompareConfig(
-    exact_max_abs=0.0,           # 精确比对最大绝对误差
-    exact_max_count=0,           # 精确比对最大不匹配数
-    fuzzy_atol=1e-5,             # 模糊比对绝对容差
-    fuzzy_rtol=1e-3,             # 模糊比对相对容差
-    fuzzy_min_qsnr=30.0,         # 最小 QSNR (dB)
-    fuzzy_min_cosine=0.999,      # 最小余弦相似度
-    sanity_min_qsnr=20.0,        # Golden 自检最小 QSNR
-)
-
-# 创建引擎
-engine = CompareEngine(config)
-
-# 执行比对
-result = engine.compare(
-    dut_output=dut,
-    golden_pure=golden_fp32,
-    golden_qnt=golden_qnt,
-    name="matmul_0",
-)
-
-print(f"Status: {result.status.value}")
-```
-
-### 3.2 frontend - 前端模块
-
-```python
-from aidevtools.frontend import (
-    DataGenerator,
-    DType,
-    DistType,
-    Tensor,
-    Compiler,
-)
-
-# 数据生成
-gen = DataGenerator(seed=42)
-x = gen.gen_input(shape=(2, 64), dtype=DType.BFP16, dist=DistType.NORMAL)
-w = gen.gen_weight(shape=(64, 128), dtype=DType.BFP16, init=DistType.XAVIER)
-
-# 编译封装
-compiler = Compiler()
-result = compiler.compile_python(source="model.py", output="model.bin")
-```
-
-### 3.3 tensor - 统一张量
-
-```python
-@dataclass
-class Tensor:
-    data: np.ndarray                    # fp32 数据
-    quant_data: Optional[bytes]         # 量化后数据
-    meta: TensorMeta                    # 元信息
-
-    @classmethod
-    def from_numpy(cls, data, name, dtype) -> "Tensor":
-        """从 numpy 创建"""
-
-    def save(self, path):
-        """保存到文件"""
-
-    @classmethod
-    def load(cls, path) -> "Tensor":
-        """从文件加载"""
-```
-
-**支持的数据类型：**
-| 类型 | 说明 | 存储 |
-|------|------|------|
-| float32 | 原始精度 | fp32 |
-| float16 | 半精度 | fp16 |
-| bfp16 | 块浮点 16 (8-bit mantissa) | int8 + exp |
-| bfp8 | 块浮点 8 (4-bit mantissa) | int8 + exp |
-| bfp4 | 块浮点 4 (2-bit mantissa) | int8 + exp |
-| gfloat16 | 自定义 16 位 (1+8+7) | uint16 |
-| gfloat8 | 自定义 8 位 (1+4+3) | uint8 |
-| gfloat4 | 自定义 4 位 (1+2+1) | uint8 |
-
-### 3.4 ops - 算子模块
-
-```python
-from aidevtools.ops import _functional as F
-
-# PyTorch 风格 API
-y = F.matmul(x, w)
-y = F.layer_norm(y, normalized_shape=(hidden,))
-y = F.softmax(y, dim=-1)
-y = F.gelu(y)
-
-# 获取记录
-for r in ops.get_records():
-    print(f"{r.op_name}: {r.golden.shape}")
-```
-
-**内置算子：**
-- linear, matmul, relu, gelu, softmax
-- layernorm, attention, add, mul, embedding
-- transpose, sigmoid, tanh, silu
-
-## 4. 四状态判定机制
-
-![比对流程](images/compare_flow.svg)
-
-### 4.1 判定矩阵
-
-```
-                    ┌─────────────┐
-                    │  DUT 输出   │
-                    │  (待验证)   │
-                    └──────┬──────┘
-                           │
-           ┌───────────────┼───────────────┐
-           │               │               │
-           ▼               ▼               ▼
-    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-    │   Exact     │ │ Fuzzy Qnt   │ │   Sanity    │
-    │  精确比对   │ │ 模糊比对    │ │ Golden自检  │
-    └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
-           │               │               │
-           └───────────────┼───────────────┘
-                           ▼
-    ┌─────────────────────────────────────────────┐
-    │              状态判定 (Status)               │
-    └─────────────────────────────────────────────┘
-```
-
-### 4.2 状态判定规则
-
-| DUT vs Golden | Golden 自检 | 判定状态 | 含义 |
-|---------------|-------------|----------|------|
-| PASS | PASS | **PASS** | DUT 正确，Golden 有效 |
-| PASS | FAIL | **GOLDEN_SUSPECT** | DUT 匹配，但 Golden 可疑 |
-| FAIL | PASS | **DUT_ISSUE** | Golden 有效，DUT 有问题 |
-| FAIL | FAIL | **BOTH_SUSPECT** | 都可疑，需人工排查 |
-
-### 4.3 Golden 自检项
-
-- **non_zero**: 数据非全零
-- **no_nan_inf**: 无 NaN/Inf
-- **range_valid**: 数值范围合理
-- **qsnr_valid**: golden_qnt vs golden_pure QSNR >= 阈值
-
-### 4.4 比对结果示例
-
-```
-==============================================================================================================
-name            exact  f_pure   f_qnt   sanity     max_abs     qsnr   cosine        status
---------------------------------------------------------------------------------------------------------------
-matmul_0           Y       Y       Y       Y     0.00e+00      inf 1.000000          PASS
-layernorm_0        N       Y       Y       Y     2.52e-01    17.54 0.991358          PASS
-softmax_0          N       Y       N       N     2.63e-02    14.54 0.982997   BOTH_SUSPECT
-conv_0             N       N       N       Y     1.00e+00      8.8 0.993808      DUT_ISSUE
-==============================================================================================================
-Summary: 2 PASS, 0 GOLDEN_SUSPECT, 1 DUT_ISSUE, 1 BOTH_SUSPECT (total: 4)
-```
-
-## 5. 数据流
-
-![数据流](images/data_flow.svg)
-
-### 5.1 Golden 生成流程
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  生成输入   │ ──▶ │  执行算子   │ ──▶ │  记录结果   │
-│ (Tensor)    │     │ (F API)     │     │ (OpRecord)  │
-└─────────────┘     └─────────────┘     └─────────────┘
-      │                   │                   │
-      │                   │                   │
-      ▼                   ▼                   ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   fp32 +    │     │ golden_pure │     │   inputs    │
-│  quantized  │     │ golden_quant│     │   weights   │
-└─────────────┘     └─────────────┘     │   output    │
-                                        └─────────────┘
-```
-
-### 5.2 比对验证流程
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   加载      │ ──▶ │  比对引擎   │ ──▶ │  生成报告   │
-│ Golden+DUT  │     │CompareEngine│     │ report.py   │
-└─────────────┘     └─────────────┘     └─────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-    ┌───────────┐   ┌───────────┐   ┌───────────┐
-    │   exact   │   │   fuzzy   │   │  sanity   │
-    │   result  │   │   result  │   │   result  │
-    └───────────┘   └───────────┘   └───────────┘
-```
-
-## 6. 目录结构
+## 一、项目总览
 
 ```
 aidevtools/
-├── aidevtools/
-│   ├── core/                    # 核心模块
-│   │   ├── __init__.py          # 统一导出
-│   │   ├── config.py            # 全局配置
-│   │   └── log.py               # 日志
-│   │
-│   ├── compare/                 # 比对模块 (新)
-│   │   ├── __init__.py          # 统一导出
-│   │   ├── types.py             # 类型定义
-│   │   ├── metrics.py           # 指标计算
-│   │   ├── exact.py             # 精确比对
-│   │   ├── fuzzy.py             # 模糊比对
-│   │   ├── sanity.py            # Golden 自检
-│   │   ├── engine.py            # 比对引擎
-│   │   └── report.py            # 报告生成
-│   │
-│   ├── frontend/                # 前端模块 (新)
-│   │   ├── __init__.py          # 统一导出
-│   │   ├── types.py             # 统一类型
-│   │   ├── datagen.py           # 数据生成
-│   │   └── compile.py           # 编译封装
-│   │
-│   ├── formats/                 # 数据格式
-│   │   ├── base.py              # 格式基类
-│   │   ├── numpy.py             # npy/npz
-│   │   ├── raw.py               # 二进制
-│   │   ├── quantize.py          # 量化注册表
-│   │   └── custom/              # 自定义格式
-│   │       ├── bfp/             # 块浮点
-│   │       └── gfloat/          # 自定义浮点
-│   │
-│   ├── ops/                     # 算子模块
-│   │   ├── __init__.py
-│   │   ├── _functional.py       # F API
-│   │   ├── base.py              # 基础函数
-│   │   └── cpu_golden.py        # CPU Golden
-│   │
-│   ├── golden/                  # Golden 实现
-│   │   ├── cpu_golden           # C++ CLI
-│   │   └── cpp/                 # C++ 源码
-│   │
-│   ├── tools/                   # 工具集
-│   │   └── compare/             # 比对工具 (旧)
-│   │
-│   ├── trace/                   # 插桩工具
-│   │   └── tracer.py
-│   │
-│   └── xlsx/                    # Excel 工作流
-│       ├── export.py
-│       ├── import_.py
-│       └── run.py
-│
-├── demos/                       # 示例
-│   ├── 01_basic_ops/
-│   ├── 02_mini_transformer/
-│   ├── 03_transformer/
-│   ├── 04_xlsx_basic/
-│   ├── 05_xlsx_transformer/
-│   ├── 07_transpose/
-│   └── 08_paper_analysis/
-│
-├── tests/                       # 测试
-│   └── ut/                      # 单元测试
-│
-└── docs/                        # 文档
-    ├── architecture.md          # 架构设计
-    └── compare_guide.md         # 比对指南
+├── analysis/       # 性能分析 (Roofline, Pass链)
+├── compare/        # 4状态比对系统
+├── frontend/       # 前端 (数据生成, 编译)
+├── ops/            # 算子 (TracedTensor, 计算图)
+├── golden/         # PyTorch 劫持
+├── optimizer/      # 融合优化 (本模块)
+├── formats/        # 数据格式 (GFloat, BFP)
+├── toolchain/      # 编译器工具链
+├── core/           # 全局配置
+├── trace/          # 执行轨迹
+└── xlsx/           # Excel 转换
 ```
 
-## 7. 使用示例
+## 二、完整数据流
 
-### 7.1 PyTorch 风格 API
-
-```python
-import numpy as np
-from aidevtools import ops
-from aidevtools.ops import _functional as F
-
-# 清空记录
-ops.clear()
-
-# 使用 F API 执行算子
-x = np.random.randn(2, 8, 64).astype(np.float32)
-w = np.random.randn(64, 128).astype(np.float32)
-
-y = F.matmul(x, w)
-y = F.layer_norm(y, (128,))
-y = F.softmax(y, dim=-1)
-
-# 获取 Golden 记录
-for r in ops.get_records():
-    print(f"{r.op_name}: input={r.input.shape}, golden={r.golden.shape}")
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        3 种前端写作方式                                  │
+├───────────────────┬─────────────────────┬───────────────────────────────┤
+│  1. Python DSL    │  2. Benchmark API   │  3. PyTorch 劫持              │
+│  (frontend)       │  (optimizer)        │  (golden + ops)               │
+│                   │                     │                               │
+│  gen = DataGen()  │  Benchmark("ffn")   │  import aidevtools.golden     │
+│  x = gen.gen_input│  .add_op("mm",...)  │  y = F.linear(x, w)           │
+│  compile_to_dut() │  .add_op("gelu",..) │  # 自动劫持+比对              │
+└─────────┬─────────┴──────────┬──────────┴───────────────┬───────────────┘
+          │                    │                          │
+          ▼                    ▼                          ▼
+┌─────────────────┐  ┌─────────────────────┐  ┌───────────────────────────┐
+│ Tensor/TensorMeta│  │ Benchmark/OpSpec    │  │ TracedTensor              │
+│ (frontend.types) │  │ (optimizer.benchmark)│  │ (ops.traced_tensor)       │
+└────────┬────────┘  └──────────┬──────────┘  └─────────────┬─────────────┘
+         │                      │                           │
+         └──────────────────────┼───────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         OpProfile (中间表示)                             │
+│                    (analysis.profile.OpProfile)                         │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          ▼                     ▼                     ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────────┐
+│  analysis 模块   │  │  optimizer 模块  │  │     compare 模块             │
+│  ──────────────  │  │  ──────────────  │  │     ──────────────           │
+│  ChipSpec        │  │  FusionRules     │  │     4状态判定:               │
+│  PaperAnalyzer   │  │  HyperCalibrator │  │     ┌─────────┬────────────┐ │
+│  Pass 链:        │  │  CostModel       │  │     │DUT\Gold │ PASS  FAIL │ │
+│  - Roofline      │  │  TilingStrategy  │  │     ├─────────┼────────────┤ │
+│  - MemEfficiency │  │                  │  │     │ PASS    │ PASS  SUSPECT│ │
+│  - Overhead      │  │  理论 vs 工程化  │  │     │ FAIL    │ ISSUE BOTH  │ │
+│  - ...           │  │  comparison      │  │     └─────────┴────────────┘ │
+└────────┬─────────┘  └────────┬─────────┘  └──────────────┬───────────────┘
+         │                     │                           │
+         ▼                     ▼                           ▼
+   LatencyResult         EvalResult              CompareResult
+   (理论时延)            (优化时延)              (比对状态)
+         │                     │                           │
+         └─────────────────────┼───────────────────────────┘
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            输出层                                        │
+├─────────────────┬─────────────────────┬─────────────────────────────────┤
+│  export_xlsx    │  ECharts 可视化     │  CompareReport                  │
+│  export_csv     │  Roofline 图        │  JSON/Text 报告                 │
+│  export_json    │  HTML 图表          │  状态汇总                       │
+└─────────────────┴─────────────────────┴─────────────────────────────────┘
 ```
 
-### 7.2 比对 API
+## 三、Optimizer 模块架构
 
-```python
-from aidevtools.compare import CompareEngine, CompareConfig
-
-# 创建比对引擎
-config = CompareConfig(
-    fuzzy_min_qsnr=30.0,
-    fuzzy_min_cosine=0.999,
-)
-engine = CompareEngine(config)
-
-# 执行比对
-result = engine.compare(
-    dut_output=dut,
-    golden_pure=golden_fp32,
-    golden_qnt=golden_qnt,
-    name="matmul_0",
-)
-print(f"Status: {result.status.value}")
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           前端 (3种写作方式)                             │
+├─────────────────────┬─────────────────────┬─────────────────────────────┤
+│   1. Python DSL     │   2. Benchmark API  │   3. 实测数据导入            │
+│   (frontend 模块)   │   (链式构建)        │   (CSV/Dict)                │
+├─────────────────────┴─────────────────────┴─────────────────────────────┤
+│                                                                         │
+│  from frontend import   Benchmark("ffn")      archive.import_results(   │
+│    Tensor, compile      .add_op("mm1",...)    [("bm1", 125.5), ...],    │
+│                         .add_op("gelu",...)    suite)                   │
+│                                                                         │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Benchmark / OpSpec                              │
+│                    (统一的算子描述中间表示)                              │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+┌───────────────────────────────┐ ┌───────────────────────────────────────┐
+│      理论分析 (analysis)      │ │        工程化方法 (optimizer)          │
+├───────────────────────────────┤ ├───────────────────────────────────────┤
+│                               │ │                                       │
+│  ChipSpec (芯片规格)          │ │  FusionHyperParams (ML超参数)         │
+│  OpProfile (算子画像)         │ │  MeasurementArchive (实测数据)        │
+│  RooflinePass (Roofline分析)  │ │  HyperCalibrator (超参数校准)         │
+│  MemoryEfficiencyPass         │ │  ParameterizedCostModel               │
+│  OverheadPass                 │ │                                       │
+│                               │ │                                       │
+│  基于芯片规格推导             │ │  基于实测数据学习                     │
+│  (优化前默认参数)             │ │  (ML校准后参数)                       │
+│                               │ │                                       │
+└───────────────────┬───────────┘ └───────────────────┬───────────────────┘
+                    │                                 │
+                    ▼                                 ▼
+┌───────────────────────────────┐ ┌───────────────────────────────────────┐
+│   理论预测时延 (latency_us)   │ │   工程化预测时延 (latency_us)          │
+└───────────────────┬───────────┘ └───────────────────┬───────────────────┘
+                    │                                 │
+                    └─────────────┬───────────────────┘
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     comparison (对比模块)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│  MethodComparator.from_calibration()                                    │
+│  - 对比理论分析 vs 工程化方法                                           │
+│  - 输出 MAE/MAPE/RMSE/R² 等指标                                         │
+│  - 生成校准后的时延预测                                                 │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.3 数据生成 API
+## 三种前端写作方式
 
+### 1. Python DSL (frontend 模块)
 ```python
-from aidevtools.frontend import DataGenerator, DType
+from aidevtools.frontend import Tensor, DataGenerator, compile_to_dut
 
+# 数据生成
 gen = DataGenerator(seed=42)
+x = gen.gen_input(shape=(2, 64), dtype="bfp16")
+w = gen.gen_weight(shape=(64, 64), dtype="bfp16")
 
-# 生成输入数据
-x = gen.gen_input(shape=(2, 64), dtype="bfp16", dist="normal")
-
-# 生成权重数据
-w = gen.gen_weight(shape=(64, 128), dtype="bfp16", init="xavier")
+# 编译到 DUT
+result = compile_to_dut(source="model.py", output="build/model.bin")
 ```
 
-### 7.4 Excel 工作流
-
-```bash
-# 生成模板
-python -c "from aidevtools.xlsx import create_template; create_template('model.xlsx')"
-
-# 编辑 model.xlsx，定义算子序列
-
-# 执行并比对
-python -c "from aidevtools.xlsx import run_xlsx; run_xlsx('model.xlsx', 'results/')"
-```
-
-## 8. 扩展指南
-
-### 8.1 添加新算子
-
+### 2. Benchmark API (链式构建)
 ```python
-from aidevtools.ops.base import register_op
+from aidevtools.optimizer import Benchmark, BenchmarkSuite
 
-@register_op("my_op")
-def my_op_impl(x, w, **kwargs):
-    """自定义算子实现"""
-    return (x + 1) @ w
+# 链式构建
+bm = (
+    Benchmark("my_ffn")
+    .add_op("mm1", "matmul", M=512, N=3072, K=768)
+    .add_op("gelu", "gelu", M=512, N=3072)
+    .add_op("mm2", "matmul", M=512, N=768, K=3072)
+)
+
+# 或使用预定义 Suite
+suite = BenchmarkSuite()
+bm = suite.get("bert_ffn_512")
 ```
 
-### 8.2 添加新量化格式
-
+### 3. 实测数据导入
 ```python
-from aidevtools.formats.quantize import register_quantize, register_dequantize
+from aidevtools.optimizer import MeasurementArchive, BenchmarkSuite
 
-@register_quantize("my_format")
-def to_my_format(data: np.ndarray, **kwargs):
-    # 量化逻辑
-    return quantized_data, meta
+archive = MeasurementArchive()
+suite = BenchmarkSuite()
 
-@register_dequantize("my_format")
-def from_my_format(data: np.ndarray, meta: dict):
-    # 反量化逻辑
-    return fp32_data
+# 只需 benchmark 名称 + 时延
+results = [
+    ("bert_ffn_512", 125.5),
+    ("gpt_attention_1024", 380.0),
+]
+archive.import_results(results, suite)
 ```
 
-## 9. 版本历史
+## 后端时延评估框架
 
-| 版本 | 日期 | 变更 |
-|------|------|------|
-| v3.0 | 2025-02 | 四状态判定模型，compare/frontend 模块，目录扁平化 |
-| v2.0 | 2025-01 | 统一工作流架构，三列比对 |
-| v1.0 | 2024-01 | 初始版本，trace + compare |
+### 理论分析方法 (analysis 模块)
+- 基于芯片规格 (ChipSpec) 和算子画像 (OpProfile)
+- 使用 Roofline 模型、访存效率模型
+- 参数是静态的，基于硬件规格推导
+- 优点：无需实测数据
+- 缺点：可能与实际有偏差
+
+### 工程化方法 (optimizer 模块)
+- 基于实测数据 (MeasurementArchive)
+- 使用 ML 校准 (HyperCalibrator)
+- 参数是动态的，从数据中学习
+- 优点：更贴近实际
+- 缺点：需要实测数据
+
+### 对比流程
+```python
+from aidevtools.optimizer import calibrate_and_compare
+
+# 一键完成: 校准 + 对比 + 输出校准后时延
+result = calibrate_and_compare(archive)
+
+# 查看对比结果
+print(result.summary())
+# 理论分析 MAPE: 12.5%
+# 工程化 MAPE: 3.2%
+# 结论: 工程化方法更优
+
+# 获取校准后的时延预测
+for bm, latency in result.calibrated_predictions.items():
+    print(f"{bm}: {latency:.2f} us")
+```
+
+## 数据流
+
+```
+前端输入                    中间表示                    后端输出
+────────                    ────────                    ────────
+
+Python DSL ──┐
+             │
+Benchmark ───┼──▶ OpSpec ──▶ OpProfile ──┬──▶ 理论时延
+API          │              FeatureVector │
+             │                            ├──▶ 工程化时延
+实测数据 ────┘              LabelVector ──┤
+                                          └──▶ 对比报告
+```
+
+## 四、模块依赖关系
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          aidevtools (主入口)                            │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+    ┌────────────┬───────────────┼───────────────┬────────────┐
+    ▼            ▼               ▼               ▼            ▼
+┌────────┐ ┌──────────┐ ┌────────────┐ ┌─────────────┐ ┌──────────┐
+│frontend│ │  golden  │ │   compare  │ │   analysis  │ │ optimizer│
+└───┬────┘ └────┬─────┘ └─────┬──────┘ └──────┬──────┘ └────┬─────┘
+    │           │             │               │              │
+    │           ▼             │               │              │
+    │      ┌─────────┐        │               │              │
+    │      │   ops   │◄───────┤               │              │
+    │      └────┬────┘        │               │              │
+    │           │             │               │              │
+    │           ▼             │               │              │
+    │      ┌─────────┐        │               │              │
+    └─────►│ formats │◄───────┴───────────────┴──────────────┘
+           │(GFloat, │
+           │  BFP)   │
+           └────┬────┘
+                │
+                ▼
+           ┌─────────┐
+           │  core   │ (config, log, utils)
+           └─────────┘
+```
+
+## 五、各模块核心职责
+
+| 模块 | 职责 | 关键类/函数 |
+|------|------|-------------|
+| **analysis** | 性能分析、Roofline、Pass链 | PaperAnalyzer, ChipSpec, RooflinePass |
+| **frontend** | 数据生成、编译接口 | DataGenerator, Tensor, compile_to_dut |
+| **compare** | 4状态比对系统 | CompareEngine, CompareStatus |
+| **ops** | 算子实现、计算图追踪 | TracedTensor, cpu_golden |
+| **golden** | PyTorch劫持 | TorchGoldenBackend, golden_mode |
+| **optimizer** | 融合评估、ML校准 | FusionEvaluator, HyperCalibrator |
+| **formats** | 数据格式、量化 | GFloat, BFP, quantize |
+| **toolchain** | 编译器工具链 | ToolchainManager, get_compiler |
+| **core** | 全局配置 | GlobalConfig, logger |
+
+## 六、关键工作流
+
+### 工作流 1: PyTorch Golden 模式
+```python
+import aidevtools.golden as golden
+
+# 配置
+golden.set_mode("python")      # cpp/python/none
+golden.set_compare("fuzzy")    # exact/fuzzy/none
+golden.set_quantize("bfp16")   # gfp16/bfp16/...
+
+# 执行 (自动劫持)
+y = torch.nn.functional.linear(x, w)
+
+# 查看结果
+golden.report()
+```
+
+### 工作流 2: 性能分析
+```python
+from aidevtools.analysis import PaperAnalyzer, load_chip_spec
+
+analyzer = PaperAnalyzer(chip="npu_910")
+analyzer.add_profile(profile)
+result = analyzer.analyze()
+analyzer.print_summary()
+```
+
+### 工作流 3: 融合优化评估
+```python
+from aidevtools.optimizer import (
+    Benchmark, FusionEvaluator, calibrate_and_compare
+)
+
+# 定义 benchmark
+bm = Benchmark("ffn").add_op("mm", "matmul", M=512, N=768, K=768)
+
+# 评估
+evaluator = FusionEvaluator()
+result = evaluator.evaluate(bm)
+
+# 校准并对比
+comparison = calibrate_and_compare(archive)
+print(comparison.summary())
+```
+
+### 工作流 4: 4状态比对
+```python
+from aidevtools.compare import compare_full, CompareStatus
+
+result = compare_full(dut_output, golden_pure, golden_quantized)
+
+if result.status == CompareStatus.PASS:
+    print("✓ 比对通过")
+elif result.status == CompareStatus.DUT_ISSUE:
+    print("✗ DUT 问题")
+elif result.status == CompareStatus.GOLDEN_SUSPECT:
+    print("? Golden 可疑")
+else:
+    print("? 双方可疑")
+```
+
+## 七、optimizer 模块内部结构
+
+```
+optimizer/
+├── benchmark.py           # Benchmark 链式构建
+├── fusion_rules.py        # 全局融合规则 (Singleton)
+├── cost_model.py          # 成本模型 (复用 analysis)
+├── measurement_archive.py # 实测数据归档 (X, Y)
+├── hyper_calibrator.py    # 超参数 ML 校准
+├── calibration.py         # 传统校准方法
+├── comparison.py          # 理论 vs 工程化对比
+├── evaluator.py           # Facade 评估器
+├── memory_plan.py         # 内存规划
+├── strategy/              # Tiling 策略
+│   ├── base.py            # 策略基类
+│   ├── baseline.py        # 基准策略
+│   ├── efficiency_aware.py# 效率导向
+│   └── fuse_speedup.py    # 加速比导向
+├── views/                 # 可视化
+│   ├── base.py            # 视图基类
+│   ├── roofline.py        # Roofline 图
+│   ├── echarts.py         # ECharts 转换
+│   └── ...
+├── demos/                 # 演示脚本
+│   ├── 01_basic.py
+│   ├── 02_calibration.py
+│   ├── 03_fusion_rules.py
+│   ├── 04_echarts.py
+│   └── 05_comparison.py
+└── ARCHITECTURE.md        # 本文档
+```
