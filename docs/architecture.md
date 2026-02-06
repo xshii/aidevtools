@@ -21,23 +21,33 @@ aidevtools/
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        3 种前端写作方式                                  │
-├───────────────────┬─────────────────────┬───────────────────────────────┤
-│  1. Python DSL    │  2. Benchmark API   │  3. PyTorch 劫持              │
-│  (frontend)       │  (optimizer)        │  (golden + ops)               │
-│                   │                     │                               │
-│  gen = DataGen()  │  Benchmark("ffn")   │  import aidevtools.golden     │
-│  x = gen.gen_input│  .add_op("mm",...)  │  y = F.linear(x, w)           │
-│  compile_to_dut() │  .add_op("gelu",..) │  # 自动劫持+比对              │
-└─────────┬─────────┴──────────┬──────────┴───────────────┬───────────────┘
-          │                    │                          │
-          ▼                    ▼                          ▼
-┌─────────────────┐  ┌─────────────────────┐  ┌───────────────────────────┐
-│ Tensor/TensorMeta│  │ Benchmark/OpSpec    │  │ TracedTensor              │
-│ (frontend.types) │  │ (optimizer.benchmark)│  │ (ops.traced_tensor)       │
-└────────┬────────┘  └──────────┬──────────┘  └─────────────┬─────────────┘
-         │                      │                           │
-         └──────────────────────┼───────────────────────────┘
+│                        2 种前端写作方式                                  │
+├─────────────────────────────────┬───────────────────────────────────────┤
+│  1. Python DSL (frontend)       │  2. PyTorch 劫持 (golden + ops)       │
+│                                 │                                       │
+│  gen = DataGenerator()          │  import aidevtools.golden             │
+│  x = gen.gen_input(...)         │  y = F.linear(x, w)                   │
+│  w = gen.gen_weight(...)        │  y = F.gelu(y)                        │
+│  compile_to_dut()               │  # 自动劫持 + 精度比对                │
+│                                 │  # 自动提取 Benchmark (bridge)        │
+│  → 数据生成 + 编译到 DUT        │  → 精度比对 + 时延评估                │
+└─────────────────┬───────────────┴───────────────────────┬───────────────┘
+                  │                                       │
+                  ▼                                       ▼
+┌─────────────────────────────┐       ┌───────────────────────────────────┐
+│ Tensor/TensorMeta           │       │ TracedTensor                      │
+│ (frontend.types)            │       │ (ops.traced_tensor)               │
+└─────────────┬───────────────┘       └─────────────────┬─────────────────┘
+              │                                         │
+              │                       ┌─────────────────┘
+              │                       │ bridge.extract_benchmark()
+              │                       ▼
+              │               ┌───────────────────────────────────────────┐
+              │               │ Benchmark/OpSpec (自动从计算图提取)       │
+              │               │ (optimizer.benchmark)                     │
+              │               └─────────────────┬─────────────────────────┘
+              │                                 │
+              └─────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -78,15 +88,29 @@ aidevtools/
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           前端 (3种写作方式)                             │
-├─────────────────────┬─────────────────────┬─────────────────────────────┤
-│   1. Python DSL     │   2. Benchmark API  │   3. 实测数据导入            │
-│   (frontend 模块)   │   (链式构建)        │   (CSV/Dict)                │
-├─────────────────────┴─────────────────────┴─────────────────────────────┤
+│                           前端 (2种写作方式)                             │
+├─────────────────────────────────┬───────────────────────────────────────┤
+│   1. Python DSL (frontend)      │   2. PyTorch 劫持 (golden)            │
+├─────────────────────────────────┼───────────────────────────────────────┤
+│                                 │                                       │
+│  from frontend import           │  import aidevtools.golden             │
+│    DataGenerator, compile       │  y = F.linear(x, w)                   │
+│                                 │  y = F.gelu(y)                        │
+│  gen = DataGenerator()          │                                       │
+│  x = gen.gen_input(...)         │  # 自动提取 Benchmark                 │
+│  compile_to_dut(...)            │  bm = extract_benchmark("my_ffn")     │
+│                                 │                                       │
+│  → 数据生成 + 编译              │  → 自动劫持 + 自动提取 Benchmark      │
+│                                 │                                       │
+└─────────────────────────────────┴───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         实测数据导入 (可选)                              │
 │                                                                         │
-│  from frontend import   Benchmark("ffn")      archive.import_results(   │
-│    Tensor, compile      .add_op("mm1",...)    [("bm1", 125.5), ...],    │
-│                         .add_op("gelu",...)    suite)                   │
+│  archive = MeasurementArchive()                                         │
+│  archive.import_results([("bm1", 125.5), ("bm2", 98.2)], suite)         │
+│  → 用于 ML 校准                                                          │
 │                                                                         │
 └─────────────────────────────────┬───────────────────────────────────────┘
                                   │
@@ -130,7 +154,7 @@ aidevtools/
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 三种前端写作方式
+## 两种前端写作方式
 
 ### 1. Python DSL (frontend 模块)
 ```python
@@ -145,24 +169,34 @@ w = gen.gen_weight(shape=(64, 64), dtype="bfp16")
 result = compile_to_dut(source="model.py", output="build/model.bin")
 ```
 
-### 2. Benchmark API (链式构建)
+### 2. PyTorch 劫持 (golden + ops + bridge)
 ```python
-from aidevtools.optimizer import Benchmark, BenchmarkSuite
+import aidevtools.golden as golden
+import torch.nn.functional as F
+from aidevtools.optimizer import extract_benchmark, extract_and_evaluate
 
-# 链式构建
-bm = (
-    Benchmark("my_ffn")
-    .add_op("mm1", "matmul", M=512, N=3072, K=768)
-    .add_op("gelu", "gelu", M=512, N=3072)
-    .add_op("mm2", "matmul", M=512, N=768, K=3072)
-)
+# 设置 golden 模式
+golden.set_mode("python")
 
-# 或使用预定义 Suite
-suite = BenchmarkSuite()
-bm = suite.get("bert_ffn_512")
+# 执行 PyTorch 代码 (自动劫持)
+x = torch.randn(512, 768)
+w1 = torch.randn(768, 3072)
+w2 = torch.randn(3072, 768)
+
+y = F.linear(x, w1.T)
+y = F.gelu(y)
+y = F.linear(y, w2.T)
+
+# 自动提取 Benchmark (无需手动构建)
+bm = extract_benchmark("my_ffn")
+print(bm.summary())
+
+# 或一键: 提取 + 评估
+result = extract_and_evaluate("my_ffn")
+print(result.summary())
 ```
 
-### 3. 实测数据导入
+### 实测数据导入 (用于 ML 校准)
 ```python
 from aidevtools.optimizer import MeasurementArchive, BenchmarkSuite
 
@@ -217,13 +251,19 @@ for bm, latency in result.calibrated_predictions.items():
 前端输入                    中间表示                    后端输出
 ────────                    ────────                    ────────
 
-Python DSL ──┐
-             │
-Benchmark ───┼──▶ OpSpec ──▶ OpProfile ──┬──▶ 理论时延
-API          │              FeatureVector │
-             │                            ├──▶ 工程化时延
-实测数据 ────┘              LabelVector ──┤
-                                          └──▶ 对比报告
+Python DSL ────────────────────────────────┬──▶ DUT 编译
+                                           │
+PyTorch 劫持 ──▶ TracedTensor ──▶ OpNode ──┤
+                         │                 │
+                         │ bridge          │
+                         ▼                 │
+                   Benchmark/OpSpec ───────┼──▶ 理论时延
+                         │                 │
+                   FeatureVector           ├──▶ 工程化时延
+                         │                 │
+实测数据 ──────────▶ LabelVector ──────────┼──▶ ML 校准
+                                           │
+                                           └──▶ 对比报告
 ```
 
 ## 四、模块依赖关系
@@ -338,6 +378,7 @@ else:
 ```
 optimizer/
 ├── benchmark.py           # Benchmark 链式构建
+├── bridge.py              # PyTorch 劫持 → Benchmark 桥接
 ├── fusion_rules.py        # 全局融合规则 (Singleton)
 ├── cost_model.py          # 成本模型 (复用 analysis)
 ├── measurement_archive.py # 实测数据归档 (X, Y)
@@ -357,10 +398,11 @@ optimizer/
 │   ├── echarts.py         # ECharts 转换
 │   └── ...
 ├── demos/                 # 演示脚本
-│   ├── 01_basic.py
-│   ├── 02_calibration.py
-│   ├── 03_fusion_rules.py
-│   ├── 04_echarts.py
-│   └── 05_comparison.py
-└── ARCHITECTURE.md        # 本文档
+│   ├── 01_basic.py        # 基础用法 (Benchmark 构建、评估)
+│   ├── 02_calibration.py  # ML 校准流程
+│   ├── 03_fusion_rules.py # 融合规则配置
+│   ├── 04_echarts.py      # ECharts 可视化
+│   ├── 05_comparison.py   # 理论 vs 工程化对比
+│   └── 06_bridge.py       # PyTorch 劫持 → Benchmark 桥接
+└── __init__.py            # 模块导出
 ```

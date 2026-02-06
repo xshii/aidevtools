@@ -81,6 +81,15 @@ from aidevtools.ops.test_generator import (
     run_test_cases,
 )
 
+# 数据生成 (基于 auto_gen)
+from aidevtools.ops.datagen import (
+    OpDataGenerator,
+    TensorInfo,
+    L2MemoryLayout,
+    generate_op_data,
+    generate_and_export,
+)
+
 # 内部模块，仅用于触发算子注册，不对外暴露
 from aidevtools.ops import _functional as _F  # noqa: F401
 
@@ -128,4 +137,10 @@ __all__ = [
     "Op",
     "register_golden_cpp",
     "has_golden_cpp",
+    # 数据生成
+    "OpDataGenerator",
+    "TensorInfo",
+    "L2MemoryLayout",
+    "generate_op_data",
+    "generate_and_export",
 ]

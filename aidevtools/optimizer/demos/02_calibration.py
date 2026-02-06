@@ -1,85 +1,134 @@
 """
 Demo: ML 校准流程
 
-展示如何导入实测数据并校准超参数
+展示如何使用 PyTorch 生成测试用例，导入实测数据并校准超参数
+
+流程:
+1. 使用 PyTorch 定义模型结构
+2. 提取 Benchmark 并生成测试数据
+3. 在 DUT 上运行获取实测时延
+4. 导入实测结果到 MeasurementArchive
+5. 使用 HyperCalibrator 校准超参数
 """
 
+import torch
+import torch.nn.functional as F
+
+import aidevtools.golden as golden
+from aidevtools.ops import clear as ops_clear
 from aidevtools.optimizer import (
-    Benchmark,
+    extract_benchmark,
     BenchmarkSuite,
     MeasurementArchive,
-    MeasurementSource,
     HyperCalibrator,
     OptimizeMethod,
     get_fusion_rules,
 )
 
 
-def demo_import_results():
-    """演示导入实测结果 (最简接口)"""
+def demo_generate_test_cases():
+    """演示用 PyTorch 生成测试用例"""
     print("=" * 60)
-    print("1. 导入实测结果")
+    print("1. 使用 PyTorch 生成测试用例")
     print("=" * 60)
 
-    # 创建归档
-    archive = MeasurementArchive()
+    test_cases = []
 
-    # 定义 benchmarks
-    benchmarks = {
-        "mm_512": Benchmark("mm_512").add_op("mm", "matmul", M=512, N=768, K=768),
-        "mm_gelu_512": (
-            Benchmark("mm_gelu_512")
-            .add_op("mm", "matmul", M=512, N=768, K=768)
-            .add_op("gelu", "gelu", M=512, N=768)
-        ),
-        "ffn_512": (
-            Benchmark("ffn_512")
-            .add_op("mm1", "matmul", M=512, N=3072, K=768)
-            .add_op("gelu", "gelu", M=512, N=3072)
-            .add_op("mm2", "matmul", M=512, N=768, K=3072)
-        ),
-    }
+    # 测试用例 1: 单个 matmul
+    ops_clear()
+    x = torch.randn(512, 768)
+    w = torch.randn(768, 768)
+    y = torch.matmul(x, w)
+    bm1 = extract_benchmark("matmul_512")
+    test_cases.append(("matmul_512", bm1))
+    print(f"生成: matmul_512, ops={len(bm1.ops)}")
 
-    # 模拟实测结果: {bm_name: latency_us}
-    results = {
-        "mm_512": 125.5,
-        "mm_gelu_512": 98.2,  # 融合后更快
-        "ffn_512": 380.0,
-    }
+    # 测试用例 2: matmul + gelu
+    ops_clear()
+    x = torch.randn(512, 768)
+    w = torch.randn(768, 768)
+    y = torch.matmul(x, w)
+    y = F.gelu(y)
+    bm2 = extract_benchmark("matmul_gelu_512")
+    test_cases.append(("matmul_gelu_512", bm2))
+    print(f"生成: matmul_gelu_512, ops={len(bm2.ops)}")
 
-    # 导入
-    count = archive.import_from_benchmarks(results, benchmarks)
-    print(f"导入了 {count} 条记录")
+    # 测试用例 3: FFN
+    ops_clear()
+    x = torch.randn(512, 768)
+    w1 = torch.randn(3072, 768)
+    w2 = torch.randn(768, 3072)
+    y = F.linear(x, w1)
+    y = F.gelu(y)
+    y = F.linear(y, w2)
+    bm3 = extract_benchmark("ffn_512")
+    test_cases.append(("ffn_512", bm3))
+    print(f"生成: ffn_512, ops={len(bm3.ops)}")
 
-    # 查看统计
-    stats = archive.statistics()
-    print(f"\n统计信息:")
-    print(f"  - 样本数: {stats['count']}")
-    print(f"  - 融合样本: {stats['fused_count']}")
-    print(f"  - 未融合样本: {stats['unfused_count']}")
-    print(f"  - 时延范围: {stats['latency_us_min']:.1f} ~ {stats['latency_us_max']:.1f} us")
-
-    return archive
+    print(f"\n总共 {len(test_cases)} 个测试用例")
+    return test_cases
 
 
-def demo_import_with_suite():
-    """演示使用 BenchmarkSuite 导入"""
+def demo_export_for_dut(test_cases):
+    """演示导出数据用于 DUT 测试"""
     print("\n" + "=" * 60)
-    print("2. 使用 BenchmarkSuite 导入")
+    print("2. 导出数据用于 DUT 测试")
+    print("=" * 60)
+
+    from aidevtools.ops import OpDataGenerator
+
+    print("使用 OpDataGenerator 生成 DUT 测试数据:")
+
+    gen = OpDataGenerator(seed=42, l2_base=0x100000, alignment=256)
+
+    for name, bm in test_cases:
+        print(f"\n{name}:")
+        for op in bm.ops:
+            # 从 Benchmark 的 OpSpec 提取 shape 信息
+            shapes = op.shapes
+            M = shapes.get("M", 1)
+            N = shapes.get("N", 1)
+            K = shapes.get("K", N)
+
+            if op.op_type.value == "matmul":
+                data = gen.generate("matmul", input_shape=(M, K), out_features=N)
+            elif op.op_type.value == "gelu":
+                data = gen.generate("gelu", input_shape=(M, N))
+            else:
+                continue
+
+            for param, info in data.items():
+                print(f"    {param}: L2=0x{info.l2_addr:X}, shape={info.shape}")
+
+    print(f"\n总 L2 内存: {gen.memory_layout().total_size / 1024:.1f} KB")
+    print("\n实际使用时调用 gen.export_dut('golden/') 导出")
+
+
+def demo_import_results():
+    """演示导入实测结果"""
+    print("\n" + "=" * 60)
+    print("3. 导入实测结果")
     print("=" * 60)
 
     archive = MeasurementArchive()
     suite = BenchmarkSuite()
 
-    # 只需提供 (bm_name, latency_us) 列表
-    results = [
+    # 模拟从 DUT 获取的实测结果
+    # 实际使用中，这些数据来自 DUT 运行
+    measured_results = [
         ("bert_ffn_512", 125.5),
         ("bert_ffn_1024", 245.0),
         ("gpt_attention_512", 180.3),
+        ("gpt_attention_1024", 350.2),
     ]
 
-    count = archive.import_results(results, suite)
+    count = archive.import_results(measured_results, suite)
     print(f"导入了 {count} 条记录")
+
+    stats = archive.statistics()
+    print(f"\n统计信息:")
+    print(f"  - 样本数: {stats['count']}")
+    print(f"  - 时延范围: {stats['latency_us_min']:.1f} ~ {stats['latency_us_max']:.1f} us")
 
     return archive
 
@@ -87,21 +136,19 @@ def demo_import_with_suite():
 def demo_calibration(archive: MeasurementArchive):
     """演示超参数校准"""
     print("\n" + "=" * 60)
-    print("3. 超参数校准")
+    print("4. 超参数校准")
     print("=" * 60)
 
-    # 创建校准器
     calibrator = HyperCalibrator(archive)
 
     # 查看当前超参数
     rules = get_fusion_rules()
-    print("当前超参数 (部分):")
+    print("当前超参数:")
     params = rules.hyper_params
     print(f"  - decay_base: {params.decay_base}")
     print(f"  - speedup_scale: {params.speedup_scale}")
-    print(f"  - op_submit_base: {params.op_submit_base}")
 
-    # 执行校准 (使用随机搜索，快速演示)
+    # 执行校准
     print("\n开始校准 (Random Search, 20 iterations)...")
     result = calibrator.calibrate(
         method=OptimizeMethod.RANDOM_SEARCH,
@@ -110,79 +157,68 @@ def demo_calibration(archive: MeasurementArchive):
     )
 
     print(f"\n校准结果:")
-    print(f"  - 方法: {result.method.value}")
-    print(f"  - 训练损失: {result.train_loss:.4f}")
-    print(f"  - 验证损失: {result.val_loss:.4f}" if result.val_loss else "  - 验证损失: N/A")
     print(f"  - R²: {result.r_squared:.4f}")
     print(f"  - RMSE: {result.rmse:.2f} us")
     print(f"  - MAPE: {result.mape:.2f}%")
     print(f"  - 改进: {result.improvement():.1f}%")
-    print(f"  - 耗时: {result.duration_seconds:.2f}s")
-
-    # 应用结果
-    if calibrator.apply(result, validate=True):
-        print("\n新超参数已应用!")
-        new_params = rules.hyper_params
-        print(f"  - decay_base: {new_params.decay_base:.4f}")
-        print(f"  - speedup_scale: {new_params.speedup_scale:.4f}")
 
     return result
 
 
-def demo_export_import():
-    """演示数据导出和导入"""
+def demo_workflow():
+    """演示完整工作流"""
     print("\n" + "=" * 60)
-    print("4. 数据导出/导入")
+    print("5. 完整工作流")
     print("=" * 60)
 
-    archive = MeasurementArchive()
+    print("""
+完整工作流:
 
-    # 添加一些数据
-    benchmarks = {
-        "test1": Benchmark("test1").add_op("mm", "matmul", M=256, N=256, K=256),
-        "test2": Benchmark("test2").add_op("mm", "matmul", M=512, N=512, K=512),
-    }
-    archive.import_from_benchmarks({"test1": 50.0, "test2": 200.0}, benchmarks)
+1. 用 PyTorch 定义模型:
+   import torch.nn.functional as F
+   import aidevtools.golden as golden
 
-    # 导出为 numpy
-    X, y, feature_names, sample_ids = archive.to_numpy()
-    print(f"Numpy 格式:")
-    print(f"  - X shape: {X.shape}")
-    print(f"  - y shape: {y.shape}")
-    print(f"  - 特征名: {feature_names[:5]}...")
+   y = F.linear(x, w1)
+   y = F.gelu(y)
+   y = F.linear(y, w2)
 
-    # 导出为 pandas
-    df = archive.to_pandas()
-    print(f"\nPandas DataFrame:")
-    print(f"  - shape: {df.shape}")
-    print(f"  - columns: {list(df.columns)[:5]}...")
+2. 提取 Benchmark:
+   bm = extract_benchmark("my_ffn")
 
-    # 保存到 JSON
-    import tempfile
-    import os
+3. 生成 DUT 测试数据:
+   gen = OpDataGenerator(seed=42)
+   gen.export_dut("golden/")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        json_path = os.path.join(tmpdir, "archive.json")
-        archive.save(json_path)
-        print(f"\n已保存到: {json_path}")
+4. DUT 运行，获取实测时延
 
-        # 重新加载
-        archive2 = MeasurementArchive(json_path)
-        print(f"重新加载: {len(archive2)} 条记录")
+5. 导入实测数据并校准:
+   archive = MeasurementArchive()
+   archive.import_results(results, suite)
+   calibrator = HyperCalibrator(archive)
+   result = calibrator.calibrate()
+   calibrator.apply(result)
+
+6. 使用校准后的模型预测:
+   evaluator = FusionEvaluator()
+   prediction = evaluator.evaluate(bm)
+""")
 
 
 if __name__ == "__main__":
-    # 1. 导入实测结果
+    # 1. 生成测试用例
+    test_cases = demo_generate_test_cases()
+
+    # 2. 导出数据
+    demo_export_for_dut(test_cases)
+
+    # 3. 导入实测结果
     archive = demo_import_results()
 
-    # 2. 使用 Suite 导入
-    demo_import_with_suite()
-
-    # 3. 校准超参数
+    # 4. 校准
     demo_calibration(archive)
 
-    # 4. 导出/导入
-    demo_export_import()
+    # 5. 完整工作流
+    demo_workflow()
 
     print("\n" + "=" * 60)
     print("Demo 完成!")

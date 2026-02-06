@@ -1,34 +1,68 @@
 """
 Demo: 基础用法
 
-展示 Benchmark 定义、评估和策略比较
+展示 PyTorch 劫持 → Benchmark 提取 → 时延评估
+
+流程:
+1. import aidevtools.golden 启用劫持
+2. 执行 PyTorch 代码 (F.linear, F.gelu, ...)
+3. extract_benchmark() 自动提取 Benchmark
+4. FusionEvaluator 评估时延
 """
 
-from aidevtools.optimizer import (
-    Benchmark,
-    BenchmarkSuite,
-    FusionEvaluator,
-    get_fusion_rules,
-)
+import torch
+import torch.nn.functional as F
+
+# 启用 PyTorch 劫持
+import aidevtools.golden as golden
+from aidevtools.optimizer import extract_benchmark, extract_and_evaluate, FusionEvaluator
+from aidevtools.ops import clear as ops_clear
 
 
-def demo_benchmark_builder():
-    """演示 Benchmark 链式构建"""
+def demo_simple_linear():
+    """演示简单 Linear"""
     print("=" * 60)
-    print("1. Benchmark 链式构建")
+    print("1. 简单 Linear")
     print("=" * 60)
 
-    # 创建一个简单的 FFN benchmark
-    bm = (
-        Benchmark("my_ffn")
-        .add_op("mm1", "matmul", M=512, N=3072, K=768)
-        .add_op("gelu", "gelu", M=512, N=3072)
-        .add_op("mm2", "matmul", M=512, N=768, K=3072)
-    )
+    ops_clear()  # 清空之前的计算图
+
+    # PyTorch 代码 (自动被劫持)
+    x = torch.randn(512, 768)
+    w = torch.randn(768, 3072)
+    y = F.linear(x, w)
+
+    # 提取 Benchmark
+    bm = extract_benchmark("simple_linear")
 
     print(f"Benchmark: {bm.name}")
-    print(f"算子数量: {len(bm.ops)}")
-    print("\n算子列表:")
+    print(f"算子数: {len(bm.ops)}")
+    for op in bm.ops:
+        print(f"  - {op.name}: {op.op_type.value}, shapes={op.shapes}")
+
+
+def demo_ffn():
+    """演示 FFN (Linear → GELU → Linear)"""
+    print("\n" + "=" * 60)
+    print("2. FFN (Linear → GELU → Linear)")
+    print("=" * 60)
+
+    ops_clear()
+
+    # FFN 结构
+    x = torch.randn(512, 768)
+    w1 = torch.randn(3072, 768)  # (out_features, in_features)
+    w2 = torch.randn(768, 3072)
+
+    y = F.linear(x, w1)   # (512, 768) @ (768, 3072) -> (512, 3072)
+    y = F.gelu(y)         # (512, 3072)
+    y = F.linear(y, w2)   # (512, 3072) @ (3072, 768) -> (512, 768)
+
+    # 提取并评估
+    bm = extract_benchmark("ffn")
+
+    print(f"Benchmark: {bm.name}")
+    print(f"算子数: {len(bm.ops)}")
     for op in bm.ops:
         print(f"  - {op.name}: {op.op_type.value}, shapes={op.shapes}")
 
@@ -38,41 +72,26 @@ def demo_benchmark_builder():
     for ops, pattern, speedup in fusion_groups:
         print(f"  - {ops}: pattern={pattern}, speedup={speedup:.2f}x")
 
-    return bm
 
-
-def demo_fusion_rules():
-    """演示全局融合规则"""
+def demo_evaluate():
+    """演示时延评估"""
     print("\n" + "=" * 60)
-    print("2. 全局融合规则")
+    print("3. 时延评估")
     print("=" * 60)
 
-    rules = get_fusion_rules()
-    print(rules.summary())
+    ops_clear()
 
-    # 查询特定规则
-    rule = rules.get_rule("matmul", "gelu")
-    if rule:
-        print(f"\nmatmul + gelu 规则:")
-        print(f"  - ratio: {rule.ratio}")
-        print(f"  - speedup: {rule.fuse_speedup}x")
+    # 执行 PyTorch
+    x = torch.randn(512, 768)
+    w1 = torch.randn(3072, 768)
+    w2 = torch.randn(768, 3072)
 
+    y = F.linear(x, w1)
+    y = F.gelu(y)
+    y = F.linear(y, w2)
 
-def demo_evaluator():
-    """演示评估器"""
-    print("\n" + "=" * 60)
-    print("3. FusionEvaluator 评估")
-    print("=" * 60)
-
-    evaluator = FusionEvaluator()
-
-    # 使用预定义 suite
-    result = evaluator.evaluate_suite(
-        "bert_ffn",
-        seq_len=512,
-        hidden=768,
-        intermediate=3072,
-    )
+    # 一键提取 + 评估
+    result = extract_and_evaluate("ffn_eval")
 
     print(result.summary())
 
@@ -83,17 +102,23 @@ def demo_strategy_compare():
     print("4. 策略比较")
     print("=" * 60)
 
-    evaluator = FusionEvaluator()
+    ops_clear()
 
-    # 自定义 benchmark
-    bm = (
-        Benchmark("attention_proj")
-        .add_op("q_proj", "matmul", M=512, N=768, K=768)
-        .add_op("k_proj", "matmul", M=512, N=768, K=768)
-        .add_op("v_proj", "matmul", M=512, N=768, K=768)
-    )
+    # Attention Projection
+    x = torch.randn(512, 768)
+    wq = torch.randn(768, 768)
+    wk = torch.randn(768, 768)
+    wv = torch.randn(768, 768)
+
+    q = F.linear(x, wq)
+    k = F.linear(x, wk)
+    v = F.linear(x, wv)
+
+    # 提取
+    bm = extract_benchmark("attention_proj")
 
     # 比较不同策略
+    evaluator = FusionEvaluator()
     compare_result = evaluator.compare(
         bm,
         strategies=["baseline", "efficiency_aware", "fuse_speedup"],
@@ -102,32 +127,47 @@ def demo_strategy_compare():
     print(compare_result.summary())
 
 
-def demo_suite():
-    """演示预定义 BenchmarkSuite"""
+def demo_nn_module():
+    """演示使用 nn.Module"""
     print("\n" + "=" * 60)
-    print("5. 预定义 BenchmarkSuite")
+    print("5. 使用 nn.Module")
     print("=" * 60)
 
-    suite = BenchmarkSuite()
+    ops_clear()
 
-    print("可用的预定义 benchmarks:")
-    for name in suite.list_benchmarks()[:10]:  # 只显示前 10 个
-        print(f"  - {name}")
+    # 定义模型
+    class FFN(torch.nn.Module):
+        def __init__(self, hidden_size, intermediate_size):
+            super().__init__()
+            self.fc1 = torch.nn.Linear(hidden_size, intermediate_size)
+            self.fc2 = torch.nn.Linear(intermediate_size, hidden_size)
 
-    # 获取一个具体的 benchmark
-    bm = suite.get("bert_ffn_512")
-    if bm:
-        print(f"\nbert_ffn_512 详情:")
-        print(f"  - 算子数: {len(bm.ops)}")
-        print(f"  - 类别: {bm.category}")
+        def forward(self, x):
+            x = self.fc1(x)
+            x = F.gelu(x)
+            x = self.fc2(x)
+            return x
+
+    # 创建模型并执行
+    model = FFN(hidden_size=768, intermediate_size=3072)
+    x = torch.randn(512, 768)
+    y = model(x)
+
+    # 提取
+    bm = extract_benchmark("nn_ffn")
+
+    print(f"Benchmark: {bm.name}")
+    print(f"算子数: {len(bm.ops)}")
+    for op in bm.ops:
+        print(f"  - {op.name}: {op.op_type.value}, shapes={op.shapes}")
 
 
 if __name__ == "__main__":
-    demo_benchmark_builder()
-    demo_fusion_rules()
-    demo_evaluator()
+    demo_simple_linear()
+    demo_ffn()
+    demo_evaluate()
     demo_strategy_compare()
-    demo_suite()
+    demo_nn_module()
 
     print("\n" + "=" * 60)
     print("Demo 完成!")
