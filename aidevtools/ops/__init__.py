@@ -96,6 +96,7 @@ from aidevtools.ops.datagen import (
     L2MemoryLayout,
     generate_op_data,
     generate_and_export,
+    generate_with_golden,
 )
 
 # 内部模块，仅用于触发算子注册，不对外暴露
@@ -155,4 +156,5 @@ __all__ = [
     "L2MemoryLayout",
     "generate_op_data",
     "generate_and_export",
+    "generate_with_golden",
 ]

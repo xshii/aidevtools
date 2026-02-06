@@ -310,6 +310,46 @@ class OpDataGenerator:
             shape = self._parse_shape(shape_spec, context)
             data = self._rng.normal(mean, std, shape).astype(np.float32)
 
+        elif strategy.startswith("uniform:"):
+            # uniform:low,high,shape_spec  或  uniform:shape_spec
+            parts = strategy[8:].split(",")
+            if len(parts) >= 3:
+                low = float(parts[0])
+                high = float(parts[1])
+                shape_spec = ",".join(parts[2:])
+            elif len(parts) == 2 and parts[0].lstrip("-").replace(".", "").isdigit():
+                low = float(parts[0])
+                high = float(parts[1])
+                shape_spec = "-1"
+            else:
+                low, high = -0.1, 0.1
+                shape_spec = ",".join(parts)
+            shape = self._parse_shape(shape_spec, context)
+            data = self._rng.uniform(low, high, shape).astype(np.float32)
+
+        elif strategy == "uniform":
+            # 简写形式：uniform (用于 bias)
+            shape = (context.get("out_features", input_shape[-1]),)
+            data = self._rng.uniform(-0.1, 0.1, shape).astype(np.float32)
+
+        elif strategy == "xavier":
+            # 简写形式：xavier (用于 weight)
+            # 推断 shape: [out_features, in_features]
+            out_features = context.get("out_features", input_shape[-1])
+            in_features = input_shape[-1]
+            shape = (out_features, in_features)
+            fan_in, fan_out = in_features, out_features
+            limit = np.sqrt(6.0 / (fan_in + fan_out))
+            data = self._rng.uniform(-limit, limit, shape).astype(np.float32)
+
+        elif strategy == "kaiming":
+            # 简写形式：kaiming (用于 weight)
+            out_features = context.get("out_features", input_shape[-1])
+            in_features = input_shape[-1]
+            shape = (out_features, in_features)
+            std = np.sqrt(2.0 / in_features)
+            data = self._rng.normal(0, std, shape).astype(np.float32)
+
         else:
             raise ValueError(f"未知生成策略: {strategy}")
 
@@ -587,3 +627,65 @@ def generate_and_export(
     gen = OpDataGenerator(seed=seed, alignment=alignment, qtype=qtype)
     gen.generate(op_name, input_shape, **kwargs)
     return gen.export_dut(output_dir)
+
+
+def generate_with_golden(
+    op_name: str,
+    input_shape: Tuple[int, ...],
+    seed: Optional[int] = None,
+    alignment: int = 256,
+    **kwargs,
+) -> Tuple[Dict[str, TensorInfo], np.ndarray, L2MemoryLayout]:
+    """
+    便捷函数: 生成数据并计算 golden 输出
+
+    Args:
+        op_name: 算子名称
+        input_shape: 主输入 shape
+        seed: 随机种子
+        alignment: 内存对齐字节数
+        **kwargs: 额外参数 (如 out_features)
+
+    Returns:
+        (data_dict, golden_output, memory_layout)
+
+    Example:
+        data, golden, layout = generate_with_golden(
+            "linear",
+            input_shape=(512, 768),
+            out_features=3072,
+            seed=42,
+        )
+        print(f"输入: {data['input'].shape}")
+        print(f"权重: {data['weight'].shape}")
+        print(f"golden: {golden.shape}")
+    """
+    from aidevtools.ops.registry import get_op_instance, get_op_meta
+
+    gen = OpDataGenerator(seed=seed, alignment=alignment)
+    data = gen.generate(op_name, input_shape, **kwargs)
+
+    # 获取算子实例
+    op = get_op_instance(op_name)
+    if op is None:
+        raise ValueError(f"算子 '{op_name}' 未注册或无法实例化")
+
+    # 获取元信息
+    meta = get_op_meta(op_name)
+    if meta is None:
+        raise ValueError(f"算子 '{op_name}' 无元信息")
+
+    # 构建参数
+    args = []
+    kwargs_call = {}
+    for inp in meta.inputs:
+        if inp in data:
+            args.append(data[inp].data)
+    for opt in meta.optional:
+        if opt in data:
+            kwargs_call[opt] = data[opt].data
+
+    # 计算 golden
+    golden = op.cpu_golden(*args, **kwargs_call)
+
+    return data, golden, gen.memory_layout()
