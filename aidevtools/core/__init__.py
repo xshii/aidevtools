@@ -15,7 +15,7 @@ from aidevtools.core.memory_types import (
     MemoryRegion,
     TensorAllocation,
 )
-from aidevtools.core.random import Method, RandomGenerator
+from aidevtools.core.random import Method, RandomGenerator, parse_shape
 
 __all__ = [
     # config
@@ -36,4 +36,5 @@ __all__ = [
     # random
     "RandomGenerator",
     "Method",
+    "parse_shape",
 ]

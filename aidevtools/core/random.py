@@ -1,7 +1,12 @@
 """公共随机数生成器
 
 将 datagen / ops.datagen / frontend.datagen 中重复的随机数生成逻辑
-提取为一个无状态的工具类，只负责：给定 shape、dtype、method、seed → 返回 ndarray。
+提取为一个公共工具类。
+
+功能:
+    1. 基础随机生成: generate(shape, method, dtype) → ndarray
+    2. 策略解析:     generate_from_strategy(strategy, context) → (ndarray, shape)
+    3. 量化模拟:     generate(..., qtype="bfp8") → 经过 quantize→dequantize 的 fp32 数据
 
 用法:
     from aidevtools.core.random import RandomGenerator
@@ -13,12 +18,15 @@
     w = rng.generate((64, 128), method="xavier")
     b = rng.generate((64,), method="uniform", low=-0.1, high=0.1)
 
-    # 指定输出 dtype
-    x_fp16 = rng.generate((2, 3), method="normal", dtype="float16")
+    # 量化模拟 (quantize→dequantize, 带精度损失)
+    x_bfp8 = rng.generate((2, 3), method="normal", qtype="bfp8")
+
+    # 策略字符串解析 (供 datagen 模块使用)
+    data, shape = rng.generate_from_strategy("xavier:-1,out_features", context)
 """
 
 from enum import Enum
-from typing import Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -71,12 +79,55 @@ def _resolve_method(method: Union[str, Method]) -> Method:
         )
 
 
+def parse_shape(spec: str, context: Dict[str, Any]) -> Tuple[int, ...]:
+    """解析 shape 规格字符串。
+
+    支持:
+        "-1"              → input_shape[-1]
+        "-2,-1"           → (input_shape[-2], input_shape[-1])
+        "out_features"    → context["out_features"]
+        "-1,out_features" → (input_shape[-1], out_features)
+
+    Args:
+        spec: shape 规格字符串
+        context: 上下文字典，需含 "input_shape" 键
+
+    Returns:
+        解析后的 shape 元组
+    """
+    input_shape = context.get("input_shape", (1,))
+    parts = [p.strip() for p in spec.split(",")]
+    result = []
+
+    for part in parts:
+        if not part:
+            continue
+
+        if part.lstrip("-").isdigit():
+            idx = int(part)
+            if abs(idx) <= len(input_shape):
+                result.append(input_shape[idx])
+            else:
+                result.append(1)
+        elif part in context:
+            val = context[part]
+            if isinstance(val, (int, np.integer)):
+                result.append(int(val))
+            elif isinstance(val, tuple):
+                result.extend(val)
+            else:
+                result.append(int(val))
+        else:
+            raise ValueError(f"无法解析 shape 规格: {part}")
+
+    return tuple(result)
+
+
 class RandomGenerator:
     """公共随机数生成器
 
-    只关注「给定参数 → 生成 ndarray」，不涉及 L2 内存布局、tensor 命名
-    等上层业务逻辑。各 datagen 模块在自身的 _add_tensor / _gen_from_strategy
-    里调用本类即可。
+    集中管理随机数生成、策略解析、量化模拟三个职责。
+    各 datagen 模块只需持有一个 RandomGenerator 实例即可。
 
     Args:
         seed: 随机种子，None 表示不固定种子。
@@ -105,6 +156,7 @@ class RandomGenerator:
         shape: Tuple[int, ...],
         method: Union[str, Method] = "normal",
         dtype: Union[str, np.dtype, type, None] = np.float32,
+        qtype: Optional[str] = None,
         **kwargs,
     ) -> np.ndarray:
         """生成随机数组。
@@ -114,6 +166,10 @@ class RandomGenerator:
             method: 生成方法 — "normal" | "uniform" | "zeros" | "ones"
                     | "xavier" | "kaiming"。
             dtype: 输出 numpy dtype，支持字符串别名如 "fp32"、"float16"。
+            qtype: 可选量化类型 (如 "bfp8", "bfp16", "gfloat8")。
+                   指定时，生成的 fp32 数据会经过 quantize→dequantize
+                   模拟量化精度损失，适用于模糊比对场景。
+                   None / "fp32" / "float32" 表示不做量化。
             **kwargs: 方法相关参数：
                 normal  — mean (float, 默认 0), std (float, 默认 1)
                 uniform — low (float, 默认 -1), high (float, 默认 1)
@@ -125,8 +181,122 @@ class RandomGenerator:
         """
         m = _resolve_method(method)
         out_dtype = _resolve_dtype(dtype)
-        data = self._dispatch(m, shape, **kwargs)
-        return data.astype(out_dtype)
+        data = self._dispatch(m, shape, **kwargs).astype(out_dtype)
+
+        # 量化模拟
+        if qtype and qtype not in ("fp32", "float32"):
+            data = self._simulate_quantize(data, qtype)
+
+        return data
+
+    # ------------------------------------------------------------------
+    # 策略解析 (供 datagen 模块使用)
+    # ------------------------------------------------------------------
+
+    def generate_from_strategy(
+        self,
+        strategy: str,
+        context: Dict[str, Any],
+        qtype: Optional[str] = None,
+    ) -> Tuple[np.ndarray, Tuple[int, ...]]:
+        """根据 auto_gen 策略字符串生成数据。
+
+        合并了三个 datagen 模块中重复的 _gen_from_strategy / _generate_param
+        逻辑。strategy 格式为 @register_op 的 auto_gen 配置值。
+
+        Args:
+            strategy: 策略字符串，如 "input", "xavier", "kaiming:-1,out_features",
+                      "normal:0,0.01,-1", "uniform:-0.1,0.1,-1", "same:input" 等
+            context: 上下文字典，需含 "input_shape"，可含 "out_features" 等
+            qtype: 可选量化类型，指定时对生成数据做 quantize→dequantize
+
+        Returns:
+            (data: np.ndarray, shape: tuple)
+        """
+        input_shape = context.get("input_shape", (1,))
+
+        # --- 简写策略 ---
+        if strategy == "input" or strategy == "random":
+            shape = input_shape
+            data = self.normal(shape)
+
+        elif strategy == "xavier":
+            out_features = context.get("out_features", input_shape[-1])
+            in_features = input_shape[-1]
+            shape = (out_features, in_features)
+            data = self.xavier(shape)
+
+        elif strategy == "kaiming":
+            out_features = context.get("out_features", input_shape[-1])
+            in_features = input_shape[-1]
+            shape = (out_features, in_features)
+            data = self.kaiming(shape)
+
+        elif strategy == "uniform":
+            shape = (context.get("out_features", input_shape[-1]),)
+            data = self.uniform(shape, low=-0.1, high=0.1)
+
+        # --- 带参数的策略 ---
+        elif strategy.startswith("zeros:"):
+            shape = parse_shape(strategy[6:], context)
+            data = self.zeros(shape)
+
+        elif strategy.startswith("ones:"):
+            shape = parse_shape(strategy[5:], context)
+            data = self.ones(shape)
+
+        elif strategy.startswith("xavier:"):
+            shape = parse_shape(strategy[7:], context)
+            data = self.xavier(shape)
+
+        elif strategy.startswith("kaiming:"):
+            shape = parse_shape(strategy[8:], context)
+            data = self.kaiming(shape)
+
+        elif strategy.startswith("same:"):
+            ref_param = strategy[5:]
+            ref_shape = context.get(f"{ref_param}_shape")
+            if ref_shape is None:
+                ref_shape = input_shape
+            shape = ref_shape
+            data = self.normal(shape)
+
+        elif strategy.startswith("normal:"):
+            parts = strategy[7:].split(",")
+            if len(parts) >= 2:
+                mean = float(parts[0])
+                std = float(parts[1])
+                shape_spec = ",".join(parts[2:]) if len(parts) > 2 else "-1"
+            else:
+                mean, std = 0.0, 1.0
+                shape_spec = parts[0]
+            shape = parse_shape(shape_spec, context)
+            data = self.normal(shape, mean=mean, std=std)
+
+        elif strategy.startswith("uniform:"):
+            parts = strategy[8:].split(",")
+            if len(parts) >= 3:
+                low = float(parts[0])
+                high = float(parts[1])
+                shape_spec = ",".join(parts[2:])
+            elif len(parts) == 2 and parts[0].lstrip("-").replace(".", "").isdigit():
+                low = float(parts[0])
+                high = float(parts[1])
+                shape_spec = "-1"
+            else:
+                low, high = -0.1, 0.1
+                shape_spec = ",".join(parts)
+            shape = parse_shape(shape_spec, context)
+            data = self.uniform(shape, low=low, high=high)
+
+        else:
+            raise ValueError(f"未知生成策略: {strategy}")
+
+        # 量化模拟
+        if qtype and qtype not in ("fp32", "float32"):
+            data = self._simulate_quantize(data, qtype)
+
+        return data, shape
 
     # ------------------------------------------------------------------
     # 便捷方法（等价于 generate + 固定 method）
@@ -185,7 +355,7 @@ class RandomGenerator:
         return self.generate(shape, method="kaiming", dtype=dtype)
 
     # ------------------------------------------------------------------
-    # 内部分发
+    # 内部方法
     # ------------------------------------------------------------------
 
     def _dispatch(
@@ -194,7 +364,7 @@ class RandomGenerator:
         shape: Tuple[int, ...],
         **kwargs,
     ) -> np.ndarray:
-        """根据 method 分发到具体的生成逻辑，返回 float64 ndarray。"""
+        """根据 method 分发到具体的生成逻辑。"""
         if method == Method.NORMAL:
             mean = kwargs.get("mean", 0.0)
             std = kwargs.get("std", 1.0)
@@ -225,3 +395,9 @@ class RandomGenerator:
             return self._rng.normal(0, std, shape)
 
         raise ValueError(f"未实现的方法: {method}")  # pragma: no cover
+
+    @staticmethod
+    def _simulate_quantize(data: np.ndarray, qtype: str) -> np.ndarray:
+        """量化→反量化，模拟精度损失。延迟导入避免循环依赖。"""
+        from aidevtools.formats.quantize import simulate_quantize
+        return simulate_quantize(data.astype(np.float32), qtype)

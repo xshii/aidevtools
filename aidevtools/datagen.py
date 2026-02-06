@@ -405,76 +405,8 @@ class DataGenerator:
         strategy: str,
         context: Dict[str, Any],
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
-        """根据 auto_gen 策略生成数据"""
-        input_shape = context.get("input_shape", (1,))
-
-        if strategy == "input":
-            shape = input_shape
-            data = self._rand.normal(shape)
-
-        elif strategy == "random":
-            shape = input_shape
-            data = self._rand.normal(shape)
-
-        elif strategy == "xavier":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            data = self._rand.xavier(shape)
-
-        elif strategy == "kaiming":
-            out_features = context.get("out_features", input_shape[-1])
-            in_features = input_shape[-1]
-            shape = (out_features, in_features)
-            data = self._rand.kaiming(shape)
-
-        elif strategy == "uniform":
-            shape = (context.get("out_features", input_shape[-1]),)
-            data = self._rand.uniform(shape, low=-0.1, high=0.1)
-
-        elif strategy.startswith("zeros:"):
-            shape = self._parse_shape(strategy[6:], context)
-            data = self._rand.zeros(shape)
-
-        elif strategy.startswith("ones:"):
-            shape = self._parse_shape(strategy[5:], context)
-            data = self._rand.ones(shape)
-
-        elif strategy.startswith("xavier:"):
-            shape = self._parse_shape(strategy[7:], context)
-            data = self._rand.xavier(shape)
-
-        elif strategy.startswith("kaiming:"):
-            shape = self._parse_shape(strategy[8:], context)
-            data = self._rand.kaiming(shape)
-
-        elif strategy.startswith("same:"):
-            ref = strategy[5:]
-            shape = context.get(f"{ref}_shape", input_shape)
-            data = self._rand.normal(shape)
-
-        else:
-            raise ValueError(f"未知策略: {strategy}")
-
-        return data, shape
-
-    def _parse_shape(self, spec: str, context: Dict[str, Any]) -> Tuple[int, ...]:
-        """解析 shape 规格"""
-        input_shape = context.get("input_shape", (1,))
-        parts = [p.strip() for p in spec.split(",") if p.strip()]
-        result = []
-
-        for part in parts:
-            if part.lstrip("-").isdigit():
-                idx = int(part)
-                result.append(input_shape[idx] if abs(idx) <= len(input_shape) else 1)
-            elif part in context:
-                val = context[part]
-                result.append(int(val) if isinstance(val, (int, np.integer)) else val)
-            else:
-                raise ValueError(f"无法解析: {part}")
-
-        return tuple(result)
+        """根据 auto_gen 策略生成数据（委托给 RandomGenerator）"""
+        return self._rand.generate_from_strategy(strategy, context)
 
 
 # ============================================================
