@@ -59,7 +59,13 @@ class CompareResult:
 
 @dataclass
 class TorchBackendConfig:
-    """后端配置"""
+    """后端配置
+
+    支持:
+    - 独立的计算/输入/输出/权重精度配置
+    - 量化感知随机数 (qa_aware)
+    - 四种比数模式
+    """
     # Golden 模式
     golden_mode: Literal["cpp", "python", "none"] = "python"
 
@@ -73,6 +79,17 @@ class TorchBackendConfig:
     quantize_input: bool = False  # 是否量化输入
     quantize_output: bool = False  # 是否量化输出
 
+    # 独立精度配置
+    compute_dtype: str = "fp32"   # 计算精度
+    input_dtype: str = "fp32"     # 输入精度
+    output_dtype: str = "fp32"    # 输出精度
+    weight_dtype: str = "fp32"    # 权重精度
+
+    # 量化感知随机数
+    qa_aware: bool = False         # 是否启用量化感知随机数
+    qa_center: float = 1.0         # 量化感知中心值
+    qa_amplitude: float = 0.5      # 量化感知波动幅度
+
     # Profile 配置
     profile_enabled: bool = False
 
@@ -81,6 +98,19 @@ class TorchBackendConfig:
 
     # 调试
     verbose: bool = False
+
+    def to_precision_config(self):
+        """转换为 PrecisionConfig"""
+        from aidevtools.frontend.types import PrecisionConfig
+        return PrecisionConfig(
+            compute_dtype=self.compute_dtype,
+            input_dtype=self.input_dtype,
+            output_dtype=self.output_dtype,
+            weight_dtype=self.weight_dtype,
+            qa_aware=self.qa_aware,
+            qa_center=self.qa_center,
+            qa_amplitude=self.qa_amplitude,
+        )
 
 
 # ============================================================
@@ -569,6 +599,15 @@ def golden_mode(
     profile: bool = False,
     backward: bool = False,
     verbose: bool = False,
+    # 精度配置
+    compute_dtype: str = "fp32",
+    input_dtype: str = "fp32",
+    output_dtype: str = "fp32",
+    weight_dtype: str = "fp32",
+    # 量化感知随机数
+    qa_aware: bool = False,
+    qa_center: float = 1.0,
+    qa_amplitude: float = 0.5,
 ):
     """Context manager: 在此范围内使用 CPU golden
 
@@ -579,10 +618,28 @@ def golden_mode(
         profile: 是否启用 Paper Analysis
         backward: 是否启用反向传播 golden (训练模式)
         verbose: 是否打印详细信息
+        compute_dtype: 计算精度
+        input_dtype: 输入精度
+        output_dtype: 输出精度
+        weight_dtype: 权重精度
+        qa_aware: 是否启用量化感知随机数
+        qa_center: 量化感知中心值
+        qa_amplitude: 量化感知波动幅度
 
     Example:
         # 推理模式
         with golden_mode(golden="cpp", compare="fuzzy", quantize="gfp16"):
+            y = model(x)
+
+        # 混合精度模式
+        with golden_mode(golden="python", compare="fuzzy",
+                         input_dtype="fp16", weight_dtype="int8",
+                         compute_dtype="fp32", output_dtype="bfp8"):
+            y = model(x)
+
+        # 量化感知模式
+        with golden_mode(golden="python", compare="fuzzy",
+                         qa_aware=True, qa_center=1.0, qa_amplitude=0.5):
             y = model(x)
 
         # 训练模式 (前向+反向都走 golden)
@@ -598,6 +655,13 @@ def golden_mode(
         profile_enabled=profile,
         backward_enabled=backward,
         verbose=verbose,
+        compute_dtype=compute_dtype,
+        input_dtype=input_dtype,
+        output_dtype=output_dtype,
+        weight_dtype=weight_dtype,
+        qa_aware=qa_aware,
+        qa_center=qa_center,
+        qa_amplitude=qa_amplitude,
     ))
 
     backend.clear()

@@ -40,6 +40,8 @@ class Method(Enum):
     ONES = "ones"
     XAVIER = "xavier"
     KAIMING = "kaiming"
+    QA_UNIFORM = "qa_uniform"      # 量化感知均匀分布
+    QA_NORMAL = "qa_normal"        # 量化感知正态分布(截断)
 
 
 # numpy dtype 别名映射
@@ -129,6 +131,12 @@ class RandomGenerator:
     集中管理随机数生成、策略解析、量化模拟三个职责。
     各 datagen 模块只需持有一个 RandomGenerator 实例即可。
 
+    量化感知随机数 (QA-aware) 作为全局配置:
+        rng = RandomGenerator(seed=42)
+        rng.set_qa_config(enabled=True, center=1.0, amplitude=0.5)
+        # 之后所有 generate 调用自动应用 QA 约束
+        x = rng.generate((100, 200), method="normal")  # 自动受控范围
+
     Args:
         seed: 随机种子，None 表示不固定种子。
     """
@@ -136,6 +144,35 @@ class RandomGenerator:
     def __init__(self, seed: Optional[int] = None):
         self.seed = seed
         self._rng = np.random.default_rng(seed)
+        # 全局量化感知配置
+        self._qa_enabled: bool = False
+        self._qa_center: float = 1.0
+        self._qa_amplitude: float = 0.5
+
+    def set_qa_config(
+        self,
+        enabled: bool = False,
+        center: float = 1.0,
+        amplitude: float = 0.5,
+    ):
+        """设置全局量化感知随机数配置。
+
+        这是一个全局开关，启用后所有 generate / generate_from_strategy
+        调用自动将数据范围限制在受控区间内。
+
+        Args:
+            enabled: 是否启用量化感知模式
+            center: 中心值 (默认 1.0)
+            amplitude: 波动幅度 (默认 0.5)
+        """
+        self._qa_enabled = enabled
+        self._qa_center = center
+        self._qa_amplitude = amplitude
+
+    @property
+    def qa_enabled(self) -> bool:
+        """量化感知模式是否启用"""
+        return self._qa_enabled
 
     # ------------------------------------------------------------------
     # 种子管理
@@ -157,6 +194,7 @@ class RandomGenerator:
         method: Union[str, Method] = "normal",
         dtype: Union[str, np.dtype, type, None] = np.float32,
         qtype: Optional[str] = None,
+        qa_aware: Optional[bool] = None,
         **kwargs,
     ) -> np.ndarray:
         """生成随机数组。
@@ -164,24 +202,43 @@ class RandomGenerator:
         Args:
             shape: 输出形状。
             method: 生成方法 — "normal" | "uniform" | "zeros" | "ones"
-                    | "xavier" | "kaiming"。
+                    | "xavier" | "kaiming" | "qa_uniform" | "qa_normal"。
             dtype: 输出 numpy dtype，支持字符串别名如 "fp32"、"float16"。
             qtype: 可选量化类型 (如 "bfp8", "bfp16", "gfloat8")。
                    指定时，生成的 fp32 数据会经过 quantize→dequantize
                    模拟量化精度损失，适用于模糊比对场景。
                    None / "fp32" / "float32" 表示不做量化。
+            qa_aware: 是否启用量化感知模式。None 表示使用全局配置 (set_qa_config)。
             **kwargs: 方法相关参数：
                 normal  — mean (float, 默认 0), std (float, 默认 1)
                 uniform — low (float, 默认 -1), high (float, 默认 1)
                 xavier  — (自动由 shape 推导 fan_in / fan_out)
                 kaiming — (自动由 shape 推导 fan_in)
+                qa_uniform/qa_normal —
+                    center (float, 默认 1.0), amplitude (float, 默认 0.5),
+                    signed (bool, 默认 True)
 
         Returns:
             np.ndarray，形状为 shape，dtype 为指定类型。
         """
         m = _resolve_method(method)
         out_dtype = _resolve_dtype(dtype)
-        data = self._dispatch(m, shape, **kwargs).astype(out_dtype)
+
+        # 确定是否启用 QA: 参数覆盖 > 全局配置
+        use_qa = qa_aware if qa_aware is not None else self._qa_enabled
+
+        # 量化感知模式: 替换生成方法为受控范围
+        if use_qa and m not in (Method.QA_UNIFORM, Method.QA_NORMAL,
+                                 Method.ZEROS, Method.ONES):
+            center = kwargs.pop("center", kwargs.pop("qa_center", self._qa_center))
+            amplitude = kwargs.pop("amplitude", kwargs.pop("qa_amplitude", self._qa_amplitude))
+            signed = kwargs.pop("signed", True)
+            data = self._dispatch(
+                Method.QA_UNIFORM, shape,
+                center=center, amplitude=amplitude, signed=signed
+            ).astype(out_dtype)
+        else:
+            data = self._dispatch(m, shape, **kwargs).astype(out_dtype)
 
         # 量化模拟
         if qtype and qtype not in ("fp32", "float32"):
@@ -198,6 +255,7 @@ class RandomGenerator:
         strategy: str,
         context: Dict[str, Any],
         qtype: Optional[str] = None,
+        qa_aware: Optional[bool] = None,
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
         """根据 auto_gen 策略字符串生成数据。
 
@@ -215,26 +273,29 @@ class RandomGenerator:
         """
         input_shape = context.get("input_shape", (1,))
 
+        # qa_aware: None → 使用全局配置，由 generate() 内部处理
+
         # --- 简写策略 ---
         if strategy == "input" or strategy == "random":
             shape = input_shape
-            data = self.normal(shape)
+            data = self.generate(shape, method="normal", qa_aware=qa_aware)
 
         elif strategy == "xavier":
             out_features = context.get("out_features", input_shape[-1])
             in_features = input_shape[-1]
             shape = (out_features, in_features)
-            data = self.xavier(shape)
+            data = self.generate(shape, method="xavier", qa_aware=qa_aware)
 
         elif strategy == "kaiming":
             out_features = context.get("out_features", input_shape[-1])
             in_features = input_shape[-1]
             shape = (out_features, in_features)
-            data = self.kaiming(shape)
+            data = self.generate(shape, method="kaiming", qa_aware=qa_aware)
 
         elif strategy == "uniform":
             shape = (context.get("out_features", input_shape[-1]),)
-            data = self.uniform(shape, low=-0.1, high=0.1)
+            data = self.generate(shape, method="uniform", qa_aware=qa_aware,
+                                 low=-0.1, high=0.1)
 
         # --- 带参数的策略 ---
         elif strategy.startswith("zeros:"):
@@ -247,11 +308,11 @@ class RandomGenerator:
 
         elif strategy.startswith("xavier:"):
             shape = parse_shape(strategy[7:], context)
-            data = self.xavier(shape)
+            data = self.generate(shape, method="xavier", qa_aware=qa_aware)
 
         elif strategy.startswith("kaiming:"):
             shape = parse_shape(strategy[8:], context)
-            data = self.kaiming(shape)
+            data = self.generate(shape, method="kaiming", qa_aware=qa_aware)
 
         elif strategy.startswith("same:"):
             ref_param = strategy[5:]
@@ -259,7 +320,7 @@ class RandomGenerator:
             if ref_shape is None:
                 ref_shape = input_shape
             shape = ref_shape
-            data = self.normal(shape)
+            data = self.generate(shape, method="normal", qa_aware=qa_aware)
 
         elif strategy.startswith("normal:"):
             parts = strategy[7:].split(",")
@@ -271,7 +332,8 @@ class RandomGenerator:
                 mean, std = 0.0, 1.0
                 shape_spec = parts[0]
             shape = parse_shape(shape_spec, context)
-            data = self.normal(shape, mean=mean, std=std)
+            data = self.generate(shape, method="normal", qa_aware=qa_aware,
+                                 mean=mean, std=std)
 
         elif strategy.startswith("uniform:"):
             parts = strategy[8:].split(",")
@@ -287,7 +349,8 @@ class RandomGenerator:
                 low, high = -0.1, 0.1
                 shape_spec = ",".join(parts)
             shape = parse_shape(shape_spec, context)
-            data = self.uniform(shape, low=low, high=high)
+            data = self.generate(shape, method="uniform", qa_aware=qa_aware,
+                                 low=low, high=high)
 
         else:
             raise ValueError(f"未知生成策略: {strategy}")
@@ -354,6 +417,56 @@ class RandomGenerator:
         """Kaiming / He 初始化。"""
         return self.generate(shape, method="kaiming", dtype=dtype)
 
+    def qa_uniform(
+        self,
+        shape: Tuple[int, ...],
+        center: float = 1.0,
+        amplitude: float = 0.5,
+        signed: bool = True,
+        dtype: Union[str, np.dtype, type, None] = np.float32,
+    ) -> np.ndarray:
+        """量化感知均匀分布。
+
+        生成数据绝对值在 [center - amplitude, center + amplitude] 范围内，
+        可选随机正负号。确保输出动态范围受控。
+
+        原理: 对于 matmul(A, B)，若 A, B 元素绝对值在 [lo, hi] 区间，
+        则输出每个元素绝对值在 [K*lo^2, K*hi^2] 区间 (K 为内积维度)，
+        max/min 比值 ≤ (hi/lo)^2，可控。
+
+        Args:
+            shape: 输出形状
+            center: 中心值 (默认 1.0)
+            amplitude: 波动幅度 (默认 0.5), 值域 [center-amplitude, center+amplitude]
+            signed: 是否随机添加正负号 (默认 True)
+            dtype: 输出 dtype
+        """
+        return self.generate(shape, method="qa_uniform", dtype=dtype,
+                             center=center, amplitude=amplitude, signed=signed)
+
+    def qa_normal(
+        self,
+        shape: Tuple[int, ...],
+        center: float = 1.0,
+        amplitude: float = 0.5,
+        signed: bool = True,
+        dtype: Union[str, np.dtype, type, None] = np.float32,
+    ) -> np.ndarray:
+        """量化感知截断正态分布。
+
+        在 center 附近按正态分布采样，截断到 [center - amplitude, center + amplitude]，
+        可选随机正负号。
+
+        Args:
+            shape: 输出形状
+            center: 中心值 (默认 1.0)
+            amplitude: 波动幅度 (默认 0.5)
+            signed: 是否随机添加正负号 (默认 True)
+            dtype: 输出 dtype
+        """
+        return self.generate(shape, method="qa_normal", dtype=dtype,
+                             center=center, amplitude=amplitude, signed=signed)
+
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
@@ -394,7 +507,65 @@ class RandomGenerator:
             std = np.sqrt(2.0 / fan_in)
             return self._rng.normal(0, std, shape)
 
+        if method == Method.QA_UNIFORM:
+            return self._qa_uniform(shape, **kwargs)
+
+        if method == Method.QA_NORMAL:
+            return self._qa_normal(shape, **kwargs)
+
         raise ValueError(f"未实现的方法: {method}")  # pragma: no cover
+
+    def _qa_uniform(
+        self,
+        shape: Tuple[int, ...],
+        center: float = 1.0,
+        amplitude: float = 0.5,
+        signed: bool = True,
+        **_kwargs,
+    ) -> np.ndarray:
+        """量化感知均匀分布实现。
+
+        生成绝对值在 [center - amplitude, center + amplitude] 范围的数据，
+        可选随机符号。这确保:
+        - 所有值的绝对值具有有限的动态范围
+        - max_abs / min_abs ≤ (center + amplitude) / (center - amplitude)
+        - 适用于需要 quantize→dequantize 后输出可控的场景
+
+        业界参考:
+        - Quantization-Aware Training (QAT) 中的 fake quantization
+        - HAWQ (Hessian AWare Quantization) 的分层量化策略
+        - 均匀量化的最优区间选择 (min-max / percentile)
+        """
+        lo = max(center - amplitude, 1e-7)  # 确保正值
+        hi = center + amplitude
+        base = self._rng.uniform(lo, hi, shape)
+        if signed:
+            signs = self._rng.choice(np.array([-1.0, 1.0]), shape)
+            base = base * signs
+        return base.astype(np.float64)
+
+    def _qa_normal(
+        self,
+        shape: Tuple[int, ...],
+        center: float = 1.0,
+        amplitude: float = 0.5,
+        signed: bool = True,
+        **_kwargs,
+    ) -> np.ndarray:
+        """量化感知截断正态分布实现。
+
+        在 center 附近使用正态分布采样 (std=amplitude/3 → 99.7% 在 3σ 内)，
+        截断到 [center - amplitude, center + amplitude]。
+        """
+        lo = max(center - amplitude, 1e-7)
+        hi = center + amplitude
+        std = amplitude / 3.0  # 3σ 覆盖
+        base = self._rng.normal(center, std, shape)
+        base = np.clip(base, lo, hi)
+        if signed:
+            signs = self._rng.choice(np.array([-1.0, 1.0]), shape)
+            base = base * signs
+        return base.astype(np.float64)
 
     @staticmethod
     def _simulate_quantize(data: np.ndarray, qtype: str) -> np.ndarray:
