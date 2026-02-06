@@ -38,7 +38,12 @@ PyTorch 劫持:
 __version__ = "0.1.0"
 
 # 统一数据生成器 (推荐入口)
-from aidevtools.datagen import DataGenerator, GeneratedTensor, Model, ModelTensor
+from aidevtools.datagen import (
+    DataGenerator, GeneratedTensor, FourTrackGolden, Model, ModelTensor,
+)
+
+# 精度配置
+from aidevtools.frontend.types import PrecisionConfig
 
 # 模块级导入
 from aidevtools import compare, frontend, ops
@@ -50,6 +55,9 @@ __all__ = [
     # 数据生成
     "DataGenerator",
     "GeneratedTensor",
+    "FourTrackGolden",
+    # 精度配置
+    "PrecisionConfig",
     # Model DSL
     "Model",
     "ModelTensor",

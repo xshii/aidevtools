@@ -3,8 +3,16 @@
 单一入口，支持：
 - 根据 @register_op 的 auto_gen 自动生成数据
 - L2 内存布局管理 (256 字节对齐)
-- Golden 计算
+- Golden 计算（四种比数模式）
 - DUT 格式导出
+- 算子级精度配置 (PrecisionConfig)
+- 量化感知随机数生成 (qa_aware 开关)
+
+四种比数模式:
+    Track 1: golden_pure   — 纯 fp32 计算的 golden（基准参考）
+    Track 2: golden_local  — 本地格式 (fp16/int16/int8) 量化→反量化后的模糊权重计算 golden
+    Track 3: golden_hw     — 硬件格式 (bfp/gfp) 量化→反量化后的模糊权重计算 golden
+    Track 4: golden_qa     — 量化感知随机权重计算 golden（受控动态范围）
 
 用法 1: DataGenerator (显式生成)
     from aidevtools import DataGenerator
@@ -12,6 +20,14 @@
     gen = DataGenerator(seed=42)
     data = gen.generate("linear", input_shape=(512, 768), out_features=3072)
     gen.export("./golden/")
+
+    # 带精度配置
+    from aidevtools.frontend.types import PrecisionConfig
+    pc = PrecisionConfig(input_dtype="fp16", weight_dtype="int8",
+                         compute_dtype="fp32", output_dtype="bfp8",
+                         qa_aware=True)
+    tracks = gen.generate_four_track("linear", input_shape=(512, 768),
+                                      precision=pc, out_features=3072)
 
 用法 2: Model DSL (自动生成权重)
     from aidevtools import Model
@@ -25,6 +41,17 @@
     print(m.tensors)   # 所有生成的数据
     print(m.outputs)   # golden 输出
     m.export("./golden/")
+
+用法 3: Model DSL 量化感知模式
+    from aidevtools import Model
+    from aidevtools.frontend.types import PrecisionConfig
+
+    pc = PrecisionConfig(input_dtype="fp16", compute_dtype="fp32",
+                         output_dtype="bfp8", qa_aware=True)
+    with Model(seed=42, precision=pc) as m:
+        x = m.input((512, 768))
+        y = m.linear(x, out_features=3072)
+        tracks = m.get_four_track_golden()
 """
 
 from dataclasses import dataclass, field
@@ -60,11 +87,75 @@ class GeneratedTensor:
         return f"GeneratedTensor({self.name}, shape={self.shape}, L2=0x{self.l2_addr:X})"
 
 
+@dataclass
+class FourTrackGolden:
+    """四种比数的 golden 输出
+
+    Track 1: golden_pure   — 纯 fp32 计算的 golden
+    Track 2: golden_local  — 本地格式模糊权重的 golden
+    Track 3: golden_hw     — 硬件格式模糊权重的 golden
+    Track 4: golden_qa     — 量化感知随机权重的 golden
+    """
+    golden_pure: np.ndarray                      # Track 1: 纯 fp32
+    golden_local: Optional[np.ndarray] = None    # Track 2: 本地格式模糊
+    golden_hw: Optional[np.ndarray] = None       # Track 3: 硬件格式模糊
+    golden_qa: Optional[np.ndarray] = None       # Track 4: 量化感知
+
+    # 生成这些 golden 时使用的数据
+    data_pure: Optional[Dict[str, np.ndarray]] = None
+    data_local: Optional[Dict[str, np.ndarray]] = None
+    data_hw: Optional[Dict[str, np.ndarray]] = None
+    data_qa: Optional[Dict[str, np.ndarray]] = None
+
+    @property
+    def all_goldens(self) -> Dict[str, np.ndarray]:
+        """返回所有非 None 的 golden"""
+        result = {"pure": self.golden_pure}
+        if self.golden_local is not None:
+            result["local"] = self.golden_local
+        if self.golden_hw is not None:
+            result["hw"] = self.golden_hw
+        if self.golden_qa is not None:
+            result["qa"] = self.golden_qa
+        return result
+
+
+def _simulate_local_dtype(data: np.ndarray, local_dtype: str) -> np.ndarray:
+    """模拟本地格式的精度损失 (fp16/int16/int8 量化→反量化)。
+
+    对于本地格式，通过 cast 到目标精度再转回 fp32 来模拟精度损失。
+    """
+    dtype_map = {
+        "fp16": np.float16, "float16": np.float16,
+        "bf16": np.float16,  # numpy 不直接支持 bf16，用 fp16 近似
+        "int16": np.int16,
+        "int8": np.int8,
+    }
+    target = dtype_map.get(local_dtype)
+    if target is None:
+        return data  # fp32 或未知类型，不做转换
+
+    fp32 = data.astype(np.float32)
+    if target in (np.int16, np.int8):
+        # 整数量化: scale → round → clip → dequant
+        max_val = np.iinfo(target).max
+        scale = np.max(np.abs(fp32)) / max_val if np.max(np.abs(fp32)) > 0 else 1.0
+        quantized = np.clip(np.round(fp32 / scale), -max_val, max_val).astype(target)
+        return (quantized.astype(np.float32) * scale)
+    else:
+        # 浮点降精度: cast → cast back
+        return fp32.astype(target).astype(np.float32)
+
+
 class DataGenerator:
     """
     统一数据生成器
 
     合并了 frontend/DataGenerator 和 ops/OpDataGenerator 的功能。
+    支持:
+    - 算子级精度配置 (PrecisionConfig)
+    - 量化感知随机数 (qa_aware 开关)
+    - 四种比数 golden 生成
     """
 
     def __init__(
@@ -73,6 +164,7 @@ class DataGenerator:
         l2_base: int = 0x100000,
         alignment: int = 256,
         qtype: str = "bfp16",
+        precision: Optional[Any] = None,
     ):
         """
         Args:
@@ -80,6 +172,7 @@ class DataGenerator:
             l2_base: L2 内存基地址
             alignment: 内存对齐 (默认 256 字节)
             qtype: 默认量化类型
+            precision: PrecisionConfig，算子级精度配置
         """
         self.seed = seed
         self.l2_base = l2_base
@@ -89,6 +182,16 @@ class DataGenerator:
         self._l2_offset = 0
         self._tensors: Dict[str, GeneratedTensor] = {}
         self._op_counter: Dict[str, int] = {}
+
+        # 精度配置
+        if precision is None:
+            from aidevtools.frontend.types import PrecisionConfig
+            self.precision = PrecisionConfig()
+        else:
+            self.precision = precision
+
+        # 同步全局 QA 配置到 RandomGenerator
+        self._sync_qa_config()
 
     def reset(self, seed: Optional[int] = None):
         """重置生成器"""
@@ -108,6 +211,7 @@ class DataGenerator:
         op_name: str,
         input_shape: Tuple[int, ...],
         qtypes: Optional[Dict[str, str]] = None,
+        precision: Optional[Any] = None,
         **kwargs,
     ) -> Dict[str, GeneratedTensor]:
         """
@@ -117,6 +221,7 @@ class DataGenerator:
             op_name: 算子名称
             input_shape: 主输入 shape
             qtypes: 各参数的量化类型 {"input": "bfp16", "weight": "bfp8"}
+            precision: 可选的算子级 PrecisionConfig，覆盖全局配置
             **kwargs: 额外参数 (out_features, num_heads 等)
 
         Returns:
@@ -128,6 +233,7 @@ class DataGenerator:
         if meta is None:
             raise ValueError(f"算子 '{op_name}' 未注册")
 
+        pc = precision or self.precision
         qtypes = qtypes or {}
 
         # 算子实例编号
@@ -141,9 +247,16 @@ class DataGenerator:
         for param, strategy in meta.auto_gen.items():
             is_weight = param in meta.weight_params
             role = "weight" if is_weight else "input"
-            param_qtype = qtypes.get(param, self.qtype)
 
-            # 生成数据
+            # 确定该参数的量化类型
+            if param in qtypes:
+                param_qtype = qtypes[param]
+            elif is_weight:
+                param_qtype = pc.weight_dtype if pc.weight_dtype != "fp32" else self.qtype
+            else:
+                param_qtype = pc.input_dtype if pc.input_dtype != "fp32" else self.qtype
+
+            # 生成数据 (QA 配置已通过全局设置生效)
             array, shape = self._gen_from_strategy(strategy, context)
 
             # 创建 tensor
@@ -187,6 +300,135 @@ class DataGenerator:
         golden = op.cpu_golden(*args, **kwargs_call)
         return data, golden
 
+    def generate_four_track(
+        self,
+        op_name: str,
+        input_shape: Tuple[int, ...],
+        precision: Optional[Any] = None,
+        **kwargs,
+    ) -> FourTrackGolden:
+        """生成四种比数的 golden 数据。
+
+        四种比数:
+            Track 1: golden_pure   — 纯 fp32 计算
+            Track 2: golden_local  — 本地格式 (fp16/int16/int8) 量化→反量化
+            Track 3: golden_hw     — 硬件格式 (bfp/gfp) 量化→反量化
+            Track 4: golden_qa     — 量化感知随机权重
+
+        Args:
+            op_name: 算子名称
+            input_shape: 输入 shape
+            precision: PrecisionConfig (可选, 覆盖全局)
+            **kwargs: 额外参数
+
+        Returns:
+            FourTrackGolden 包含四种 golden 及其对应的输入数据
+        """
+        from aidevtools.ops.registry import get_op_instance, get_op_meta
+        from aidevtools.formats.quantize import simulate_quantize
+
+        pc = precision or self.precision
+        meta = get_op_meta(op_name)
+        if meta is None:
+            raise ValueError(f"算子 '{op_name}' 未注册")
+
+        op = get_op_instance(op_name)
+        if op is None:
+            raise ValueError(f"算子 '{op_name}' 无法实例化")
+
+        # ---------- Track 1: 纯 fp32 golden ----------
+        # 保存和恢复生成器状态用于复现
+        saved_seed = self.seed
+        self._rand.reset(saved_seed)
+
+        context = {"input_shape": input_shape, **kwargs}
+        pure_data = {}
+        for param, strategy in meta.auto_gen.items():
+            array, shape = self._rand.generate_from_strategy(strategy, context)
+            pure_data[param] = array.astype(np.float32)
+            context[f"{param}_shape"] = shape
+            context[param] = array
+
+        pure_args = [pure_data[inp] for inp in meta.inputs if inp in pure_data]
+        pure_kwargs = {opt: pure_data[opt] for opt in meta.optional if opt in pure_data}
+        golden_pure = op.cpu_golden(*pure_args, **pure_kwargs)
+
+        # ---------- Track 2: 本地格式模糊权重 golden ----------
+        local_dtype = pc.input_dtype  # 使用 input_dtype 确定本地格式
+        golden_local = None
+        local_data = None
+        if local_dtype in ("fp16", "float16", "bf16", "int16", "int8"):
+            local_data = {}
+            for param, arr in pure_data.items():
+                is_weight = param in meta.weight_params
+                dtype_to_use = pc.weight_dtype if is_weight else pc.input_dtype
+                local_data[param] = _simulate_local_dtype(arr, dtype_to_use)
+
+            local_args = [local_data[inp] for inp in meta.inputs if inp in local_data]
+            local_kwargs = {opt: local_data[opt] for opt in meta.optional if opt in local_data}
+            golden_local = op.cpu_golden(*local_args, **local_kwargs)
+
+        # ---------- Track 3: 硬件格式模糊权重 golden ----------
+        hw_dtype = pc.output_dtype  # 使用 output_dtype 确定硬件格式
+        golden_hw = None
+        hw_data = None
+        hw_qtypes = ("bfp16", "bfp8", "bfp4", "gfloat16", "gfloat8", "gfloat4",
+                     "gfp16", "gfp8", "gfp4")
+        # 检查是否有任何精度配置使用了硬件格式
+        has_hw = any(getattr(pc, f) in hw_qtypes
+                     for f in ("input_dtype", "weight_dtype", "output_dtype"))
+        if has_hw:
+            hw_data = {}
+            for param, arr in pure_data.items():
+                is_weight = param in meta.weight_params
+                dtype_to_use = pc.weight_dtype if is_weight else pc.input_dtype
+                if dtype_to_use in hw_qtypes:
+                    hw_data[param] = simulate_quantize(arr, dtype_to_use)
+                else:
+                    hw_data[param] = arr.copy()
+
+            hw_args = [hw_data[inp] for inp in meta.inputs if inp in hw_data]
+            hw_kwargs = {opt: hw_data[opt] for opt in meta.optional if opt in hw_data}
+            golden_hw = op.cpu_golden(*hw_args, **hw_kwargs)
+
+        # ---------- Track 4: 量化感知随机权重 golden ----------
+        golden_qa = None
+        qa_data = None
+        if pc.qa_aware:
+            self._rand.reset(saved_seed)
+            # 临时启用 QA 全局配置
+            self._rand.set_qa_config(
+                enabled=True,
+                center=pc.qa_center,
+                amplitude=pc.qa_amplitude,
+            )
+            qa_context = {"input_shape": input_shape, **kwargs}
+            qa_data = {}
+            for param, strategy in meta.auto_gen.items():
+                array, shape = self._rand.generate_from_strategy(
+                    strategy, qa_context,
+                )
+                qa_data[param] = array.astype(np.float32)
+                qa_context[f"{param}_shape"] = shape
+                qa_context[param] = array
+
+            qa_args = [qa_data[inp] for inp in meta.inputs if inp in qa_data]
+            qa_kwargs = {opt: qa_data[opt] for opt in meta.optional if opt in qa_data}
+            golden_qa = op.cpu_golden(*qa_args, **qa_kwargs)
+            # 恢复全局配置
+            self._sync_qa_config()
+
+        return FourTrackGolden(
+            golden_pure=golden_pure,
+            golden_local=golden_local,
+            golden_hw=golden_hw,
+            golden_qa=golden_qa,
+            data_pure=pure_data,
+            data_local=local_data,
+            data_hw=hw_data,
+            data_qa=qa_data,
+        )
+
     # ============================================================
     # 手动生成
     # ============================================================
@@ -199,7 +441,12 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """正态分布随机数"""
-        array = self._rand.normal(shape)
+        if self.precision.qa_aware:
+            array = self._rand.qa_uniform(shape,
+                                          center=self.precision.qa_center,
+                                          amplitude=self.precision.qa_amplitude)
+        else:
+            array = self._rand.normal(shape)
         name = name or self._auto_name("randn")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -213,7 +460,12 @@ class DataGenerator:
         role: str = "input",
     ) -> GeneratedTensor:
         """均匀分布"""
-        array = self._rand.uniform(shape, low=low, high=high)
+        if self.precision.qa_aware:
+            array = self._rand.qa_uniform(shape,
+                                          center=self.precision.qa_center,
+                                          amplitude=self.precision.qa_amplitude)
+        else:
+            array = self._rand.uniform(shape, low=low, high=high)
         name = name or self._auto_name("uniform")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
@@ -248,7 +500,12 @@ class DataGenerator:
         qtype: Optional[str] = None,
     ) -> GeneratedTensor:
         """Xavier 初始化"""
-        array = self._rand.xavier(shape)
+        if self.precision.qa_aware:
+            array = self._rand.qa_uniform(shape,
+                                          center=self.precision.qa_center,
+                                          amplitude=self.precision.qa_amplitude)
+        else:
+            array = self._rand.xavier(shape)
         name = name or self._auto_name("weight")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role="weight")
 
@@ -259,9 +516,28 @@ class DataGenerator:
         qtype: Optional[str] = None,
     ) -> GeneratedTensor:
         """Kaiming 初始化"""
-        array = self._rand.kaiming(shape)
+        if self.precision.qa_aware:
+            array = self._rand.qa_uniform(shape,
+                                          center=self.precision.qa_center,
+                                          amplitude=self.precision.qa_amplitude)
+        else:
+            array = self._rand.kaiming(shape)
         name = name or self._auto_name("weight")
         return self._add_tensor(name, array, qtype=qtype or self.qtype, role="weight")
+
+    def qa_randn(
+        self,
+        shape: Tuple[int, ...],
+        center: float = 1.0,
+        amplitude: float = 0.5,
+        name: Optional[str] = None,
+        qtype: Optional[str] = None,
+        role: str = "input",
+    ) -> GeneratedTensor:
+        """量化感知随机数（显式调用）"""
+        array = self._rand.qa_uniform(shape, center=center, amplitude=amplitude)
+        name = name or self._auto_name("qa_randn")
+        return self._add_tensor(name, array, qtype=qtype or self.qtype, role=role)
 
     # ============================================================
     # L2 内存管理
@@ -400,12 +676,23 @@ class DataGenerator:
         count = sum(1 for n in self._tensors if n.startswith(prefix))
         return f"{prefix}_{count}"
 
+    def _sync_qa_config(self):
+        """同步 PrecisionConfig 的 QA 配置到 RandomGenerator 全局配置"""
+        self._rand.set_qa_config(
+            enabled=self.precision.qa_aware,
+            center=self.precision.qa_center,
+            amplitude=self.precision.qa_amplitude,
+        )
+
     def _gen_from_strategy(
         self,
         strategy: str,
         context: Dict[str, Any],
     ) -> Tuple[np.ndarray, Tuple[int, ...]]:
-        """根据 auto_gen 策略生成数据（委托给 RandomGenerator）"""
+        """根据 auto_gen 策略生成数据（委托给 RandomGenerator）
+
+        QA 配置已通过 _sync_qa_config 设为全局，无需逐调用传递。
+        """
         return self._rand.generate_from_strategy(strategy, context)
 
 
@@ -430,6 +717,12 @@ class Model:
     """
     Model DSL - 自动根据 @register_op 生成权重
 
+    支持:
+    - 自动权重生成
+    - 算子级精度配置 (PrecisionConfig)
+    - 量化感知随机数 (qa_aware 开关)
+    - 四种比数 golden 生成
+
     用法:
         with Model(seed=42) as m:
             x = m.input((512, 768))
@@ -443,6 +736,16 @@ class Model:
 
         # 导出
         m.export("./golden/")
+
+    量化感知用法:
+        from aidevtools.frontend.types import PrecisionConfig
+
+        pc = PrecisionConfig(input_dtype="fp16", compute_dtype="fp32",
+                             qa_aware=True, qa_center=1.0, qa_amplitude=0.5)
+
+        with Model(seed=42, precision=pc) as m:
+            x = m.input((512, 768))
+            y = m.linear(x, out_features=3072)
     """
 
     def __init__(
@@ -451,8 +754,12 @@ class Model:
         l2_base: int = 0x100000,
         alignment: int = 256,
         qtype: str = "bfp16",
+        precision: Optional[Any] = None,
     ):
-        self._gen = DataGenerator(seed=seed, l2_base=l2_base, alignment=alignment, qtype=qtype)
+        self._gen = DataGenerator(
+            seed=seed, l2_base=l2_base, alignment=alignment,
+            qtype=qtype, precision=precision,
+        )
         self._outputs: List[ModelTensor] = []
         self._op_counter: Dict[str, int] = {}
 
@@ -461,6 +768,11 @@ class Model:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
+
+    @property
+    def precision(self):
+        """获取当前精度配置"""
+        return self._gen.precision
 
     # ============================================================
     # 输入
@@ -547,6 +859,22 @@ class Model:
         return out
 
     # ============================================================
+    # 四种比数
+    # ============================================================
+
+    def generate_four_track(
+        self,
+        op_name: str,
+        input_shape: Tuple[int, ...],
+        precision: Optional[Any] = None,
+        **kwargs,
+    ) -> FourTrackGolden:
+        """为指定算子生成四种比数 golden (委托给 DataGenerator)"""
+        return self._gen.generate_four_track(
+            op_name, input_shape, precision=precision, **kwargs
+        )
+
+    # ============================================================
     # 通用算子调用
     # ============================================================
 
@@ -574,7 +902,7 @@ class Model:
             is_weight = param in meta.weight_params
             role = "weight" if is_weight else "input"
 
-            # 生成数据
+            # 生成数据 (QA 配置已通过全局设置生效)
             array, shape = self._gen._gen_from_strategy(strategy, context)
             tensor_name = f"{prefix}.{param}"
             self._gen._add_tensor(tensor_name, array, qtype=self._gen.qtype, role=role)

@@ -108,7 +108,11 @@ class BinaryPaths:
 
 @dataclass
 class OpConfig:
-    """算子配置 (使用组合模式)"""
+    """算子配置 (使用组合模式)
+
+    支持独立配置计算精度、输入精度、输出精度、权重精度，
+    以及量化感知随机数开关。
+    """
 
     id: int
     op_name: str
@@ -119,6 +123,28 @@ class OpConfig:
     skip: bool
     note: str
     paths: BinaryPaths = field(default_factory=BinaryPaths)
+    # 独立精度配置
+    compute_dtype: str = "fp32"    # 计算精度
+    input_dtype: str = "fp32"      # 输入精度
+    output_dtype: str = "fp32"     # 输出精度
+    weight_dtype: str = "fp32"     # 权重精度
+    # 量化感知随机数
+    qa_aware: bool = False         # 是否启用量化感知随机数
+    qa_center: float = 1.0         # 量化感知中心值
+    qa_amplitude: float = 0.5      # 量化感知波动幅度
+
+    def to_precision_config(self):
+        """转换为 PrecisionConfig"""
+        from aidevtools.frontend.types import PrecisionConfig
+        return PrecisionConfig(
+            compute_dtype=self.compute_dtype,
+            input_dtype=self.input_dtype,
+            output_dtype=self.output_dtype,
+            weight_dtype=self.weight_dtype,
+            qa_aware=self.qa_aware,
+            qa_center=self.qa_center,
+            qa_amplitude=self.qa_amplitude,
+        )
 
     def parse_depends(self) -> Dict[str, List[int]]:
         """
@@ -208,6 +234,18 @@ def _row_to_opconfig(row_dict: Dict) -> OpConfig:
     skip_str = _get_str(row_dict, "skip", "FALSE").upper()
     skip = skip_str in ("TRUE", "1", "YES")
 
+    qa_aware_str = _get_str(row_dict, "qa_aware", "FALSE").upper()
+    qa_aware = qa_aware_str in ("TRUE", "1", "YES")
+
+    def _get_float(key: str, default: float) -> float:
+        val = row_dict.get(key)
+        if val is None or str(val).strip() == "":
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
     return OpConfig(
         id=int(row_dict.get("id", 0) or 0),
         op_name=_get_str(row_dict, "op_name"),
@@ -224,6 +262,15 @@ def _row_to_opconfig(row_dict: Dict) -> OpConfig:
             weight=_get_str(row_dict, "weight_bin"),
             sim_cmd=_get_str(row_dict, "sim_cmd"),
         ),
+        # 精度配置
+        compute_dtype=_get_str(row_dict, "compute_dtype", "fp32"),
+        input_dtype=_get_str(row_dict, "input_dtype", "fp32"),
+        output_dtype=_get_str(row_dict, "output_dtype", "fp32"),
+        weight_dtype=_get_str(row_dict, "weight_dtype", "fp32"),
+        # 量化感知
+        qa_aware=qa_aware,
+        qa_center=_get_float("qa_center", 1.0),
+        qa_amplitude=_get_float("qa_amplitude", 0.5),
     )
 
 
