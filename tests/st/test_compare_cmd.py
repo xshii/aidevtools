@@ -170,6 +170,87 @@ class TestCompareClearCmd:
         assert len(get_records()) == 0
 
 
+class TestCompareBitwiseCmd:
+    """bitwise 子命令测试"""
+
+    def test_bitwise_pass(self, tmp_path):
+        """bit 级比对 - 仅尾数差异"""
+        from aidevtools.commands.compare import cmd_compare
+
+        golden = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        # 微小差异 (仅尾数)
+        result = golden + np.array([1e-7, 0, 0], dtype=np.float32)
+
+        golden_path = tmp_path / "golden.bin"
+        result_path = tmp_path / "result.bin"
+        golden.tofile(golden_path)
+        result.tofile(result_path)
+
+        ret = cmd_compare(
+            action="bitwise",
+            golden=str(golden_path),
+            result=str(result_path),
+            dtype="float32",
+            shape="3",
+            output=str(tmp_path / "output"),
+        )
+
+        assert ret == 0  # 无 CRITICAL
+        assert (tmp_path / "output" / "bit_heatmap.svg").exists()
+        assert (tmp_path / "output" / "perbit_bar.svg").exists()
+
+    def test_bitwise_critical(self, tmp_path):
+        """bit 级比对 - 符号翻转 → CRITICAL"""
+        from aidevtools.commands.compare import cmd_compare
+
+        golden = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        result = np.array([-1.0, 2.0, 3.0], dtype=np.float32)  # sign flip
+
+        golden_path = tmp_path / "golden.bin"
+        result_path = tmp_path / "result.bin"
+        golden.tofile(golden_path)
+        result.tofile(result_path)
+
+        ret = cmd_compare(
+            action="bitwise",
+            golden=str(golden_path),
+            result=str(result_path),
+            dtype="float32",
+            shape="3",
+            output=str(tmp_path / "output"),
+        )
+
+        assert ret == 1  # has CRITICAL
+
+    def test_bitwise_missing_args(self):
+        """bitwise 缺少参数"""
+        from aidevtools.commands.compare import cmd_compare
+
+        ret = cmd_compare(action="bitwise", golden="", result="")
+        assert ret == 1
+
+    def test_bitwise_alias(self, tmp_path):
+        """bit 别名"""
+        from aidevtools.commands.compare import cmd_compare
+
+        data = np.array([1.0, 2.0], dtype=np.float32)
+        golden_path = tmp_path / "g.bin"
+        result_path = tmp_path / "r.bin"
+        data.tofile(golden_path)
+        data.tofile(result_path)
+
+        ret = cmd_compare(
+            action="bit",
+            golden=str(golden_path),
+            result=str(result_path),
+            dtype="float32",
+            shape="2",
+            output=str(tmp_path / "output"),
+        )
+
+        assert ret == 0
+
+
 class TestCompareUnknownCmd:
     """未知子命令测试"""
 

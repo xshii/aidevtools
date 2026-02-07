@@ -9,7 +9,7 @@
 # 1. 加载基类和注册机制
 from aidevtools.formats import base  # noqa: F401
 from aidevtools.formats._registry import get, list_formats, register  # noqa: F401
-from aidevtools.formats.base import FormatBase, load, save  # noqa: F401
+from aidevtools.formats.base import FormatBase, load, load_dir, save  # noqa: F401
 
 # 2. 加载内置格式以触发注册
 from aidevtools.formats import numpy_fmt  # noqa: F401

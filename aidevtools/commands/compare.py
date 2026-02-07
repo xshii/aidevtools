@@ -13,6 +13,17 @@ from aidevtools.ops.base import clear as do_clear
 from aidevtools.ops.base import dump as do_dump
 from aidevtools.ops.base import get_records
 from aidevtools.tools.compare.diff import compare_full
+from aidevtools.compare.bitwise import (
+    FloatFormat,
+    BitLayout,
+    BFP8,
+    BFP4,
+    compare_bitwise,
+    print_bit_analysis,
+    print_bit_heatmap,
+    gen_bit_heatmap_svg,
+    gen_perbit_bar_svg,
+)
 
 
 def _action_dump(output, **kwargs):
@@ -122,6 +133,50 @@ def _action_qtypes(**kwargs):
     return 0
 
 
+def _action_bitwise(golden, result, dtype, shape, output, **kwargs):
+    """Bit 级比对分析"""
+    if not golden or not result:
+        logger.error(
+            "请指定文件: compare bitwise --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32"
+        )
+        return 1
+    dt = parse_dtype(dtype)
+    sh = parse_shape(shape)
+    g = load(golden, fmt="raw", dtype=dt, shape=sh)
+    r = load(result, fmt="raw", dtype=dt, shape=sh)
+
+    # 自动检测浮点格式 (支持标准浮点 + BFP)
+    fmt_map = {
+        "float32": FloatFormat.FLOAT32,
+        "float16": FloatFormat.FLOAT16,
+        "bfloat16": FloatFormat.BFLOAT16,
+        "bfp8": BFP8,
+        "bfp4": BFP4,
+    }
+    fmt = fmt_map.get(dtype, FloatFormat.FLOAT32)
+
+    # Bit 级分析
+    bit_result = compare_bitwise(g, r, fmt=fmt)
+    print_bit_analysis(bit_result, name=golden)
+
+    # Bit 热力图 (文本)
+    print_bit_heatmap(g, r, fmt=fmt, block_size=256)
+
+    # 生成 SVG (热力图 + per-bit 条形图)
+    import os
+    os.makedirs(output, exist_ok=True)
+
+    svg_heatmap = os.path.join(output, "bit_heatmap.svg")
+    gen_bit_heatmap_svg(g, r, svg_heatmap, fmt=fmt, block_size=256)
+    print(f"Bit 热力图 SVG: {svg_heatmap}")
+
+    svg_perbit = os.path.join(output, "perbit_bar.svg")
+    gen_perbit_bar_svg(bit_result, svg_perbit)
+    print(f"Per-bit 分布图 SVG: {svg_perbit}")
+
+    return 0 if not bit_result.has_critical else 1
+
+
 # Action 分发表
 _ACTIONS = {
     "dump": _action_dump,
@@ -130,6 +185,8 @@ _ACTIONS = {
     "fuzzy": _action_fuzzy,
     "convert": _action_convert,
     "qtypes": _action_qtypes,
+    "bitwise": _action_bitwise,
+    "bit": _action_bitwise,
 }
 
 
@@ -159,6 +216,7 @@ def cmd_compare(
         clear      清空 Golden 记录
         single     单次比对两个文件
         fuzzy      模糊比对（跳过 bit 级比对）
+        bitwise    Bit 级比对分析 (sign/exponent/mantissa 告警 + 热力图)
         convert    类型转换导出
         qtypes     列出支持的量化类型
 
@@ -178,6 +236,7 @@ def cmd_compare(
         compare dump --output=./workspace                       导出数据
         compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32
         compare fuzzy --golden=a.bin --result=b.bin --dtype=float32
+        compare bitwise --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64  Bit级分析
         compare convert --golden=a.bin --output=a_fp16.bin --target_dtype=float16
         compare qtypes                                          列出量化类型
 
