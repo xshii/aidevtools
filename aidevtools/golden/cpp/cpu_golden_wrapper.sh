@@ -16,6 +16,18 @@ else
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 fi
 
+# 处理特殊参数（--help, -h, help）
+if [ $# -eq 0 ] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]] || [[ "$1" == "help" ]]; then
+    # 默认路由到 GFloat backend 显示帮助
+    BACKEND="$SCRIPT_DIR/cpu_golden_gfloat"
+    if [ -x "$BACKEND" ]; then
+        exec "$BACKEND" "$@"
+    else
+        echo "Error: backend not found: $BACKEND" >&2
+        exit 1
+    fi
+fi
+
 # 检查参数数量
 if [ $# -lt 2 ]; then
     echo "Error: insufficient arguments" >&2
