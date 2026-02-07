@@ -70,6 +70,8 @@ max-args = 7
 max-positional-arguments = 7
 max-locals = 20  # 算子实现需要较多局部变量
 max-attributes = 12  # 配置类需要较多属性
+max-statements = 50  # 函数最大语句数
+max-branches = 35  # 函数最大分支数（if/elif/else）
 
 [tool.ruff]
 line-length = 100
