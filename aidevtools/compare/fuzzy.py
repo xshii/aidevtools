@@ -5,8 +5,45 @@
 使用单次遍历合并计算 + early exit 优化。
 """
 
-from .metrics import calc_all_metrics_early_exit
-from .types import FuzzyResult, CompareConfig
+from .metrics import calc_all_metrics_early_exit, _calc_all_metrics_early_exit_prepared
+from .types import FuzzyResult, CompareConfig, _PreparedPair
+
+
+def _compare_fuzzy_prepared(
+    p: _PreparedPair,
+    config: CompareConfig = None,
+) -> FuzzyResult:
+    """使用预处理数据的模糊比对 — 避免重复 astype + flatten"""
+    if config is None:
+        config = CompareConfig()
+
+    m = _calc_all_metrics_early_exit_prepared(
+        p,
+        atol=config.fuzzy_atol,
+        rtol=config.fuzzy_rtol,
+        min_qsnr=config.fuzzy_min_qsnr,
+        min_cosine=config.fuzzy_min_cosine,
+        max_exceed_ratio=config.fuzzy_max_exceed_ratio,
+    )
+
+    exceed_ratio = m.exceed_count / m.total_elements if m.total_elements > 0 else 0.0
+
+    passed = (
+        exceed_ratio <= config.fuzzy_max_exceed_ratio
+        and m.qsnr >= config.fuzzy_min_qsnr
+        and m.cosine >= config.fuzzy_min_cosine
+    )
+
+    return FuzzyResult(
+        passed=passed,
+        max_abs=m.max_abs,
+        mean_abs=m.mean_abs,
+        max_rel=m.max_rel,
+        qsnr=m.qsnr,
+        cosine=m.cosine,
+        total_elements=m.total_elements,
+        exceed_count=m.exceed_count,
+    )
 
 
 def compare_fuzzy(

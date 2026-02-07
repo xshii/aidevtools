@@ -793,6 +793,46 @@ def _popcount_block(xor_block: np.ndarray, total_bits: int) -> int:
     return int(_per_bit_count(xor_block, total_bits).sum())
 
 
+def _prepare_bitwise_xor(
+    golden: np.ndarray,
+    result: np.ndarray,
+    fmt: Optional[Union[FloatFormat, BitLayout]],
+) -> Tuple[np.ndarray, int, Union[FloatFormat, BitLayout]]:
+    """Pre-compute XOR for bitwise visualization — shared by heatmap/SVG functions.
+
+    Returns:
+        (xor, total_bits_per_elem, fmt)
+    """
+    if fmt is None:
+        fmt = _detect_format(golden)
+    total_bits_per_elem = sum(_resolve_layout(fmt))
+    g_uint = _to_uint(golden, fmt)
+    r_uint = _to_uint(result, fmt)
+    xor = g_uint ^ r_uint
+    return xor, total_bits_per_elem, fmt
+
+
+def _calc_block_ratios(
+    xor: np.ndarray,
+    total_bits_per_elem: int,
+    block_size: int,
+) -> List[Tuple[int, int, int, float]]:
+    """Calculate per-block bit diff ratios from pre-computed XOR.
+
+    Returns:
+        List of (offset, size, diff_bits, ratio) per block.
+    """
+    total = len(xor)
+    blocks = []
+    for offset in range(0, total, block_size):
+        end = min(offset + block_size, total)
+        diff_bits = _popcount_block(xor[offset:end], total_bits_per_elem)
+        total_bits_in_block = (end - offset) * total_bits_per_elem
+        ratio = diff_bits / total_bits_in_block if total_bits_in_block > 0 else 0.0
+        blocks.append((offset, end - offset, diff_bits, ratio))
+    return blocks
+
+
 def print_bit_heatmap(
     golden: np.ndarray,
     result: np.ndarray,
@@ -819,26 +859,8 @@ def print_bit_heatmap(
         block_size: 每块元素数
         cols: 每行显示的块数
     """
-    if fmt is None:
-        fmt = _detect_format(golden)
-
-    total_bits_per_elem = sum(_resolve_layout(fmt))
-
-    g_uint = _to_uint(golden, fmt)
-    r_uint = _to_uint(result, fmt)
-    xor = g_uint ^ r_uint
-
-    total = len(g_uint)
-    blocks_info = []
-
-    for offset in range(0, total, block_size):
-        end = min(offset + block_size, total)
-        blk_xor = xor[offset:end]
-        # popcount: 统计每个元素的差异 bit 数
-        diff_bits = _popcount_block(blk_xor, total_bits_per_elem)
-        total_bits_in_block = (end - offset) * total_bits_per_elem
-        ratio = diff_bits / total_bits_in_block if total_bits_in_block > 0 else 0.0
-        blocks_info.append((offset, end - offset, diff_bits, ratio))
+    xor, total_bits_per_elem, fmt = _prepare_bitwise_xor(golden, result, fmt)
+    blocks_info = _calc_block_ratios(xor, total_bits_per_elem, block_size)
 
     # 打印
     def _char(ratio):
@@ -852,7 +874,7 @@ def print_bit_heatmap(
 
     n_blocks = len(blocks_info)
     total_diff = sum(b[2] for b in blocks_info)
-    total_possible = total * total_bits_per_elem
+    total_possible = len(xor) * total_bits_per_elem
     global_ratio = total_diff / total_possible if total_possible > 0 else 0.0
 
     print(f"\n  Bit Heatmap ({n_blocks} blocks x {block_size} elem, "
@@ -900,25 +922,9 @@ def gen_bit_heatmap_svg(
     """
     from pathlib import Path
 
-    if fmt is None:
-        fmt = _detect_format(golden)
-
-    total_bits_per_elem = sum(_resolve_layout(fmt))
-
-    g_uint = _to_uint(golden, fmt)
-    r_uint = _to_uint(result, fmt)
-    xor = g_uint ^ r_uint
-
-    total = len(g_uint)
-    ratios = []
-
-    for offset in range(0, total, block_size):
-        end = min(offset + block_size, total)
-        blk_xor = xor[offset:end]
-        diff_bits = _popcount_block(blk_xor, total_bits_per_elem)
-        total_bits_in_block = (end - offset) * total_bits_per_elem
-        ratio = diff_bits / total_bits_in_block if total_bits_in_block > 0 else 0.0
-        ratios.append(ratio)
+    xor, total_bits_per_elem, fmt = _prepare_bitwise_xor(golden, result, fmt)
+    blocks_info = _calc_block_ratios(xor, total_bits_per_elem, block_size)
+    ratios = [b[3] for b in blocks_info]
 
     n_blocks = len(ratios)
     rows = (n_blocks + cols - 1) // cols

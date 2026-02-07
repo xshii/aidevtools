@@ -126,6 +126,28 @@ def generate_text_report(
                 lines.append(f"    - {msg}")
             lines.append("")
 
+        if r.bitwise:
+            s = r.bitwise.summary
+            lines.append("  Bit-Level Analysis:")
+            lines.append(f"    Format: {r.bitwise.format_name}")
+            lines.append(f"    Diff Elements: {s.diff_elements} / {s.total_elements} ({s.diff_ratio:.2%})")
+            lines.append(f"    Sign Flips: {s.sign_flip_count}")
+            lines.append(f"    Exponent Diffs: {s.exponent_diff_count} (max shift={s.max_exponent_diff})")
+            lines.append(f"    Mantissa Diffs: {s.mantissa_diff_count}")
+            lines.append(f"    Critical: {'YES' if r.bitwise.has_critical else 'NO'}")
+            lines.append("")
+
+        if r.blocked:
+            n_fail = sum(1 for b in r.blocked if not b.passed)
+            worst = min(r.blocked, key=lambda b: b.qsnr) if r.blocked else None
+            lines.append("  Block Analysis:")
+            lines.append(f"    Total Blocks: {len(r.blocked)}")
+            lines.append(f"    Failed Blocks: {n_fail}")
+            if worst:
+                q_str = f"{worst.qsnr:.1f}" if worst.qsnr != float("inf") else "inf"
+                lines.append(f"    Worst Block: offset={worst.offset}, QSNR={q_str} dB")
+            lines.append("")
+
         lines.append("-" * 80)
         lines.append("")
 
@@ -201,6 +223,38 @@ def generate_json_report(
                 "valid": r.sanity.valid,
                 "checks": r.sanity.checks,
                 "messages": r.sanity.messages,
+            }
+
+        if r.bitwise:
+            s = r.bitwise.summary
+            d["bitwise"] = {
+                "format": r.bitwise.format_name,
+                "total_elements": s.total_elements,
+                "diff_elements": s.diff_elements,
+                "diff_ratio": s.diff_ratio,
+                "sign_flip_count": s.sign_flip_count,
+                "exponent_diff_count": s.exponent_diff_count,
+                "max_exponent_diff": s.max_exponent_diff,
+                "mantissa_diff_count": s.mantissa_diff_count,
+                "has_critical": r.bitwise.has_critical,
+            }
+
+        if r.blocked:
+            n_fail = sum(1 for b in r.blocked if not b.passed)
+            d["blocked"] = {
+                "total_blocks": len(r.blocked),
+                "failed_blocks": n_fail,
+                "blocks": [
+                    {
+                        "offset": b.offset,
+                        "size": b.size,
+                        "qsnr": b.qsnr,
+                        "cosine": b.cosine,
+                        "max_abs": b.max_abs,
+                        "passed": b.passed,
+                    }
+                    for b in r.blocked
+                ],
             }
 
         return d

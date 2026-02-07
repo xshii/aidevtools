@@ -71,7 +71,7 @@ def check_golden_sanity(
         result.valid = False
 
     # 3. 检查数值范围 (简单检查: 不能全为同一值)
-    unique_count = len(np.unique(golden_pure.flatten()[:1000]))  # 采样检查
+    unique_count = len(np.unique(golden_pure.ravel()[:1000]))  # 采样检查 (ravel 避免不必要的全数组拷贝)
     result.range_valid = unique_count > 1
     result.checks["range_valid"] = result.range_valid
 

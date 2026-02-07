@@ -3,6 +3,10 @@
 
 对大张量进行分块比对，快速定位误差集中区域。
 支持文本热力图和 per-block 指标输出。
+
+架构优化:
+- 整体只做一次 float64 转换，per-block 通过 _PreparedPair 直接引用子切片，
+  避免原版 calc_all_metrics 每个 block 重复执行 astype(float64).flatten()。
 """
 
 from dataclasses import dataclass
@@ -10,7 +14,8 @@ from typing import List
 
 import numpy as np
 
-from .metrics import calc_all_metrics
+from .metrics import _calc_all_metrics_prepared
+from .types import _PreparedPair
 
 
 @dataclass
@@ -41,6 +46,9 @@ def compare_blocked(
     将大张量拆分为 block_size 个元素的块，分别计算指标。
     用于快速定位误差集中的区域。
 
+    优化: 整体只做一次 astype(float64).flatten()，per-block 构造
+    _PreparedPair 直接引用子切片，避免每块重复转换。
+
     Args:
         golden: 参考数据
         result: 待比对数据
@@ -53,6 +61,7 @@ def compare_blocked(
     Returns:
         每个 block 的比对结果列表
     """
+    # 整体转换一次 (原版此处转换后，calc_all_metrics 每块又转换一次)
     g = golden.astype(np.float64).flatten()
     r = result.astype(np.float64).flatten()
     total = len(g)
@@ -63,7 +72,14 @@ def compare_blocked(
         g_blk = g[offset:end]
         r_blk = r[offset:end]
 
-        m = calc_all_metrics(g_blk, r_blk, atol=atol, rtol=rtol)
+        # 构造 per-block PreparedPair，直接复用切片，无额外拷贝
+        diff = g_blk - r_blk
+        p = _PreparedPair(
+            g=g_blk, r=r_blk, diff=diff,
+            abs_err=np.abs(diff), g_abs=np.abs(g_blk),
+            total=end - offset,
+        )
+        m = _calc_all_metrics_prepared(p, atol=atol, rtol=rtol)
 
         passed = m.qsnr >= min_qsnr and m.cosine >= min_cosine
         blocks.append(BlockResult(

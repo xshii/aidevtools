@@ -30,6 +30,13 @@ from aidevtools.compare.bitwise import (
     gen_bit_heatmap_svg,
     gen_perbit_bar_svg,
 )
+from aidevtools.compare import (
+    compare_full,
+    CompareConfig,
+    print_block_heatmap,
+    find_worst_blocks,
+    print_compare_table,
+)
 
 # ---- 全局参数 ----
 BATCH, SEQ, HIDDEN = 2, 16, 64
@@ -186,6 +193,45 @@ def main():
     gen_perbit_bar_svg(softmax_result, svg_softmax)
     print(f"  Softmax Per-bit 分布图: {svg_softmax}")
 
+    # --- 第五部分: 统一管线 (四态 + bitwise + blocked 一步到位) ---
+    print("\n" + "-" * 75)
+    print("  第五部分: 统一管线 (四态 + bitwise + blocked)")
+    print("-" * 75)
+
+    config = CompareConfig(
+        fuzzy_min_qsnr=20.0, fuzzy_min_cosine=0.99,
+        enable_bitwise=True, bitwise_fmt=FP32,
+        enable_blocked=True, blocked_block_size=64,
+    )
+    compare_results = []
+    for op_name, (g, c) in per_op_pairs.items():
+        r = compare_full(
+            dut_output=c.astype(np.float32),
+            golden_pure=g.astype(np.float32),
+            config=config,
+            name=op_name,
+        )
+        compare_results.append(r)
+
+    print_compare_table(compare_results)
+
+    # 从统一结果中提取 blocked 信息 (以最后一个算子为例)
+    last_r = compare_results[-1]
+    if last_r.blocked:
+        print(f"\n  [{last_r.name}] 分块误差定位:")
+        print_block_heatmap(last_r.blocked, cols=32)
+        worst = find_worst_blocks(last_r.blocked, top_n=3)
+        print(f"  最差的 {len(worst)} 个 block:")
+        for b in worst:
+            q_str = f"{b.qsnr:.1f}" if b.qsnr != float("inf") else "inf"
+            print(f"    offset={b.offset:>6}, size={b.size}, QSNR={q_str} dB, "
+                  f"max_abs={b.max_abs:.2e}, {'FAIL' if not b.passed else 'PASS'}")
+
+    # 从统一结果中提取 bitwise 信息
+    n_critical = sum(1 for r in compare_results if r.bitwise and r.bitwise.has_critical)
+    n_bit_diff = sum(1 for r in compare_results if r.bitwise and r.bitwise.summary.diff_elements > 0)
+    print(f"\n  统一管线 bitwise 汇总: {n_bit_diff} ops 有 bit 差异, {n_critical} ops CRITICAL")
+
     # --- 汇总 ---
     print("\n" + "=" * 75)
     s = model_result.global_result.summary
@@ -195,6 +241,10 @@ def main():
     print(f"    指数域偏移:       {s.exponent_diff_count} 个 (max shift={s.max_exponent_diff})")
     print(f"    尾数差异:         {s.mantissa_diff_count} 个")
     print(f"    CRITICAL 告警:    {'YES' if model_result.has_critical else 'NO'}")
+    # 统一管线分块汇总
+    total_blocks = sum(len(r.blocked) for r in compare_results if r.blocked)
+    n_fail = sum(1 for r in compare_results if r.blocked for b in r.blocked if not b.passed)
+    print(f"    分块失败:         {n_fail}/{total_blocks} blocks (统一管线)")
     print(f"\n  生成文件:")
     print(f"    {svg_heatmap}")
     print(f"    {svg_perbit}")
