@@ -45,6 +45,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          set +e  # Don't exit on error
           echo "Running all demos..."
           mkdir -p demos/output
 
@@ -64,10 +65,10 @@ jobs:
             cd "$demo_dir"
             if python run.py; then
               echo "✓ $demo_name passed"
-              ((demos_passed++))
+              demos_passed=$((demos_passed + 1))
             else
               echo "✗ $demo_name failed (non-fatal)"
-              ((demos_failed++))
+              demos_failed=$((demos_failed + 1))
             fi
             cd - > /dev/null
           done
@@ -77,7 +78,7 @@ jobs:
           echo "Demos Summary: $demos_passed passed, $demos_failed failed"
           echo "=================================================="
 
-          # Don't fail CI if some demos fail (they might have special requirements)
+          # Always succeed - demos are informational
           exit 0
 
       - name: Coverage
