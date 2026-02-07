@@ -68,7 +68,9 @@ check_deps() {
 
 # 激活 venv (如果存在)
 activate_venv() {
-    if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
+    if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
+        source "$SCRIPT_DIR/venv/bin/activate"
+    elif [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
         source "$SCRIPT_DIR/.venv/bin/activate"
     fi
 }
@@ -89,7 +91,7 @@ check_pybind11() {
 
 # 编译 cpu_golden
 build_cpu_golden() {
-    info "编译 cpu_golden (GFloat 算子 CLI)..."
+    info "编译 cpu_golden (GFloat & BFP 算子 CLI)..."
 
     local cpp_dir="$SRC_DIR/golden/cpp"
     local build_dir="$cpp_dir/build"
@@ -101,8 +103,17 @@ build_cpu_golden() {
     cmake .. -DCMAKE_BUILD_TYPE=Release
     make -j$(get_nproc)
 
-    cp cpu_golden "$output_dir/"
-    info "cpu_golden 编译完成: $output_dir/cpu_golden"
+    # 复制两个实现
+    cp cpu_golden_gfloat "$output_dir/"
+    cp cpu_golden_bfp "$output_dir/"
+
+    # 创建统一入口 wrapper
+    cp "$cpp_dir/cpu_golden_wrapper.sh" "$output_dir/cpu_golden"
+    chmod +x "$output_dir/cpu_golden"
+
+    info "cpu_golden_gfloat 编译完成: $output_dir/cpu_golden_gfloat"
+    info "cpu_golden_bfp 编译完成: $output_dir/cpu_golden_bfp"
+    info "cpu_golden (wrapper) 创建完成: $output_dir/cpu_golden"
 }
 
 # 编译 gfloat_golden
@@ -151,6 +162,8 @@ clean() {
 
     rm -rf "$SRC_DIR/golden/cpp/build"
     rm -f "$SRC_DIR/golden/cpu_golden"
+    rm -f "$SRC_DIR/golden/cpu_golden_gfloat"
+    rm -f "$SRC_DIR/golden/cpu_golden_bfp"
 
     rm -rf "$SRC_DIR/formats/custom/gfloat/cpp/build"
     rm -f "$SRC_DIR/formats/custom/gfloat/"gfloat_golden*.so
@@ -185,9 +198,11 @@ show_help() {
     echo "  help     显示帮助"
     echo ""
     echo "组件说明:"
-    echo "  cpu_golden     - GFloat 格式的算子 CLI，支持 matmul/softmax/layernorm/transpose"
-    echo "  gfloat_golden  - GFloat 格式的 Python 扩展 (pybind11)"
-    echo "  bfp_golden     - BFP 块浮点格式的 Python 扩展 (pybind11)"
+    echo "  cpu_golden        - 统一的算子 CLI (自动路由 GFloat/BFP)"
+    echo "  cpu_golden_gfloat - GFloat 格式的算子 CLI"
+    echo "  cpu_golden_bfp    - BFP 格式的算子 CLI"
+    echo "  gfloat_golden     - GFloat 格式的 Python 扩展 (pybind11)"
+    echo "  bfp_golden        - BFP 块浮点格式的 Python 扩展 (pybind11)"
     echo ""
     echo "示例:"
     echo "  $0              # 编译所有"

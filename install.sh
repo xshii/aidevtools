@@ -1,7 +1,7 @@
 #!/bin/bash
 # AI Dev Tools 安装脚本
 
-VENV_DIR=".venv"
+VENV_DIR="venv"
 
 echo "=== AI Dev Tools 安装 ==="
 
