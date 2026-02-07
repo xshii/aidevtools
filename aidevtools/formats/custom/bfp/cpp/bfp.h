@@ -6,6 +6,7 @@
 #ifndef BFP_H
 #define BFP_H
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 #include <cmath>
