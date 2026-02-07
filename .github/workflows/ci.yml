@@ -49,13 +49,14 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          set +e  # Don't exit on error
+          set +e  # Don't exit immediately on error
           echo "Running all demos..."
           mkdir -p demos/output
 
           # Find and run all demo scripts
           demos_passed=0
           demos_failed=0
+          failed_demos=()
 
           for demo_script in $(find demos -name "run.py" -type f | sort); do
             demo_dir=$(dirname "$demo_script")
@@ -67,12 +68,13 @@ jobs:
             echo "=================================================="
 
             cd "$demo_dir"
-            if python run.py; then
+            if python run.py 2>&1; then
               echo "✓ $demo_name passed"
               demos_passed=$((demos_passed + 1))
             else
-              echo "✗ $demo_name failed (non-fatal)"
+              echo "✗ $demo_name FAILED"
               demos_failed=$((demos_failed + 1))
+              failed_demos+=("$demo_name")
             fi
             cd - > /dev/null
           done
@@ -82,7 +84,18 @@ jobs:
           echo "Demos Summary: $demos_passed passed, $demos_failed failed"
           echo "=================================================="
 
-          # Always succeed - demos are informational
+          if [ $demos_failed -gt 0 ]; then
+            echo ""
+            echo "Failed demos:"
+            for demo in "${failed_demos[@]}"; do
+              echo "  - $demo"
+            done
+            echo ""
+            echo "Demos failed. Please check syntax errors or assertion failures."
+            exit 1
+          fi
+
+          echo "All demos passed!"
           exit 0
 
       - name: Coverage
