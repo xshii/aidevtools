@@ -1,9 +1,27 @@
-"""比对核心逻辑"""
+"""比对核心逻辑
+
+统一使用 aidevtools.compare 核心模块进行计算，消除重复逻辑。
+本模块保留原有类型和 API 以维持向后兼容。
+"""
 
 from dataclasses import dataclass
 from typing import Dict, List
 
 import numpy as np
+
+# === 核心计算委托给 compare 模块 ===
+from aidevtools.compare.metrics import (
+    calc_all_metrics as _calc_all_metrics,
+    calc_qsnr,
+    calc_cosine,
+)
+from aidevtools.compare.exact import (
+    compare_bit,
+    compare_exact as _core_compare_exact,
+)
+
+
+# === 本模块专有类型 (保持向后兼容) ===
 
 
 @dataclass
@@ -103,11 +121,14 @@ class FullCompareResult:
         return "FAIL"
 
 
+# === 核心比对函数 (委托给 compare 模块) ===
+
+
 def compare_exact(
     golden: np.ndarray, result: np.ndarray, max_abs: float = 0.0, max_count: int = 0
 ) -> ExactResult:
     """
-    精确比对
+    精确比对 - 委托给 compare.exact 模块
 
     Args:
         golden: golden 数据
@@ -118,38 +139,13 @@ def compare_exact(
     Returns:
         ExactResult
     """
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-
-    abs_err = np.abs(g - r)
-    max_abs_actual = float(abs_err.max()) if len(abs_err) > 0 else 0.0
-
-    if max_abs == 0:
-        # bit 级精确比对 (需要 contiguous 数组)
-        g_cont = np.ascontiguousarray(golden)
-        r_cont = np.ascontiguousarray(result)
-        mismatch_mask = g_cont.view(np.uint8) != r_cont.view(np.uint8)
-        mismatch_count = int(np.sum(mismatch_mask))
-        first_diff = np.argmax(mismatch_mask) if mismatch_count > 0 else -1
-    else:
-        # 允许一定误差
-        exceed_mask = abs_err > max_abs
-        mismatch_count = int(np.sum(exceed_mask))
-        first_diff = int(np.argmax(exceed_mask)) if mismatch_count > 0 else -1
-
-    passed = mismatch_count <= max_count
-
+    core_result = _core_compare_exact(golden, result, max_abs, max_count)
     return ExactResult(
-        passed=passed,
-        mismatch_count=mismatch_count,
-        first_diff_offset=first_diff,
-        max_abs=max_abs_actual,
+        passed=core_result.passed,
+        mismatch_count=core_result.mismatch_count,
+        first_diff_offset=core_result.first_diff_offset,
+        max_abs=core_result.max_abs,
     )
-
-
-def compare_bit(golden: bytes, result: bytes) -> bool:
-    """bit 级对比，完全一致"""
-    return golden == result
 
 
 def compare_block(
@@ -170,17 +166,16 @@ def compare_block(
         if len(g_block) == 0:
             continue
 
-        abs_err = np.abs(g_block.astype(np.float64) - r_block.astype(np.float64))
-        max_abs = float(abs_err.max())
-        qsnr = calc_qsnr(g_block, r_block)
+        # 使用核心模块的单次遍历计算
+        m = _calc_all_metrics(g_block, r_block)
 
         blocks.append(
             {
                 "offset": i,
                 "size": len(g_block) * g_block.itemsize,
-                "max_abs": max_abs,
-                "qsnr": qsnr,
-                "passed": max_abs < threshold,
+                "max_abs": m.max_abs,
+                "qsnr": m.qsnr,
+                "passed": m.max_abs < threshold,
             }
         )
 
@@ -190,58 +185,20 @@ def compare_block(
 def compare_full(
     golden: np.ndarray, result: np.ndarray, atol: float = 1e-5, rtol: float = 1e-5
 ) -> DiffResult:
-    """完整对比"""
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-
-    abs_err = np.abs(g - r)
-    rel_err = abs_err / (np.abs(g) + 1e-12)
-
-    max_abs = float(abs_err.max())
-    mean_abs = float(abs_err.mean())
-    max_rel = float(rel_err.max())
-
-    qsnr = calc_qsnr(golden, result)
-    cosine = calc_cosine(g, r)
-
-    threshold = atol + rtol * np.abs(g)
-    exceed_count = int(np.sum(abs_err > threshold))
-    passed = exceed_count == 0
+    """完整对比 - 使用单次遍历优化"""
+    m = _calc_all_metrics(golden, result, atol=atol, rtol=rtol)
+    passed = m.exceed_count == 0
 
     return DiffResult(
         passed=passed,
-        max_abs=max_abs,
-        mean_abs=mean_abs,
-        max_rel=max_rel,
-        qsnr=qsnr,
-        cosine=cosine,
-        total_elements=len(g),
-        exceed_count=exceed_count,
+        max_abs=m.max_abs,
+        mean_abs=m.mean_abs,
+        max_rel=m.max_rel,
+        qsnr=m.qsnr,
+        cosine=m.cosine,
+        total_elements=m.total_elements,
+        exceed_count=m.exceed_count,
     )
-
-
-def calc_qsnr(golden: np.ndarray, result: np.ndarray) -> float:
-    """计算 QSNR (dB)"""
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-
-    signal = np.sum(g**2)
-    noise = np.sum((g - r) ** 2)
-
-    if noise < 1e-12:
-        return float("inf")
-    return float(10 * np.log10(signal / noise))
-
-
-def calc_cosine(a: np.ndarray, b: np.ndarray) -> float:
-    """计算余弦相似度"""
-    a_flat = a.flatten()
-    b_flat = b.flatten()
-    norm_a = np.linalg.norm(a_flat)
-    norm_b = np.linalg.norm(b_flat)
-    if norm_a < 1e-12 or norm_b < 1e-12:
-        return 0.0
-    return float(np.dot(a_flat, b_flat) / (norm_a * norm_b))
 
 
 def compare_isclose(
@@ -256,64 +213,35 @@ def compare_isclose(
 
     判断条件: |result - golden| <= atol + rtol * |golden|
     通过条件: exceed_ratio <= max_exceed_ratio
-
-    Args:
-        golden: 参考数据 (golden)
-        result: 待比对数据 (DUT 输出)
-        atol: 绝对误差门限 (absolute tolerance)
-        rtol: 相对误差门限 (relative tolerance)
-        max_exceed_ratio: 允许的最大超限比例 (0.0 = 不允许任何超限)
-
-    Returns:
-        IsCloseResult 包含详细统计信息
-
-    示例:
-        >>> result = compare_isclose(golden, dut, atol=1e-4, rtol=1e-2, max_exceed_ratio=0.01)
-        >>> print(f"Pass: {result.passed}, Exceed: {result.exceed_ratio:.2%}")
     """
-    # 转换为 fp32 高精度
-    g = golden.astype(np.float32).flatten()
-    r = result.astype(np.float32).flatten()
+    g = golden.astype(np.float64).flatten()
+    r = result.astype(np.float64).flatten()
 
     if len(g) != len(r):
         raise ValueError(f"Shape mismatch: golden={golden.shape}, result={result.shape}")
 
-    total_elements = len(g)
+    # 使用核心模块做主要计算
+    m = _calc_all_metrics(golden, result, atol=atol, rtol=rtol)
 
-    # 计算绝对误差
-    abs_error = np.abs(r - g)
-
-    # 计算相对误差 (避免除零警告)
+    # mean_rel 需要额外计算 (AllMetrics 只有 max_rel)
+    abs_err = np.abs(g - r)
     g_abs = np.abs(g)
-    rel_error = np.zeros_like(abs_error)
+    rel_err = np.zeros_like(abs_err)
     nonzero_mask = g_abs > 1e-12
-    np.divide(abs_error, g_abs, out=rel_error, where=nonzero_mask)
+    np.divide(abs_err, g_abs, out=rel_err, where=nonzero_mask)
+    mean_rel_error = float(rel_err.mean()) if len(rel_err) > 0 else 0.0
 
-    # 计算综合门限: atol + rtol * |golden|
-    threshold = atol + rtol * g_abs
-
-    # 统计超限元素
-    exceed_mask = abs_error > threshold
-    exceed_count = int(np.sum(exceed_mask))
-    exceed_ratio = exceed_count / total_elements if total_elements > 0 else 0.0
-
-    # 判断是否通过
+    exceed_ratio = m.exceed_count / m.total_elements if m.total_elements > 0 else 0.0
     passed = exceed_ratio <= max_exceed_ratio
-
-    # 统计指标
-    max_abs_error = float(np.max(abs_error)) if total_elements > 0 else 0.0
-    mean_abs_error = float(np.mean(abs_error)) if total_elements > 0 else 0.0
-    max_rel_error = float(np.max(rel_error)) if total_elements > 0 else 0.0
-    mean_rel_error = float(np.mean(rel_error)) if total_elements > 0 else 0.0
 
     return IsCloseResult(
         passed=passed,
-        total_elements=total_elements,
-        exceed_count=exceed_count,
+        total_elements=m.total_elements,
+        exceed_count=m.exceed_count,
         exceed_ratio=exceed_ratio,
-        max_abs_error=max_abs_error,
-        max_rel_error=max_rel_error,
-        mean_abs_error=mean_abs_error,
+        max_abs_error=m.max_abs,
+        max_rel_error=m.max_rel,
+        mean_abs_error=m.mean_abs,
         mean_rel_error=mean_rel_error,
         atol=atol,
         rtol=rtol,

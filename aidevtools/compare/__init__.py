@@ -39,6 +39,9 @@ from .types import (
     SanityResult,
 )
 from .metrics import (
+    AllMetrics,
+    calc_all_metrics,
+    calc_all_metrics_early_exit,
     calc_qsnr,
     calc_cosine,
     calc_abs_error,
@@ -51,6 +54,12 @@ from .exact import compare_exact, compare_bit
 from .fuzzy import compare_fuzzy, compare_isclose
 from .sanity import check_golden_sanity, check_data_sanity
 from .engine import CompareEngine, compare_full, determine_status
+from .blocked import (
+    BlockResult,
+    compare_blocked,
+    print_block_heatmap,
+    find_worst_blocks,
+)
 from .report import (
     print_compare_table,
     generate_text_report,
@@ -78,7 +87,11 @@ __all__ = [
     # Golden 自检
     "check_golden_sanity",
     "check_data_sanity",
-    # 指标计算
+    # 指标计算 (优化版)
+    "AllMetrics",
+    "calc_all_metrics",
+    "calc_all_metrics_early_exit",
+    # 指标计算 (独立函数)
     "calc_qsnr",
     "calc_cosine",
     "calc_abs_error",
@@ -86,6 +99,11 @@ __all__ = [
     "calc_exceed_count",
     "check_nan_inf",
     "check_nonzero",
+    # 分块比对
+    "BlockResult",
+    "compare_blocked",
+    "print_block_heatmap",
+    "find_worst_blocks",
     # 报告
     "print_compare_table",
     "generate_text_report",

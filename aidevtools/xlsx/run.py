@@ -245,10 +245,21 @@ def run_xlsx(
     # 导出到 xlsx
     export_xlsx(xlsx_path, records, preserve_results=True)
 
-    # 比对
-    for idx, record in enumerate(records):
-        if record.get("golden") is not None:
-            results.append(_compare_record(record, idx, out_path))
+    # 比对 (并行优化: 多记录并发比对)
+    compare_tasks = [
+        (record, idx, out_path)
+        for idx, record in enumerate(records)
+        if record.get("golden") is not None
+    ]
+    if compare_tasks:
+        from concurrent.futures import ThreadPoolExecutor
+        import os
+
+        workers = min(len(compare_tasks), os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_compare_record, r, i, p) for r, i, p in compare_tasks]
+            for f in futures:
+                results.append(f.result())
 
     # 更新结果
     update_compare_results(xlsx_path, results)
