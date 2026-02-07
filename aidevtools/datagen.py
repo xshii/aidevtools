@@ -658,13 +658,18 @@ class DataGenerator:
         self,
         output_dir: Union[str, Path],
         prefix: str = "",
+        bm: str = "",
     ) -> Dict[str, Path]:
         """
         导出为 DUT 格式
 
+        文件命名: {bm}_{name}_{shape}.{qtype}.bin
+        示例: encoder_linear_0_weight_64x64.bfp4.bin
+
         Args:
             output_dir: 输出目录
-            prefix: 文件名前缀
+            prefix: 文件名前缀 (旧接口，保持兼容)
+            bm: benchmark 名称前缀 (如 "encoder")
 
         Returns:
             Dict[tensor_name, file_path]
@@ -680,15 +685,25 @@ class DataGenerator:
             # 量化
             packed, _ = quantize(tensor.array, tensor.qtype)
 
-            # 保存
+            # 文件名: {bm}_{name}_{shape}.{qtype}.bin
             safe_name = tensor.name.replace(".", "_")
-            filename = f"{prefix}{safe_name}.bin" if prefix else f"{safe_name}.bin"
+            shape_suffix = "x".join(str(s) for s in tensor.shape)
+            parts = []
+            if prefix:
+                parts.append(prefix)
+            if bm:
+                parts.append(bm)
+            parts.append(safe_name)
+            parts.append(shape_suffix)
+            basename = "_".join(parts)
+            filename = f"{basename}.{tensor.qtype}.bin"
             filepath = output_dir / filename
             save(str(filepath), packed, fmt="raw")
             result[tensor.name] = filepath
 
         # 保存内存布局
-        (output_dir / f"{prefix}memory_layout.txt").write_text(self.memory_summary())
+        layout_prefix = f"{bm}_" if bm else prefix
+        (output_dir / f"{layout_prefix}memory_layout.txt").write_text(self.memory_summary())
 
         return result
 
@@ -810,6 +825,8 @@ class Model:
         alignment: int = 256,
         qtype: str = "bfp16",
         precision: Optional[Any] = None,
+        data_dir: Optional[Union[str, Path]] = None,
+        bm: str = "",
     ):
         self._gen = DataGenerator(
             seed=seed, l2_base=l2_base, alignment=alignment,
@@ -817,6 +834,12 @@ class Model:
         )
         self._outputs: List[ModelTensor] = []
         self._op_counter: Dict[str, int] = {}
+        self._data_dir = Path(data_dir) if data_dir else None
+        self._bm = bm
+        self._loaded: Optional[Dict[str, np.ndarray]] = None
+        if self._data_dir:
+            from aidevtools.formats.base import load_dir
+            self._loaded = load_dir(str(self._data_dir), bm=bm)
 
     def __enter__(self) -> "Model":
         return self
@@ -839,8 +862,12 @@ class Model:
         name: Optional[str] = None,
         qtype: Optional[str] = None,
     ) -> ModelTensor:
-        """定义输入"""
+        """定义输入 (data_dir 模式下从文件加载)"""
         name = name or self._next_name("input")
+        key = name.replace(".", "_")
+        if self._loaded and key in self._loaded:
+            array = self._loaded[key]
+            return ModelTensor(shape=array.shape, name=name, golden=array)
         t = self._gen.randn(shape, name=name, qtype=qtype, role="input")
         return ModelTensor(shape=t.shape, name=name, golden=t.array)
 
@@ -972,9 +999,14 @@ class Model:
             if param_qtype == "fp32":
                 param_qtype = self._gen.qtype
 
-            # 生成数据 (QA 配置已通过全局设置生效)
-            array, shape = self._gen._gen_from_strategy(strategy, context)
+            # 从 data_dir 加载或生成
             tensor_name = f"{prefix}.{param}"
+            load_key = tensor_name.replace(".", "_")
+            if self._loaded and load_key in self._loaded:
+                array = self._loaded[load_key]
+                shape = array.shape
+            else:
+                array, shape = self._gen._gen_from_strategy(strategy, context)
             self._gen._add_tensor(tensor_name, array, qtype=param_qtype, role=role)
 
             # 更新 context
@@ -1027,9 +1059,9 @@ class Model:
         """L2 内存摘要"""
         return self._gen.memory_summary()
 
-    def export(self, output_dir: Union[str, Path], prefix: str = "") -> Dict[str, Path]:
+    def export(self, output_dir: Union[str, Path], prefix: str = "", bm: str = "") -> Dict[str, Path]:
         """导出为 DUT 格式"""
-        return self._gen.export(output_dir, prefix)
+        return self._gen.export(output_dir, prefix, bm=bm)
 
     def export_header(self, output_path: Union[str, Path], prefix: str = "DATA") -> Path:
         """导出 C 头文件"""
