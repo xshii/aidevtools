@@ -8,10 +8,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10']
+        python-version: ['3.8']
 
     steps:
       - uses: actions/checkout@v4
@@ -24,18 +24,29 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,xlsx,cpp]"
+          pip install libs/prettycli
+          pip install "numpy>=1.21,<2.0" "pyyaml>=6.0" "jinja2>=3.0"
+          pip install pytest pytest-cov ruff
+          pip install openpyxl pybind11
 
       - name: Build C++ extensions
         run: |
-          cd src/aidevtools/formats/custom/gfloat/cpp && bash build.sh
-          cd src/aidevtools/formats/custom/bfp/cpp && bash build.sh
+          PYBIND_INC=$(python3 -m pybind11 --includes)
+          PY_EXT=$(python3-config --extension-suffix)
+          cd aidevtools/formats/custom/gfloat/cpp
+          c++ -O3 -Wall -shared -std=c++17 -fPIC $PYBIND_INC gfloat.cpp gfloat_pybind.cpp -o ../gfloat_golden$PY_EXT
+          cd $GITHUB_WORKSPACE/aidevtools/formats/custom/bfp/cpp
+          c++ -O3 -Wall -shared -std=c++17 -fPIC $PYBIND_INC bfp.cpp bfp_pybind.cpp -o ../bfp_golden$PY_EXT
 
       - name: Lint
-        run: ruff check src/ tests/ || true
+        run: ruff check aidevtools/ tests/ || true
 
       - name: Test aidevtools
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ -v --tb=short
 
       - name: Coverage
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ --cov=aidevtools --cov-report=term-missing

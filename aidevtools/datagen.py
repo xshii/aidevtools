@@ -10,7 +10,9 @@
 
 四种比数模式:
     Track 1: golden_pure   — 纯 fp32 计算的 golden（基准参考）
-    Track 2: golden_local  — 本地格式 (fp16/int16/int8) 量化→反量化后的模糊权重计算 golden
+    Track 2: golden_local  — 本地格式 (fp16/int16/int8) 原生数据计算 golden
+                             fp16/bf16: 直接 cast 到目标精度 (原生 fp16 数据)
+                             int8/int16: 直接生成目标格式的随机整数
     Track 3: golden_hw     — 硬件格式 (bfp/gfp) 量化→反量化后的模糊权重计算 golden
     Track 4: golden_qa     — 量化感知随机权重计算 golden（受控动态范围）
 
@@ -120,31 +122,43 @@ class FourTrackGolden:
         return result
 
 
-def _simulate_local_dtype(data: np.ndarray, local_dtype: str) -> np.ndarray:
-    """模拟本地格式的精度损失 (fp16/int16/int8 量化→反量化)。
+def _to_native_local_dtype(data_fp32: np.ndarray, local_dtype: str, rng=None) -> np.ndarray:
+    """生成目标本地格式的原生数据。
 
-    对于本地格式，通过 cast 到目标精度再转回 fp32 来模拟精度损失。
+    直接在目标格式生成，不做 fp32→target→fp32 往返:
+    - fp16/bf16: 直接 cast 到 fp16 (numpy 原生精度)
+    - int8/int16: 直接生成同 shape 的随机整数 (原生整型数据)
+    - fp32/其他: 原样返回
+
+    返回的数据保持目标原生 dtype (fp16/int8/int16 等)。
+    用于 golden 计算时应调用 .astype(np.float32)。
+
+    Args:
+        data_fp32: fp32 源数据 (用于确定 shape 及浮点 cast)
+        local_dtype: 目标本地格式 ("fp16"/"bf16"/"int8"/"int16"/"fp32")
+        rng: numpy Generator 实例，用于整型数据生成 (可选)
     """
-    dtype_map = {
+    float_map = {
         "fp16": np.float16, "float16": np.float16,
         "bf16": np.float16,  # numpy 不直接支持 bf16，用 fp16 近似
-        "int16": np.int16,
-        "int8": np.int8,
     }
-    target = dtype_map.get(local_dtype)
-    if target is None:
-        return data  # fp32 或未知类型，不做转换
+    int_map = {"int8": np.int8, "int16": np.int16}
 
-    fp32 = data.astype(np.float32)
-    if target in (np.int16, np.int8):
-        # 整数量化: scale → round → clip → dequant
+    if local_dtype in float_map:
+        # 浮点本地格式: 直接 cast 到目标精度
+        return data_fp32.astype(float_map[local_dtype])
+    elif local_dtype in int_map:
+        # 整型本地格式: 直接生成目标类型的随机整数
+        target = int_map[local_dtype]
         max_val = np.iinfo(target).max
-        scale = np.max(np.abs(fp32)) / max_val if np.max(np.abs(fp32)) > 0 else 1.0
-        quantized = np.clip(np.round(fp32 / scale), -max_val, max_val).astype(target)
-        return (quantized.astype(np.float32) * scale)
+        if rng is not None:
+            return rng.integers(-max_val, max_val + 1, size=data_fp32.shape, dtype=target)
+        else:
+            return np.random.default_rng().integers(
+                -max_val, max_val + 1, size=data_fp32.shape, dtype=target
+            )
     else:
-        # 浮点降精度: cast → cast back
-        return fp32.astype(target).astype(np.float32)
+        return data_fp32
 
 
 class DataGenerator:
@@ -248,13 +262,13 @@ class DataGenerator:
             is_weight = param in meta.weight_params
             role = "weight" if is_weight else "input"
 
-            # 确定该参数的量化类型
+            # 确定该参数的量化类型 (逐参数精度覆盖)
             if param in qtypes:
                 param_qtype = qtypes[param]
-            elif is_weight:
-                param_qtype = pc.weight_dtype if pc.weight_dtype != "fp32" else self.qtype
             else:
-                param_qtype = pc.input_dtype if pc.input_dtype != "fp32" else self.qtype
+                param_qtype = pc.get_dtype(param, is_weight)
+                if param_qtype == "fp32":
+                    param_qtype = self.qtype
 
             # 生成数据 (QA 配置已通过全局设置生效)
             array, shape = self._gen_from_strategy(strategy, context)
@@ -349,23 +363,49 @@ class DataGenerator:
             context[f"{param}_shape"] = shape
             context[param] = array
 
-        pure_args = [pure_data[inp] for inp in meta.inputs if inp in pure_data]
+        # 构建调用参数 — 处理非 auto_gen 的 inputs (如 normalized_shape)
+        pure_args = []
+        for inp in meta.inputs:
+            if inp in pure_data:
+                pure_args.append(pure_data[inp])
+            elif inp == "normalized_shape":
+                pure_args.append((input_shape[-1],))
+            elif inp in kwargs:
+                pure_args.append(kwargs[inp])
         pure_kwargs = {opt: pure_data[opt] for opt in meta.optional if opt in pure_data}
         golden_pure = op.cpu_golden(*pure_args, **pure_kwargs)
 
-        # ---------- Track 2: 本地格式模糊权重 golden ----------
-        local_dtype = pc.input_dtype  # 使用 input_dtype 确定本地格式
+        # ---------- Track 2: 本地格式原生数据 golden ----------
+        # 直接在目标格式生成数据，不经过 fp32→target→fp32 中转
         golden_local = None
         local_data = None
-        if local_dtype in ("fp16", "float16", "bf16", "int16", "int8"):
+        local_dtypes = ("fp16", "float16", "bf16", "int16", "int8")
+        has_local = any(
+            pc.get_dtype(p, p in meta.weight_params) in local_dtypes
+            for p in pure_data
+        )
+        if has_local:
             local_data = {}
             for param, arr in pure_data.items():
                 is_weight = param in meta.weight_params
-                dtype_to_use = pc.weight_dtype if is_weight else pc.input_dtype
-                local_data[param] = _simulate_local_dtype(arr, dtype_to_use)
+                dtype_to_use = pc.get_dtype(param, is_weight)
+                local_data[param] = _to_native_local_dtype(
+                    arr, dtype_to_use, rng=self._rand._rng,
+                )
 
-            local_args = [local_data[inp] for inp in meta.inputs if inp in local_data]
-            local_kwargs = {opt: local_data[opt] for opt in meta.optional if opt in local_data}
+            # Golden 计算: cast 到 fp32
+            local_args = []
+            for inp in meta.inputs:
+                if inp in local_data:
+                    local_args.append(local_data[inp].astype(np.float32))
+                elif inp == "normalized_shape":
+                    local_args.append((input_shape[-1],))
+                elif inp in kwargs:
+                    local_args.append(kwargs[inp])
+            local_kwargs = {
+                opt: local_data[opt].astype(np.float32)
+                for opt in meta.optional if opt in local_data
+            }
             golden_local = op.cpu_golden(*local_args, **local_kwargs)
 
         # ---------- Track 3: 硬件格式模糊权重 golden ----------
@@ -375,19 +415,27 @@ class DataGenerator:
         hw_qtypes = ("bfp16", "bfp8", "bfp4", "gfloat16", "gfloat8", "gfloat4",
                      "gfp16", "gfp8", "gfp4")
         # 检查是否有任何精度配置使用了硬件格式
-        has_hw = any(getattr(pc, f) in hw_qtypes
-                     for f in ("input_dtype", "weight_dtype", "output_dtype"))
+        all_dtypes = {getattr(pc, f) for f in ("input_dtype", "weight_dtype", "output_dtype")}
+        all_dtypes.update(pc.param_dtypes.values())
+        has_hw = bool(all_dtypes & set(hw_qtypes))
         if has_hw:
             hw_data = {}
             for param, arr in pure_data.items():
                 is_weight = param in meta.weight_params
-                dtype_to_use = pc.weight_dtype if is_weight else pc.input_dtype
+                dtype_to_use = pc.get_dtype(param, is_weight)
                 if dtype_to_use in hw_qtypes:
                     hw_data[param] = simulate_quantize(arr, dtype_to_use)
                 else:
                     hw_data[param] = arr.copy()
 
-            hw_args = [hw_data[inp] for inp in meta.inputs if inp in hw_data]
+            hw_args = []
+            for inp in meta.inputs:
+                if inp in hw_data:
+                    hw_args.append(hw_data[inp])
+                elif inp == "normalized_shape":
+                    hw_args.append((input_shape[-1],))
+                elif inp in kwargs:
+                    hw_args.append(kwargs[inp])
             hw_kwargs = {opt: hw_data[opt] for opt in meta.optional if opt in hw_data}
             golden_hw = op.cpu_golden(*hw_args, **hw_kwargs)
 
@@ -412,7 +460,14 @@ class DataGenerator:
                 qa_context[f"{param}_shape"] = shape
                 qa_context[param] = array
 
-            qa_args = [qa_data[inp] for inp in meta.inputs if inp in qa_data]
+            qa_args = []
+            for inp in meta.inputs:
+                if inp in qa_data:
+                    qa_args.append(qa_data[inp])
+                elif inp == "normalized_shape":
+                    qa_args.append((input_shape[-1],))
+                elif inp in kwargs:
+                    qa_args.append(kwargs[inp])
             qa_kwargs = {opt: qa_data[opt] for opt in meta.optional if opt in qa_data}
             golden_qa = op.cpu_golden(*qa_args, **qa_kwargs)
             # 恢复全局配置
@@ -892,8 +947,18 @@ class Model:
         # 根据 auto_gen 生成权重
         context = {"input_shape": input_shape, **kwargs}
         args = [x.golden]  # 第一个参数是输入
+
+        # 处理非 auto_gen 的 inputs (如 normalized_shape)
+        for inp in meta.inputs[1:]:
+            if inp not in meta.auto_gen:
+                if inp == "normalized_shape":
+                    args.append((input_shape[-1],))
+                elif inp in kwargs:
+                    args.append(kwargs[inp])
+
         kwargs_call = {}
 
+        pc = self._gen.precision
         for param, strategy in meta.auto_gen.items():
             if param == meta.inputs[0]:
                 # 第一个输入已经有了
@@ -902,10 +967,15 @@ class Model:
             is_weight = param in meta.weight_params
             role = "weight" if is_weight else "input"
 
+            # 确定该参数的量化类型 (逐参数精度覆盖)
+            param_qtype = pc.get_dtype(param, is_weight)
+            if param_qtype == "fp32":
+                param_qtype = self._gen.qtype
+
             # 生成数据 (QA 配置已通过全局设置生效)
             array, shape = self._gen._gen_from_strategy(strategy, context)
             tensor_name = f"{prefix}.{param}"
-            self._gen._add_tensor(tensor_name, array, qtype=self._gen.qtype, role=role)
+            self._gen._add_tensor(tensor_name, array, qtype=param_qtype, role=role)
 
             # 更新 context
             context[f"{param}_shape"] = shape

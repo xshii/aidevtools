@@ -84,6 +84,7 @@ class TorchBackendConfig:
     input_dtype: str = "fp32"     # 输入精度
     output_dtype: str = "fp32"    # 输出精度
     weight_dtype: str = "fp32"    # 权重精度
+    param_dtypes: Dict[str, str] = field(default_factory=dict)  # 逐参数精度覆盖
 
     # 量化感知随机数
     qa_aware: bool = False         # 是否启用量化感知随机数
@@ -107,6 +108,7 @@ class TorchBackendConfig:
             input_dtype=self.input_dtype,
             output_dtype=self.output_dtype,
             weight_dtype=self.weight_dtype,
+            param_dtypes=dict(self.param_dtypes),
             qa_aware=self.qa_aware,
             qa_center=self.qa_center,
             qa_amplitude=self.qa_amplitude,
@@ -259,7 +261,7 @@ class TorchGoldenBackend:
     4. 自定义数据类型
     """
 
-    # 支持的算子映射: torch_fn -> (golden_fn, op_type, flops_fn)
+    # 支持的算子映射: torch_fn -> (golden_fn, op_type, flops_fn, param_names)
     OP_REGISTRY = {
         'linear': {
             'torch_fn': F_torch.linear,
@@ -267,6 +269,7 @@ class TorchGoldenBackend:
             'op_type': 'linear',
             'compute_unit': 'cube',
             'flops': lambda s: 2 * s['M'] * s['K'] * s['N'],
+            'param_names': ['input', 'weight', 'bias'],
         },
         'relu': {
             'torch_fn': F_torch.relu,
@@ -274,6 +277,7 @@ class TorchGoldenBackend:
             'op_type': 'relu',
             'compute_unit': 'vector',
             'flops': lambda s: s['input_size'],
+            'param_names': ['input'],
         },
         'gelu': {
             'torch_fn': F_torch.gelu,
@@ -281,6 +285,7 @@ class TorchGoldenBackend:
             'op_type': 'gelu',
             'compute_unit': 'vector',
             'flops': lambda s: 8 * s['input_size'],
+            'param_names': ['input'],
         },
         'softmax': {
             'torch_fn': F_torch.softmax,
@@ -288,6 +293,7 @@ class TorchGoldenBackend:
             'op_type': 'softmax',
             'compute_unit': 'vector',
             'flops': lambda s: 5 * s['input_size'],
+            'param_names': ['input'],
         },
         'layer_norm': {
             'torch_fn': F_torch.layer_norm,
@@ -295,6 +301,7 @@ class TorchGoldenBackend:
             'op_type': 'layernorm',
             'compute_unit': 'vector',
             'flops': lambda s: 8 * s['input_size'],
+            'param_names': ['input', 'normalized_shape', 'weight', 'bias'],
         },
         'silu': {
             'torch_fn': F_torch.silu,
@@ -302,6 +309,7 @@ class TorchGoldenBackend:
             'op_type': 'silu',
             'compute_unit': 'vector',
             'flops': lambda s: 4 * s['input_size'],
+            'param_names': ['input'],
         },
         'sigmoid': {
             'torch_fn': F_torch.sigmoid,
@@ -309,6 +317,7 @@ class TorchGoldenBackend:
             'op_type': 'sigmoid',
             'compute_unit': 'vector',
             'flops': lambda s: 4 * s['input_size'],
+            'param_names': ['input'],
         },
         'tanh': {
             'torch_fn': F_torch.tanh,
@@ -316,6 +325,7 @@ class TorchGoldenBackend:
             'op_type': 'tanh',
             'compute_unit': 'vector',
             'flops': lambda s: 4 * s['input_size'],
+            'param_names': ['input'],
         },
     }
 
@@ -425,13 +435,27 @@ class TorchGoldenBackend:
             # 转换为 numpy
             np_args, np_kwargs = self._to_numpy_args(args, kwargs)
 
-            # 可选: 量化输入
-            if self.config.quantize_input and self.config.quantize_type:
-                np_args = tuple(
-                    simulate_quantize(a, self.config.quantize_type)
-                    if isinstance(a, np.ndarray) else a
-                    for a in np_args
-                )
+            # 可选: 量化输入 (支持逐参数精度)
+            if self.config.quantize_input:
+                param_names = op_info.get('param_names', [])
+                if self.config.param_dtypes and param_names:
+                    # 逐参数量化: 每个参数用自己的精度
+                    quantized = []
+                    for i, a in enumerate(np_args):
+                        pname = param_names[i] if i < len(param_names) else None
+                        qtype = self.config.param_dtypes.get(pname) if pname else None
+                        qtype = qtype or self.config.quantize_type
+                        if isinstance(a, np.ndarray) and qtype:
+                            quantized.append(simulate_quantize(a, qtype))
+                        else:
+                            quantized.append(a)
+                    np_args = tuple(quantized)
+                elif self.config.quantize_type:
+                    np_args = tuple(
+                        simulate_quantize(a, self.config.quantize_type)
+                        if isinstance(a, np.ndarray) else a
+                        for a in np_args
+                    )
 
             # 计算 golden (设置标志防止递归)
             if self.config.golden_mode != "none":

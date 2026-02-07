@@ -264,7 +264,7 @@ class TestFourTrackGolden:
         assert tracks.golden_pure.shape == (4, 8)
 
     def test_track2_local_format(self):
-        """Track 2: 本地格式模糊权重 golden"""
+        """Track 2: 本地格式原生数据 golden"""
         from aidevtools.datagen import DataGenerator
         from aidevtools.frontend.types import PrecisionConfig
 
@@ -274,14 +274,18 @@ class TestFourTrackGolden:
 
         assert tracks.golden_pure is not None
         assert tracks.golden_local is not None
-        # data_local 和 data_pure 的输入应有差异 (fp16 降精度)
         assert tracks.data_local is not None
         assert tracks.data_pure is not None
-        pure_x = tracks.data_pure["x"]
+
+        # data_local 存储原生 fp16 dtype (不是 fp32)
         local_x = tracks.data_local["x"]
-        assert not np.array_equal(pure_x, local_x), "fp16 should cause precision difference in input"
-        # 输入差异应很小
-        diff = np.max(np.abs(pure_x - local_x))
+        assert local_x.dtype == np.float16, f"Expected fp16 native dtype, got {local_x.dtype}"
+
+        # cast 回 fp32 后与 pure 有差异 (fp16 精度损失)
+        pure_x = tracks.data_pure["x"]
+        local_x_fp32 = local_x.astype(np.float32)
+        assert not np.array_equal(pure_x, local_x_fp32), "fp16 should cause precision difference"
+        diff = np.max(np.abs(pure_x - local_x_fp32))
         assert diff < 0.01, f"fp16 vs fp32 input diff too large: {diff}"
 
     def test_track3_hw_format(self):
@@ -411,44 +415,61 @@ class TestModelDSLQA:
 
 
 # ============================================================
-# 7. simulate_local_dtype 测试
+# 7. 本地格式原生数据生成测试
 # ============================================================
 
 
-class TestSimulateLocalDtype:
-    """本地格式模拟"""
+class TestNativeLocalDtype:
+    """本地格式原生数据生成 (直接在目标格式生成)"""
 
-    def test_fp16_precision_loss(self):
-        from aidevtools.datagen import _simulate_local_dtype
+    def test_fp16_native_dtype(self):
+        """fp16: 返回原生 fp16 dtype"""
+        from aidevtools.datagen import _to_native_local_dtype
         data = np.array([1.0001, 2.0002, 0.1234567], dtype=np.float32)
-        result = _simulate_local_dtype(data, "fp16")
-        # fp16 有精度损失
-        assert result.dtype == np.float32
-        assert not np.array_equal(data, result)
+        result = _to_native_local_dtype(data, "fp16")
+        # 返回原生 fp16 dtype
+        assert result.dtype == np.float16
+        # cast 回 fp32 后有精度差异
+        assert not np.array_equal(data, result.astype(np.float32))
 
-    def test_int8_quantize_dequantize(self):
-        from aidevtools.datagen import _simulate_local_dtype
+    def test_int8_native_dtype(self):
+        """int8: 直接生成原生 int8 随机整数"""
+        from aidevtools.datagen import _to_native_local_dtype
+        rng = np.random.default_rng(42)
         data = np.array([1.0, -0.5, 0.3, -0.8], dtype=np.float32)
-        result = _simulate_local_dtype(data, "int8")
-        # int8 有量化误差
-        assert result.dtype == np.float32
-        diff = np.max(np.abs(data - result))
-        assert diff < 0.05  # 误差有限
+        result = _to_native_local_dtype(data, "int8", rng=rng)
+        # 返回原生 int8 dtype
+        assert result.dtype == np.int8
+        assert result.shape == data.shape
+        # 值在 int8 范围内
+        assert np.all(result >= -127) and np.all(result <= 127)
 
-    def test_int16_quantize_dequantize(self):
-        from aidevtools.datagen import _simulate_local_dtype
+    def test_int16_native_dtype(self):
+        """int16: 直接生成原生 int16 随机整数"""
+        from aidevtools.datagen import _to_native_local_dtype
+        rng = np.random.default_rng(42)
         data = np.array([1.0, -0.5, 0.3, -0.8], dtype=np.float32)
-        result = _simulate_local_dtype(data, "int16")
-        assert result.dtype == np.float32
-        # int16 精度更高，误差更小
-        diff = np.max(np.abs(data - result))
-        assert diff < 0.001
+        result = _to_native_local_dtype(data, "int16", rng=rng)
+        assert result.dtype == np.int16
+        assert result.shape == data.shape
 
     def test_fp32_passthrough(self):
-        from aidevtools.datagen import _simulate_local_dtype
+        """fp32: 原样返回"""
+        from aidevtools.datagen import _to_native_local_dtype
         data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        result = _simulate_local_dtype(data, "fp32")
+        result = _to_native_local_dtype(data, "fp32")
         np.testing.assert_array_equal(data, result)
+
+    def test_int8_golden_via_cast(self):
+        """int8 数据通过 .astype(fp32) 用于 golden 计算"""
+        from aidevtools.datagen import _to_native_local_dtype
+        rng = np.random.default_rng(42)
+        data = np.zeros((4, 8), dtype=np.float32)
+        int8_data = _to_native_local_dtype(data, "int8", rng=rng)
+        # 可以安全 cast 到 fp32 用于 golden
+        fp32_data = int8_data.astype(np.float32)
+        assert fp32_data.dtype == np.float32
+        np.testing.assert_array_equal(fp32_data, int8_data.astype(np.float64))
 
 
 # ============================================================
@@ -602,3 +623,152 @@ class TestFourTrackWithCompare:
         assert result.status in (
             CompareStatus.PASS, CompareStatus.GOLDEN_SUSPECT, CompareStatus.DUT_ISSUE
         )
+
+
+# ============================================================
+# 11. 逐参数精度 (param_dtypes) 测试
+# ============================================================
+
+
+class TestParamDtypes:
+    """逐参数精度覆盖 (param_dtypes + get_dtype)"""
+
+    def test_get_dtype_param_override(self):
+        """param_dtypes 优先级高于角色级默认"""
+        from aidevtools.frontend.types import PrecisionConfig
+        pc = PrecisionConfig(
+            input_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"x": "int8", "weight": "bfp16"},
+        )
+        assert pc.get_dtype("x") == "int8"
+        assert pc.get_dtype("weight", is_weight=True) == "bfp16"
+        # 未覆盖的参数使用角色级默认
+        assert pc.get_dtype("bias", is_weight=True) == "bfp8"
+        assert pc.get_dtype("gamma") == "fp16"
+
+    def test_get_dtype_fallback(self):
+        """无 param_dtypes 时 fallback 到角色级"""
+        from aidevtools.frontend.types import PrecisionConfig
+        pc = PrecisionConfig(input_dtype="fp16", weight_dtype="int8")
+        assert pc.get_dtype("x") == "fp16"
+        assert pc.get_dtype("weight", is_weight=True) == "int8"
+
+    def test_is_mixed_includes_param_dtypes(self):
+        """is_mixed 考虑 param_dtypes"""
+        from aidevtools.frontend.types import PrecisionConfig
+        # 角色级全 fp32，但 param_dtypes 有不同的
+        pc = PrecisionConfig(param_dtypes={"x": "bfp8"})
+        assert pc.is_mixed
+
+    def test_from_dict_with_param_dtypes(self):
+        """from_dict 能正确传递 param_dtypes"""
+        from aidevtools.frontend.types import PrecisionConfig
+        d = {
+            "input_dtype": "fp16",
+            "param_dtypes": {"x": "bfp8", "weight": "int8"},
+        }
+        pc = PrecisionConfig.from_dict(d)
+        assert pc.get_dtype("x") == "bfp8"
+        assert pc.get_dtype("weight", is_weight=True) == "int8"
+
+    def test_four_track_per_param_hw(self):
+        """generate_four_track 使用 param_dtypes 触发 hw track"""
+        from aidevtools.datagen import DataGenerator
+        from aidevtools.frontend.types import PrecisionConfig
+
+        pc = PrecisionConfig(
+            input_dtype="fp32",
+            weight_dtype="fp32",
+            param_dtypes={"x": "bfp8"},  # 仅 x 用 bfp8
+        )
+        gen = DataGenerator(seed=42, precision=pc)
+        tracks = gen.generate_four_track("relu", input_shape=(4, 16), precision=pc)
+
+        assert tracks.golden_pure is not None
+        # param_dtypes 中有 bfp8，应触发 hw track
+        assert tracks.golden_hw is not None
+
+    def test_four_track_per_param_local(self):
+        """generate_four_track 使用 param_dtypes 触发 local track"""
+        from aidevtools.datagen import DataGenerator
+        from aidevtools.frontend.types import PrecisionConfig
+
+        pc = PrecisionConfig(
+            input_dtype="fp32",
+            weight_dtype="fp32",
+            param_dtypes={"x": "fp16"},  # 仅 x 用 fp16
+        )
+        gen = DataGenerator(seed=42, precision=pc)
+        tracks = gen.generate_four_track("relu", input_shape=(4, 16), precision=pc)
+
+        assert tracks.golden_pure is not None
+        assert tracks.golden_local is not None
+
+    def test_xlsx_opconfig_param_dtypes(self):
+        """XLSX OpConfig 支持 param_dtypes"""
+        from aidevtools.xlsx.import_ import OpConfig
+        cfg = OpConfig(
+            id=0, op_name="linear", shape=(4, 8),
+            dtype="float32", depends="", qtype="bfp16",
+            skip=False, note="",
+            input_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"bias": "fp32", "x": "int8"},
+        )
+        pc = cfg.to_precision_config()
+        assert pc.get_dtype("x") == "int8"
+        assert pc.get_dtype("bias", is_weight=True) == "fp32"
+        assert pc.get_dtype("weight", is_weight=True) == "bfp8"
+
+    def test_torch_backend_param_dtypes(self):
+        """TorchBackendConfig 支持 param_dtypes"""
+        from aidevtools.torch_backend import TorchBackendConfig
+        cfg = TorchBackendConfig(
+            input_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"input": "int8", "weight": "bfp16"},
+        )
+        pc = cfg.to_precision_config()
+        assert pc.get_dtype("input") == "int8"
+        assert pc.get_dtype("weight", is_weight=True) == "bfp16"
+
+    def test_model_dsl_per_param_qtype(self):
+        """Model DSL _call_op 使用 per-param 精度"""
+        from aidevtools.datagen import Model
+        from aidevtools.frontend.types import PrecisionConfig
+
+        pc = PrecisionConfig(
+            input_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"weight": "int8"},
+        )
+        with Model(seed=42, precision=pc, qtype="bfp16") as m:
+            x = m.input((4, 8))
+            y = m.linear(x, out_features=16)
+
+        # 验证 weight tensor 使用了 param_dtypes 中的 int8
+        weight_tensors = {
+            k: v for k, v in m.tensors.items() if "weight" in k
+        }
+        assert len(weight_tensors) > 0
+        for name, t in weight_tensors.items():
+            assert t.qtype == "int8", f"{name} should use int8 from param_dtypes, got {t.qtype}"
+
+    def test_datagen_generate_per_param(self):
+        """DataGenerator.generate 使用 per-param 精度"""
+        from aidevtools.datagen import DataGenerator
+        from aidevtools.frontend.types import PrecisionConfig
+
+        pc = PrecisionConfig(
+            input_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"weight": "int8"},
+        )
+        gen = DataGenerator(seed=42, precision=pc, qtype="bfp16")
+        data = gen.generate("linear", input_shape=(4, 8), out_features=16)
+
+        # weight 应使用 param_dtypes 中指定的 int8
+        assert data["weight"].qtype == "int8"
+        # input 不在 param_dtypes 中，fallback 到 input_dtype="fp16"
+        assert data["input"].qtype == "fp16"
