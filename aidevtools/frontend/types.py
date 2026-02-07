@@ -7,7 +7,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -75,33 +75,42 @@ class DistType(Enum):
 class PrecisionConfig:
     """算子精度配置
 
-    支持独立配置每个算子的计算精度、输入精度、输出精度。
-    同时支持本地格式 (fp32/fp16/int16/int8) 和硬件定制格式 (bfp/gfp)。
+    两层精度控制:
+    1. 角色级 (默认): input_dtype / weight_dtype / compute_dtype / output_dtype
+    2. 参数级 (覆盖): param_dtypes = {"x": "bfp8", "weight": "int8", ...}
+
+    查询优先级: param_dtypes[参数名] > 角色级默认值
 
     用法:
-        # 统一精度
-        pc = PrecisionConfig(compute_dtype="fp16")
+        # 角色级: 所有 input 用 fp16, 所有 weight 用 bfp8
+        pc = PrecisionConfig(input_dtype="fp16", weight_dtype="bfp8")
 
-        # 混合精度: 输入 fp16, 计算 fp32, 输出 bfp8
+        # 参数级: 每个参数独立精度
         pc = PrecisionConfig(
-            input_dtype="fp16",
-            compute_dtype="fp32",
-            output_dtype="bfp8",
+            compute_dtype="fp16",
+            param_dtypes={"x": "bfp8", "weight": "int8", "bias": "fp32"},
         )
 
-        # 权重使用不同精度
+        # 混用: 角色级做默认, 参数级覆盖个别
         pc = PrecisionConfig(
             input_dtype="fp16",
-            weight_dtype="int8",
-            compute_dtype="fp32",
-            output_dtype="fp16",
+            weight_dtype="bfp8",
+            param_dtypes={"bias": "fp32"},  # bias 不跟 weight_dtype
         )
+
+        # 查询
+        pc.get_dtype("x")               # → "bfp8" (param_dtypes 命中)
+        pc.get_dtype("gamma")            # → "fp16" (fallback input_dtype)
+        pc.get_dtype("weight", is_weight=True)  # → "int8" (param_dtypes 命中)
     """
 
     compute_dtype: str = "fp32"    # 计算精度
     input_dtype: str = "fp32"      # 输入精度
     output_dtype: str = "fp32"     # 输出精度
     weight_dtype: str = "fp32"     # 权重精度 (默认跟 input_dtype)
+
+    # 逐参数精度覆盖 (优先级最高)
+    param_dtypes: Dict[str, str] = field(default_factory=dict)
 
     # 量化感知随机数开关
     qa_aware: bool = False         # 是否启用量化感知随机数
@@ -114,6 +123,22 @@ class PrecisionConfig:
         if self.weight_dtype == "fp32" and self.input_dtype != "fp32":
             self.weight_dtype = self.input_dtype
 
+    def get_dtype(self, param_name: str, is_weight: bool = False) -> str:
+        """查询参数精度
+
+        优先级: param_dtypes[param_name] > weight_dtype/input_dtype
+
+        Args:
+            param_name: 参数名 (如 "x", "weight", "bias", "gamma")
+            is_weight: 是否为权重参数 (fallback 到 weight_dtype)
+
+        Returns:
+            精度字符串 (如 "bfp8", "fp16", "int8")
+        """
+        if param_name in self.param_dtypes:
+            return self.param_dtypes[param_name]
+        return self.weight_dtype if is_weight else self.input_dtype
+
     @classmethod
     def from_dict(cls, d: dict) -> "PrecisionConfig":
         """从字典创建"""
@@ -124,8 +149,10 @@ class PrecisionConfig:
     @property
     def is_mixed(self) -> bool:
         """是否为混合精度"""
-        return len({self.compute_dtype, self.input_dtype,
-                    self.output_dtype, self.weight_dtype}) > 1
+        dtypes = {self.compute_dtype, self.input_dtype,
+                  self.output_dtype, self.weight_dtype}
+        dtypes.update(self.param_dtypes.values())
+        return len(dtypes) > 1
 
 
 @dataclass

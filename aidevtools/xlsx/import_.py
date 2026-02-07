@@ -111,7 +111,7 @@ class OpConfig:
     """算子配置 (使用组合模式)
 
     支持独立配置计算精度、输入精度、输出精度、权重精度，
-    以及量化感知随机数开关。
+    逐参数精度覆盖，以及量化感知随机数开关。
     """
 
     id: int
@@ -128,6 +128,8 @@ class OpConfig:
     input_dtype: str = "fp32"      # 输入精度
     output_dtype: str = "fp32"     # 输出精度
     weight_dtype: str = "fp32"     # 权重精度
+    # 逐参数精度覆盖 (如 "x:bfp8,weight:int8,bias:fp32")
+    param_dtypes: Dict[str, str] = field(default_factory=dict)
     # 量化感知随机数
     qa_aware: bool = False         # 是否启用量化感知随机数
     qa_center: float = 1.0         # 量化感知中心值
@@ -141,6 +143,7 @@ class OpConfig:
             input_dtype=self.input_dtype,
             output_dtype=self.output_dtype,
             weight_dtype=self.weight_dtype,
+            param_dtypes=dict(self.param_dtypes),
             qa_aware=self.qa_aware,
             qa_center=self.qa_center,
             qa_amplitude=self.qa_amplitude,
@@ -246,6 +249,15 @@ def _row_to_opconfig(row_dict: Dict) -> OpConfig:
         except (ValueError, TypeError):
             return default
 
+    # 解析逐参数精度 (格式: "x:bfp8,weight:int8,bias:fp32")
+    param_dtypes_str = _get_str(row_dict, "param_dtypes")
+    param_dtypes = {}
+    if param_dtypes_str:
+        for part in parse_list(param_dtypes_str):
+            if ":" in part:
+                pname, pdtype = part.split(":", 1)
+                param_dtypes[pname.strip()] = pdtype.strip()
+
     return OpConfig(
         id=int(row_dict.get("id", 0) or 0),
         op_name=_get_str(row_dict, "op_name"),
@@ -267,6 +279,7 @@ def _row_to_opconfig(row_dict: Dict) -> OpConfig:
         input_dtype=_get_str(row_dict, "input_dtype", "fp32"),
         output_dtype=_get_str(row_dict, "output_dtype", "fp32"),
         weight_dtype=_get_str(row_dict, "weight_dtype", "fp32"),
+        param_dtypes=param_dtypes,
         # 量化感知
         qa_aware=qa_aware,
         qa_center=_get_float("qa_center", 1.0),

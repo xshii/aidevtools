@@ -1,91 +1,152 @@
 # Demos 目录说明
 
-本目录包含 aidevtools 的使用示例。
+本目录包含 aidevtools 的使用示例，按功能分为五大类。
 
 ## 目录结构
 
 ```
 demos/
-├── 01_basic_ops/           # 基础算子示例
-├── 02_mini_transformer/    # MiniTransformer 完整比对流程
-├── 03_transformer/         # Transformer 模型示例
-├── 04_xlsx_basic/          # xlsx 双向工作流示例
-├── 05_xlsx_transformer/    # xlsx Transformer 示例
-├── 06_add_ops/             # 添加新算子指南
-├── 07_transpose/           # Transpose 多维度测试
-└── 08_paper_analysis/      # Paper Analysis 时延分析
+│
+├── [入门] 基础算子与模型
+│   ├── 01_basic_ops/               # 基础算子 (PyTorch 劫持模式)
+│   ├── 02_mini_transformer/        # MiniTransformer 完整比对流程 (推荐入门)
+│   └── 03_transformer/             # 完整 Transformer 模型
+│
+├── [数据生成] 五种输入方式 — 同一 Encoder, 五种写法, bfp8 精度
+│   └── datagen/
+│       ├── 00_datagen_manual/      # 方式 1: DataGenerator 手动 API
+│       ├── 01_datagen_autogen/     # 方式 2: 算子自动生成 API
+│       ├── 02_model_dsl/           # 方式 3: Model DSL (纯 Python, 无需编译器)
+│       ├── 03_torch_golden/        # 方式 4: PyTorch 劫持 (Golden Mode)
+│       └── 04_xlsx_config/         # 方式 5: Excel/XLSX 配置
+│
+├── [比数] 量化比对与报告
+│   └── compare/
+│       ├── 06_encoder_bfp8/        # Encoder 全局 bfp8 四种比数 (三种前端模式)
+│       └── 07_qa_encoder_bfp8/     # 量化感知随机 vs 正态 bfp8 比数
+│
+├── [优化器] 时延分析与融合评估
+│   └── optimizer/
+│       ├── 01_basic/               # 基础用法: PyTorch 劫持 → Benchmark → 评估
+│       ├── 02_calibration/         # ML 校准流程
+│       ├── 03_fusion_rules/        # 融合规则配置
+│       ├── 04_echarts/             # ECharts 可视化
+│       ├── 05_comparison/          # 理论 vs 工程化对比
+│       └── 06_bridge/              # PyTorch → Benchmark 桥接
+│
+├── [工具] 开发与分析
+│   ├── 04_xlsx_basic/              # xlsx 双向工作流
+│   ├── 05_xlsx_transformer/        # xlsx Transformer
+│   ├── 06_add_ops/                 # 添加新算子指南
+│   ├── 07_transpose/              # Transpose 多维度测试
+│   └── 08_paper_analysis/         # Paper Analysis 时延分析
+│
+└── README.md
 ```
 
-## Demo 说明
+---
 
-### 01_basic_ops - 基础算子
+## 五种输入方式 (`datagen/`)
 
-演示 `aidevtools.ops.nn` 中的基础算子用法。
+同一 Transformer Encoder (Q/K/V → Softmax → O → LN → FFN_up → GELU → FFN_down → LN)，
+五种前端写法，全部使用 bfp8 精度。
+
+| # | 目录 | 输入方式 | 面向人群 |
+|---|------|---------|---------|
+| 0 | `00_datagen_manual` | DataGenerator 手动 API | 开发者/精细控制 |
+| 1 | `01_datagen_autogen` | 算子自动生成 API | 开发者/快速验证 |
+| 2 | `02_model_dsl` | Model DSL (类 PyTorch) | 算法团队 |
+| 3 | `03_torch_golden` | PyTorch 劫持 (Golden Mode) | 算法团队/现有代码 |
+| 4 | `04_xlsx_config` | Excel/XLSX 配置 | 硬件测试/非编程 |
+
+```bash
+python demos/datagen/00_datagen_manual/run.py
+python demos/datagen/01_datagen_autogen/run.py
+python demos/datagen/02_model_dsl/run.py
+python demos/datagen/03_torch_golden/run.py
+python demos/datagen/04_xlsx_config/run.py
+```
+
+---
+
+## 四种比数 (`compare/`)
+
+| Track | 名称 | 说明 | 典型场景 |
+|-------|------|------|---------|
+| 1 | golden_pure | 纯 fp32 计算的 golden（基准） | 所有比对的参考基线 |
+| 2 | golden_local | 本地格式 (fp16/int8) 原生数据 golden | 浮点降精度影响评估 |
+| 3 | golden_hw | 硬件格式 (bfp/gfp) 量化→反量化 golden | 硬件量化误差评估 |
+| 4 | golden_qa | 量化感知受控随机 golden | 动态范围可控的比对 |
+
+### compare/06_encoder_bfp8 — Encoder 全局 bfp8 四种比数
+
+三种前端模式 (DSL / Torch / XLSX) 对同一 Encoder 生成 golden，全局 bfp8:
+- 三种模式输出对比 + 跨模式一致性验证
+- 10 个算子逐层四种比数: pure vs local / pure vs hw / pure vs qa
+- DUT 模拟 (bfp8 + noise) vs golden
+
+```bash
+python demos/compare/06_encoder_bfp8/run.py
+```
+
+### compare/07_qa_encoder_bfp8 — 量化感知随机 bfp8 比数
+
+对比实验: 正态随机 vs 量化感知随机 (QA-aware)，评估 QA 模式对 bfp8 比数的影响:
+- A 组: 标准正态分布 N(0,1)
+- B 组: QA 受控范围 (center=1.0, amplitude=0.5)
+- 数据特征分析 + Golden 漂移分析 + 动态范围对比
+
+```bash
+python demos/compare/07_qa_encoder_bfp8/run.py
+```
+
+---
+
+## 优化器 (`optimizer/`)
+
+时延分析、融合评估、ML 校准。
+
+| # | 目录 | 功能 |
+|---|------|------|
+| 1 | `01_basic` | PyTorch 劫持 → Benchmark 提取 → 时延评估 |
+| 2 | `02_calibration` | ML 校准: 生成测试用例 → 导入实测 → 校准超参数 |
+| 3 | `03_fusion_rules` | 融合规则: 全局配置、多算子模式、超参数 |
+| 4 | `04_echarts` | ECharts 可视化: 柱状图、饼图、Roofline、热力图 |
+| 5 | `05_comparison` | 理论 vs 工程化方法精度对比 |
+| 6 | `06_bridge` | PyTorch → Benchmark 自动桥接 |
+
+```bash
+python demos/optimizer/01_basic/run.py
+python demos/optimizer/02_calibration/run.py
+python demos/optimizer/03_fusion_rules/run.py
+python demos/optimizer/04_echarts/run.py
+python demos/optimizer/05_comparison/run.py
+python demos/optimizer/06_bridge/run.py
+```
+
+---
+
+## 入门 Demo
+
+### 01_basic_ops — 基础算子 (PyTorch 劫持)
 
 ```bash
 python demos/01_basic_ops/run.py
 ```
 
-### 02_mini_transformer - 完整比对流程 (推荐入门)
-
-演示完整的 golden 生成与比对流程：
-- 使用 ops API 定义算子序列
-- 执行 cpp golden 和 reference
-- 三列比对 (exact / fuzzy_pure / fuzzy_qnt)
+### 02_mini_transformer — 完整比对流程 (推荐入门)
 
 ```bash
 python demos/02_mini_transformer/run.py
 ```
 
-### 03_transformer - Transformer 模型
-
-完整 Transformer 模型示例，展示使用 ops API 构建模型。
+### 03_transformer — 完整 Transformer
 
 ```bash
 python demos/03_transformer/run.py
 ```
 
-### 04_xlsx_basic - xlsx 双向工作流
-
-xlsx 配置文件的双向工作流示例：
-- Python → Excel: 代码导出为配置
-- Excel → Python: 配置生成代码
-
-```bash
-python demos/04_xlsx_basic/run.py
-```
-
-### 05_xlsx_transformer - xlsx Transformer
-
-从 Excel 配置生成 Transformer 模型。
-
-```bash
-python demos/05_xlsx_transformer/run.py
-```
-
-### 06_add_ops - 添加新算子指南
-
-以 RMSNorm 为例，说明添加新算子的完整流程。
-
-### 07_transpose - Transpose 测试
-
-测试 Transpose 算子的多维度支持 (2D/3D/4D) 和多种量化类型。
-
-```bash
-python demos/07_transpose/run.py
-```
-
-### 08_paper_analysis - Paper Analysis 时延分析
-
-演示使用 PyTorch 风格 F API 定义模型，自动生成 OpProfile 进行 Paper Analysis：
-- 使用 F.matmul, F.layer_norm, F.softmax, F.gelu 等算子
-- 自动收集算子 profile (FLOPs, bytes, arithmetic intensity)
-- 基于 Roofline 模型分析时延瓶颈
-- 导出 xlsx/csv/json 报告
-
-```bash
-python demos/08_paper_analysis/main.py
-```
+---
 
 ## 支持的算子
 
