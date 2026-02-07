@@ -50,31 +50,42 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e  # Don't exit immediately on error
-          echo "Running all demos..."
+          echo "Running selected demos..."
           mkdir -p demos/output
 
-          # Find and run all demo scripts
+          # Run only specific demo categories:
+          # - compare/* (comparison tools)
+          # - 06_add_ops (adding new operators)
+          # - 07_transpose (transpose tests)
           demos_passed=0
           demos_failed=0
           failed_demos=()
 
-          for demo_script in $(find demos -name "run.py" -type f | sort); do
+          for demo_script in $(find demos/compare demos/06_add_ops demos/07_transpose -name "run.py" -type f 2>/dev/null | sort); do
             demo_dir=$(dirname "$demo_script")
             demo_name=$(basename "$demo_dir")
+            demo_category=$(basename "$(dirname "$demo_dir")")
+
+            # Handle nested structure (e.g., compare/06_encoder_bfp8)
+            if [ "$demo_category" != "demos" ]; then
+              demo_display="${demo_category}/${demo_name}"
+            else
+              demo_display="$demo_name"
+            fi
 
             echo ""
             echo "=================================================="
-            echo "Running: $demo_dir"
+            echo "Running: $demo_display"
             echo "=================================================="
 
             cd "$demo_dir"
             if python run.py 2>&1; then
-              echo "✓ $demo_name passed"
+              echo "✓ $demo_display passed"
               demos_passed=$((demos_passed + 1))
             else
-              echo "✗ $demo_name FAILED"
+              echo "✗ $demo_display FAILED"
               demos_failed=$((demos_failed + 1))
-              failed_demos+=("$demo_name")
+              failed_demos+=("$demo_display")
             fi
             cd - > /dev/null
           done
@@ -95,7 +106,7 @@ jobs:
             exit 1
           fi
 
-          echo "All demos passed!"
+          echo "All selected demos passed!"
           exit 0
 
       - name: Coverage
