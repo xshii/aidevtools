@@ -9,16 +9,17 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2")
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # ============================================================
-# 构建两个可执行文件: cpu_golden (gfloat) 和 cpu_golden_bfp
+# 构建两个可执行文件: cpu_golden_gfloat 和 cpu_golden_bfp
+# cpu_golden 是 shell wrapper，在构建脚本中生成
 # ============================================================
 
-# GFloat 版本 (默认)
+# GFloat 版本
 set(GFLOAT_SOURCES
     main.cpp
     gfloat/io.cpp
     gfloat/impl.cpp
 )
-add_executable(cpu_golden ${GFLOAT_SOURCES})
+add_executable(cpu_golden_gfloat ${GFLOAT_SOURCES})
 
 # BFP 版本
 set(BFP_SOURCES
@@ -28,7 +29,7 @@ set(BFP_SOURCES
 )
 add_executable(cpu_golden_bfp ${BFP_SOURCES})
 
-install(TARGETS cpu_golden cpu_golden_bfp DESTINATION bin)
+install(TARGETS cpu_golden_gfloat cpu_golden_bfp DESTINATION bin)
 
 # ============================================================
 # 目录结构说明
@@ -46,5 +47,6 @@ install(TARGETS cpu_golden cpu_golden_bfp DESTINATION bin)
 # └── bfp_main.cpp     # BFP CLI
 #
 # 构建输出:
-#   - cpu_golden:     使用 gfloat 格式 (gfp4/gfp8/gfp16)
-#   - cpu_golden_bfp: 使用 bfp 格式 (bfp4/bfp8/bfp16)
+#   - cpu_golden_gfloat: 使用 gfloat 格式 (gfp4/gfp8/gfp16)
+#   - cpu_golden_bfp:    使用 bfp 格式 (bfp4/bfp8/bfp16)
+#   - cpu_golden:        shell wrapper 自动路由到上述两个 binary

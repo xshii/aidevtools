@@ -21,6 +21,7 @@ coverage.xml
 .idea/
 *.swp
 *.swo
+.clauderc
 
 # Cache
 .pytest_cache/
@@ -57,6 +58,7 @@ src/aidevtools/formats/custom/*/*.so
 aidevtools/formats/custom/*/cpp/build/
 aidevtools/formats/custom/*/*.so
 aidevtools/golden/cpu_golden
+aidevtools/golden/cpu_golden_gfloat
 aidevtools/golden/cpu_golden_bfp
 aidevtools/golden/cpp/build/
 
