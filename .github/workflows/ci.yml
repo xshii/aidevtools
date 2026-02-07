@@ -34,10 +34,24 @@ jobs:
         run: |
           PYBIND_INC=$(python3 -m pybind11 --includes)
           PY_EXT=$(python3-config --extension-suffix)
+
+          # Build GFloat Python extension
           cd aidevtools/formats/custom/gfloat/cpp
           c++ -O3 -Wall -shared -std=c++17 -fPIC $PYBIND_INC gfloat.cpp gfloat_pybind.cpp -o ../gfloat_golden$PY_EXT
+
+          # Build BFP Python extension
           cd $GITHUB_WORKSPACE/aidevtools/formats/custom/bfp/cpp
           c++ -O3 -Wall -shared -std=c++17 -fPIC $PYBIND_INC bfp.cpp bfp_pybind.cpp -o ../bfp_golden$PY_EXT
+
+          # Build cpu_golden CLI binaries
+          cd $GITHUB_WORKSPACE/aidevtools/golden/cpp
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+          cp cpu_golden_gfloat ../..
+          cp cpu_golden_bfp ../..
+          cp ../cpu_golden_wrapper.sh ../../cpu_golden
+          chmod +x ../../cpu_golden
 
       - name: Lint
         run: ruff check aidevtools/ tests/ || true
