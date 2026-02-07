@@ -12,7 +12,9 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 
 class CompareStatus(Enum):
@@ -89,6 +91,12 @@ class CompareResult:
     # Golden 自检
     sanity: Optional[SanityResult] = None
 
+    # 可选扩展分析 (Pipeline B 合并)
+    # BitAnalysisResult — 避免循环导入，运行时类型为 bitwise.BitAnalysisResult
+    bitwise: Optional[Any] = None
+    # List[BlockResult] — 运行时类型为 blocked.BlockResult 列表
+    blocked: Optional[List[Any]] = None
+
     # 最终状态
     status: CompareStatus = CompareStatus.DUT_ISSUE
 
@@ -142,3 +150,42 @@ class CompareConfig:
     sanity_max_nan_ratio: float = 0.0
     sanity_max_inf_ratio: float = 0.0
     sanity_min_nonzero_ratio: float = 0.01
+
+    # 可选: Bit 级分析 (Pipeline B)
+    enable_bitwise: bool = False
+    bitwise_fmt: Optional[Any] = None  # FloatFormat | BitLayout, None=自动检测
+
+    # 可选: 分块比对
+    enable_blocked: bool = False
+    blocked_block_size: int = 1024
+
+
+@dataclass
+class _PreparedPair:
+    """数据预处理缓存 — 消除跨模块重复转换
+
+    将 golden/result 的 float64 转换、diff、abs_err 等中间结果
+    一次性计算并缓存，供 exact/fuzzy/metrics 共享使用。
+
+    架构作用:
+        engine.compare() 创建一次 _PreparedPair，传递给 exact/fuzzy/metrics，
+        避免每个模块独立执行 astype(float64).flatten() + np.abs(g - r)。
+    """
+
+    g: np.ndarray        # float64, flattened golden
+    r: np.ndarray        # float64, flattened result
+    diff: np.ndarray     # g - r
+    abs_err: np.ndarray  # |diff|
+    g_abs: np.ndarray    # |g|
+    total: int
+
+    @classmethod
+    def from_arrays(cls, golden: np.ndarray, result: np.ndarray) -> "_PreparedPair":
+        g = golden.astype(np.float64).flatten()
+        r = result.astype(np.float64).flatten()
+        diff = g - r
+        return cls(
+            g=g, r=r, diff=diff,
+            abs_err=np.abs(diff), g_abs=np.abs(g),
+            total=len(g),
+        )

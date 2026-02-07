@@ -26,6 +26,15 @@ from aidevtools.compare.bitwise import (
     gen_bit_heatmap_svg,
     gen_perbit_bar_svg,
 )
+from aidevtools.compare import (
+    compare_full,
+    CompareConfig,
+    print_block_heatmap,
+    find_worst_blocks,
+    print_compare_table,
+    generate_text_report,
+    generate_json_report,
+)
 
 # ---- 全局参数 ----
 BATCH, SEQ, HIDDEN = 1, 8, 32
@@ -192,6 +201,54 @@ def main():
     gen_bit_heatmap_svg(final_orig, final_corr, svg_heatmap, fmt=FP32, block_size=32)
     print(f"  全局热力图:     {svg_heatmap}")
 
+    # ---- Phase 5: 统一管线 (四态 + bitwise + blocked 一步到位) ----
+    print("\n" + "-" * 75)
+    print("  Phase 5: 统一管线 (四态 + bitwise + blocked)")
+    print("-" * 75)
+
+    config = CompareConfig(
+        fuzzy_min_qsnr=20.0, fuzzy_min_cosine=0.99,
+        enable_bitwise=True, bitwise_fmt=FP32,
+        enable_blocked=True,
+        blocked_block_size=max(8, original_outputs[OP_NAMES[0]].size // 16),
+    )
+    compare_results = []
+    for name in OP_NAMES:
+        g = original_outputs[name]
+        c = corrupted_outputs[name]
+        r = compare_full(dut_output=c, golden_pure=g, config=config, name=name)
+        compare_results.append(r)
+
+    print_compare_table(compare_results)
+
+    # 从统一结果中提取分块信息 (最后两步被篡改的)
+    print("-" * 75)
+    print("  Phase 5b: 分块定位篡改区域 (从统一结果提取)")
+    print("-" * 75)
+
+    for r in compare_results[-2:]:
+        if r.blocked:
+            print(f"\n  [{r.name}] ({len(r.blocked)} blocks)")
+            print_block_heatmap(r.blocked, cols=32, show_legend=False)
+
+            worst = find_worst_blocks(r.blocked, top_n=3)
+            for b in worst:
+                q_str = f"{b.qsnr:.1f}" if b.qsnr != float("inf") else "inf"
+                print(f"    worst: offset={b.offset}, QSNR={q_str} dB, max_abs={b.max_abs:.2e}")
+
+    # ---- Phase 6: 生成结构化报告 (含 bitwise/blocked) ----
+    print("\n" + "-" * 75)
+    print("  Phase 6: 生成结构化报告 (含 bitwise/blocked)")
+    print("-" * 75)
+
+    txt_path = str(workspace / "compare_report.txt")
+    generate_text_report(compare_results, output_path=txt_path)
+    print(f"  文本报告: {txt_path}")
+
+    json_path = str(workspace / "compare_report.json")
+    generate_json_report(compare_results, output_path=json_path)
+    print(f"  JSON 报告: {json_path}")
+
     # ---- 汇总 ----
     print("\n" + "=" * 75)
     print("  汇总:")
@@ -212,6 +269,12 @@ def main():
         status = "CRITICAL" if r.has_critical else ("DIFF" if r.summary.diff_elements > 0 else "OK")
         print(f"    {name}: {status}")
 
+    print(f"\n  生成文件:")
+    print(f"    {txt_path}")
+    print(f"    {json_path}")
+    if result.global_result:
+        print(f"    {str(workspace / 'global_perbit_bar.svg')}")
+    print(f"    {str(workspace / 'global_heatmap.svg')}")
     print("=" * 75)
 
 
