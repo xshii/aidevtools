@@ -41,6 +41,45 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ -v --tb=short
 
+      - name: Run demos
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          echo "Running all demos..."
+          mkdir -p demos/output
+
+          # Find and run all demo scripts
+          demos_passed=0
+          demos_failed=0
+
+          for demo_script in $(find demos -name "run.py" -type f | sort); do
+            demo_dir=$(dirname "$demo_script")
+            demo_name=$(basename "$demo_dir")
+
+            echo ""
+            echo "=================================================="
+            echo "Running: $demo_dir"
+            echo "=================================================="
+
+            cd "$demo_dir"
+            if python run.py; then
+              echo "✓ $demo_name passed"
+              ((demos_passed++))
+            else
+              echo "✗ $demo_name failed (non-fatal)"
+              ((demos_failed++))
+            fi
+            cd - > /dev/null
+          done
+
+          echo ""
+          echo "=================================================="
+          echo "Demos Summary: $demos_passed passed, $demos_failed failed"
+          echo "=================================================="
+
+          # Don't fail CI if some demos fail (they might have special requirements)
+          exit 0
+
       - name: Coverage
         env:
           PYTHONPATH: ${{ github.workspace }}
