@@ -31,14 +31,17 @@ jobs:
           pip install libs/prettycli
           pip install "numpy>=1.21,<2.0" "pyyaml>=6.0" "jinja2>=3.0"
           pip install "torch>=2.0.0" --index-url https://download.pytorch.org/whl/cpu
-          pip install pytest pytest-cov ruff
+          pip install pytest pytest-cov ruff pylint
           pip install openpyxl pybind11
 
       - name: Build C++ extensions
         run: ./build_golden.sh all
 
-      - name: Lint
+      - name: Lint with ruff
         run: ruff check aidevtools/ tests/ || true
+
+      - name: Lint with pylint
+        run: pylint aidevtools/ tests/ || true
 
       - name: Test aidevtools
         env:
