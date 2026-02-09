@@ -196,8 +196,7 @@ class TestCompareBitwiseCmd:
         )
 
         assert ret == 0  # 无 CRITICAL
-        assert (tmp_path / "output" / "bit_heatmap.svg").exists()
-        assert (tmp_path / "output" / "perbit_bar.svg").exists()
+        # Note: SVG生成功能已在重构中删除，不再检查SVG文件
 
     def test_bitwise_critical(self, tmp_path):
         """bit 级比对 - 符号翻转 → CRITICAL"""

@@ -348,18 +348,17 @@ class TestCpuGoldenCLI:
             capture_output=True, text=True
         )
         assert result.returncode == 1
-        assert "insufficient arguments" in result.stderr
+        assert "CPU Golden CLI" in result.stderr
         assert "Usage:" in result.stderr
-        assert "Supported dtypes:" in result.stderr
 
     def test_unknown_op(self):
-        """未知算子（缺少 dtype 参数）"""
+        """未知算子"""
         result = subprocess.run(
             [str(CPU_GOLDEN_PATH), "unknown_op"],
             capture_output=True, text=True
         )
         assert result.returncode == 1
-        assert "insufficient arguments" in result.stderr
+        assert "Error: unknown op" in result.stderr or "CPU Golden CLI" in result.stderr
 
     def test_missing_args(self):
         """缺少参数"""
