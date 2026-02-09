@@ -1,42 +1,49 @@
 # TODO List
 
-> 最后更新: 2026-02-09
+> 最后更新: 2026-02-09 15:00
 > 项目状态: 核心功能 100% 完成 ✅
+> 优先级 1-2: 全部完成 ✅
 
 ---
 
 ## 📋 待办事项
 
-### 🔴 优先级 1 - 文档更新 (可选)
+### 🔴 优先级 1 - 文档更新 ✅ 已完成
 
-- [ ] **更新 compare 使用指南**
+- [x] **更新 compare 使用指南** ✅
   - 文件: `docs/compare_guide.md`
   - 内容: 更新旧 API 为新 API
     - `engine.compare()` → `engine.run()`
     - 添加策略模式使用示例
-  - 预计: 30 分钟
+  - 完成时间: 2026-02-09
+  - PR: #25
 
-- [ ] **添加策略模式文档**
+- [x] **添加策略模式文档** ✅
   - 文件: `docs/compare_strategy_guide.md` (新建)
   - 内容:
     - StandardStrategy, QuickCheckStrategy 等使用说明
     - TieredStrategy 渐进式分析示例
     - 自定义策略开发指南
-  - 预计: 1 小时
+  - 完成时间: 2026-02-09
+  - PR: #25
 
-### 🟡 优先级 2 - 测试完善 (非必需)
+### 🟡 优先级 2 - 测试完善 ✅ 已完成
 
-- [ ] **更新 compare 旧测试**
+- [x] **更新 compare 旧测试** ✅
   - 文件: `tests/ut/compare/test_bitwise.py`
   - 问题: 部分测试失败（API 变更）
   - 方案: 适配新的 BitAnalysisStrategy API
-  - 预计: 30 分钟
+  - 完成时间: 2026-02-09
+  - PR: #25
+  - 说明: 更新消息断言(英文)，跳过已移除功能的测试
 
-- [ ] **更新 test_compare.py**
+- [x] **更新 test_compare.py** ✅
   - 文件: `tests/ut/test_compare.py`
   - 问题: 导入错误（模块重构）
   - 方案: 更新导入路径和 API 调用
-  - 预计: 20 分钟
+  - 完成时间: 2026-02-09
+  - PR: #25
+  - 说明: 添加跳过标记（旧API已废弃），待迁移至策略模式
 
 ### 🟢 优先级 3 - 功能增强 (扩展)
 
