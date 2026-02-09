@@ -17,12 +17,15 @@ from aidevtools.compare.metrics import (
     calc_qsnr,
     calc_cosine,
 )
-from aidevtools.compare.blocked import (
+from aidevtools.compare.strategy.blocked import (
     BlockResult,
-    compare_blocked,
-    print_block_heatmap,
-    find_worst_blocks,
+    BlockedStrategy,
 )
+
+# 旧 API 兼容别名
+compare_blocked = BlockedStrategy.compare
+print_block_heatmap = BlockedStrategy.print_heatmap
+find_worst_blocks = BlockedStrategy.find_worst
 
 
 class TestCalcAllMetrics:

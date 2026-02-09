@@ -178,7 +178,7 @@ def generate_strategy_json(
 # ============================================================================
 
 
-def format_result_row(result) -> str:
+def format_result_row(result, *args, **kwargs) -> str:
     """
     格式化单行结果（旧API，已废弃）
 
@@ -251,11 +251,11 @@ def print_compare_table(results):
     print()
 
 
-def generate_text_report(results, output_path: Optional[Path] = None) -> str:
+def generate_text_report(results, output_path=None) -> str:
     """生成文本报告（旧API，已废弃）"""
     lines = []
     lines.append("=" * 80)
-    lines.append("Compare Results Report")
+    lines.append("Compare Report")
     lines.append("=" * 80)
     lines.append("")
 
@@ -263,32 +263,44 @@ def generate_text_report(results, output_path: Optional[Path] = None) -> str:
         lines.append(f"Operation: {r.name or f'op_{r.op_id}'}")
         lines.append(f"  Status: {r.status.value if r.status else 'UNKNOWN'}")
         if r.exact:
-            lines.append(f"  Exact: {'PASS' if r.exact.passed else 'FAIL'}")
+            lines.append(f"  Exact Compare: {'PASS' if r.exact.passed else 'FAIL'}")
+            lines.append(f"    Mismatch: {r.exact.mismatch_count}")
         if r.fuzzy_pure:
             lines.append(
-                f"  Fuzzy (pure): QSNR={r.fuzzy_pure.qsnr:.2f}, "
+                f"  Fuzzy Compare (pure): QSNR={r.fuzzy_pure.qsnr:.2f}, "
                 f"Cosine={r.fuzzy_pure.cosine:.6f}"
             )
         if r.fuzzy_qnt:
             lines.append(
-                f"  Fuzzy (qnt): QSNR={r.fuzzy_qnt.qsnr:.2f}, "
+                f"  Fuzzy Compare (qnt): QSNR={r.fuzzy_qnt.qsnr:.2f}, "
                 f"Cosine={r.fuzzy_qnt.cosine:.6f}"
             )
         if r.sanity:
-            lines.append(f"  Sanity: {'VALID' if r.sanity.valid else 'INVALID'}")
+            lines.append(f"  Golden Sanity: {'VALID' if r.sanity.valid else 'INVALID'}")
         lines.append("")
+
+    # Summary
+    status_counts = {s: 0 for s in CompareStatus}
+    for r in results:
+        if r.status in status_counts:
+            status_counts[r.status] += 1
+    lines.append("Summary:")
+    lines.append(f"  Total: {len(results)}")
+    for s, count in status_counts.items():
+        if count > 0:
+            lines.append(f"  {s.value}: {count}")
 
     report = "\n".join(lines)
 
     if output_path:
-        output_path.write_text(report)
+        Path(output_path).write_text(report)
 
     return report
 
 
-def generate_json_report(results, output_path: Optional[Path] = None) -> str:
+def generate_json_report(results, output_path=None) -> dict:
     """生成JSON报告（旧API，已废弃）"""
-    output = []
+    items = []
     for r in results:
         item = {
             "name": r.name or f"op_{r.op_id}",
@@ -310,11 +322,23 @@ def generate_json_report(results, output_path: Optional[Path] = None) -> str:
             }
         if r.sanity:
             item["sanity"] = {"valid": r.sanity.valid}
-        output.append(item)
+        items.append(item)
 
-    json_str = json.dumps(output, indent=2)
+    # Summary
+    status_counts = {}
+    for r in results:
+        status_val = r.status.value if r.status else "UNKNOWN"
+        status_counts[status_val] = status_counts.get(status_val, 0) + 1
+
+    output = {
+        "results": items,
+        "summary": {
+            "total": len(results),
+            "by_status": status_counts,
+        },
+    }
 
     if output_path:
-        output_path.write_text(json_str)
+        Path(output_path).write_text(json.dumps(output, indent=2))
 
-    return json_str
+    return output

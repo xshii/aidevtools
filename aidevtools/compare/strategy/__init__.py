@@ -16,6 +16,7 @@ from .bit_xor import BitXorStrategy, BitXorResult
 from .bit_analysis import (
     BitAnalysisStrategy,
     BitAnalysisResult,
+    ModelBitAnalysis,
     FloatFormat,
     BitLayout,
     FP32,
@@ -24,6 +25,17 @@ from .bit_analysis import (
     BFP16,
     BFP8,
     BFP4,
+    INT8,
+    UINT8,
+    # 可视化
+    print_bit_analysis,
+    print_bit_template,
+    print_bit_heatmap,
+    gen_bit_heatmap_svg,
+    gen_perbit_bar_svg,
+    # 模型级
+    compare_model_bitwise,
+    print_model_bit_analysis,
 )
 
 # 组合策略

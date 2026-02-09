@@ -133,6 +133,74 @@ class CompareEngine:
             return CompareStatus.BOTH_SUSPECT
 
     # ========================================================================
+    # 旧 API 兼容方法
+    # ========================================================================
+
+    def compare(
+        self,
+        dut: np.ndarray,
+        golden: np.ndarray,
+        golden_qnt: Optional[np.ndarray] = None,
+        name: str = "",
+        op_id: int = 0,
+    ) -> "CompareResult":
+        """比对（旧API兼容），新代码请使用 engine.run()"""
+        from .types import CompareResult
+        from .strategy import ExactStrategy, FuzzyStrategy, SanityStrategy
+
+        result = CompareResult(name=name, op_id=op_id)
+        result.exact = ExactStrategy.compare(
+            golden, dut,
+            max_abs=self.config.exact_max_abs,
+            max_count=self.config.exact_max_count,
+        )
+        result.fuzzy_pure = FuzzyStrategy.compare(golden, dut, self.config)
+        if golden_qnt is not None:
+            result.fuzzy_qnt = FuzzyStrategy.compare(golden_qnt, dut, self.config)
+        else:
+            result.fuzzy_qnt = FuzzyStrategy.compare(golden, dut, self.config)
+        if golden_qnt is not None:
+            result.sanity = SanityStrategy.compare(golden, golden_qnt, self.config)
+        else:
+            result.sanity = SanityStrategy.compare(golden, golden, self.config)
+        result.status = result.determine_status()
+        return result
+
+    def compare_exact_only(
+        self,
+        dut: np.ndarray,
+        golden: np.ndarray,
+        name: str = "",
+    ) -> "CompareResult":
+        """仅精确比对（旧API兼容）"""
+        from .types import CompareResult
+        from .strategy import ExactStrategy
+
+        result = CompareResult(name=name)
+        result.exact = ExactStrategy.compare(
+            golden, dut,
+            max_abs=self.config.exact_max_abs,
+            max_count=self.config.exact_max_count,
+        )
+        result.status = result.determine_status()
+        return result
+
+    def compare_fuzzy_only(
+        self,
+        dut: np.ndarray,
+        golden: np.ndarray,
+        name: str = "",
+    ) -> "CompareResult":
+        """仅模糊比对（旧API兼容）"""
+        from .types import CompareResult
+        from .strategy import FuzzyStrategy
+
+        result = CompareResult(name=name)
+        result.fuzzy_qnt = FuzzyStrategy.compare(golden, dut, self.config)
+        result.status = result.determine_status()
+        return result
+
+    # ========================================================================
     # 便捷工厂方法
     # ========================================================================
 
@@ -266,6 +334,45 @@ class CompareEngine:
         """
         from .model import ModelTieredAnalyzer
         return ModelTieredAnalyzer(config=config)
+
+
+# ============================================================================
+# 独立判定函数（旧API兼容）
+# ============================================================================
+
+
+def determine_status(exact, fuzzy_pure, fuzzy_qnt, sanity) -> CompareStatus:
+    """
+    独立状态判定函数（旧API兼容）
+
+    Args:
+        exact: ExactResult 或 None
+        fuzzy_pure: FuzzyResult 或 None
+        fuzzy_qnt: FuzzyResult 或 None
+        sanity: SanityResult 或 None
+
+    Returns:
+        CompareStatus
+    """
+    dut_pass = False
+    if exact and exact.passed:
+        dut_pass = True
+    if fuzzy_qnt and fuzzy_qnt.passed:
+        dut_pass = True
+    if fuzzy_pure and fuzzy_pure.passed:
+        dut_pass = True
+
+    golden_valid = True
+    if sanity is not None:
+        golden_valid = sanity.valid
+
+    if dut_pass and golden_valid:
+        return CompareStatus.PASS
+    if dut_pass and not golden_valid:
+        return CompareStatus.GOLDEN_SUSPECT
+    if not dut_pass and golden_valid:
+        return CompareStatus.DUT_ISSUE
+    return CompareStatus.BOTH_SUSPECT
 
 
 # ============================================================================

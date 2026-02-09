@@ -12,23 +12,29 @@ from aidevtools.compare.strategy import (
     BFP16,
     BFP8,
     BFP4,
+    INT8,
+    UINT8,
     BitAnalysisStrategy,
     BitAnalysisResult,
+    ModelBitAnalysis,
+    # 可视化
+    print_bit_analysis,
+    print_bit_template,
+    print_bit_heatmap,
+    gen_bit_heatmap_svg,
+    gen_perbit_bar_svg,
+    # 模型级
+    compare_model_bitwise,
+    print_model_bit_analysis,
 )
 
-# WarnLevel 没有在 __init__.py 中导出，直接从模块导入
 from aidevtools.compare.strategy.bit_analysis import WarnLevel
 
-# 旧 API 兼容层 - 将 compare_bitwise 映射到新的静态方法
-def compare_bitwise(golden, result, fmt=FP32):
-    """兼容旧 API - 自动推断格式"""
-    return BitAnalysisStrategy.compare(golden, result, fmt=fmt)
 
-# 删除已移除的类型/函数（测试中如果用到需要更新）
-# INT8, UINT8, BitDiffSummary, BitWarning, ModelBitAnalysis
-# compare_model_bitwise, print_bit_template, print_bit_analysis
-# print_bit_heatmap, print_model_bit_analysis
-# gen_bit_heatmap_svg, gen_perbit_bar_svg
+# 旧 API 兼容层 - 将 compare_bitwise 映射到新的静态方法
+def compare_bitwise(golden, result, fmt=FP32, max_warning_indices=10):
+    """兼容旧 API"""
+    return BitAnalysisStrategy.compare(golden, result, fmt=fmt, max_warning_indices=max_warning_indices)
 
 
 class TestCompareBitwise:
@@ -197,7 +203,7 @@ class TestPrintBitAnalysis:
         captured = capsys.readouterr()
         assert "[test_op]" in captured.out
         assert "Bit-Level Analysis" in captured.out
-        assert "float32" in captured.out
+        assert "fp32" in captured.out
         assert "Sign flips:" in captured.out
         assert "[!]" in captured.out  # CRITICAL mark
 

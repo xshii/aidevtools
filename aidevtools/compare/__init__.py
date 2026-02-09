@@ -56,7 +56,13 @@ from .engine import (
     CompareEngine,
     compare_full,
     compare_quick,
+    determine_status,
 )
+
+# 旧API兼容
+from .exact import compare_exact, compare_bit
+from .fuzzy import compare_fuzzy, compare_isclose
+from .sanity import check_golden_sanity, check_data_sanity
 
 # ============================================================================
 # 策略
@@ -94,6 +100,7 @@ from .strategy import (
     BlockResult,
     BitXorResult,
     BitAnalysisResult,
+    ModelBitAnalysis,
     FloatFormat,
     BitLayout,
     FP32,
@@ -102,6 +109,17 @@ from .strategy import (
     BFP16,
     BFP8,
     BFP4,
+    INT8,
+    UINT8,
+    # 可视化
+    print_bit_analysis,
+    print_bit_template,
+    print_bit_heatmap,
+    gen_bit_heatmap_svg,
+    gen_perbit_bar_svg,
+    # 模型级
+    compare_model_bitwise,
+    print_model_bit_analysis,
 )
 
 

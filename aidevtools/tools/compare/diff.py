@@ -121,6 +121,11 @@ class FullCompareResult:
 # === 核心比对函数 (委托给 compare 模块) ===
 
 
+def compare_bit(golden_bytes: bytes, result_bytes: bytes) -> bool:
+    """bit 级字节比对"""
+    return ExactStrategy.compare_bytes(golden_bytes, result_bytes)
+
+
 def compare_exact(
     golden: np.ndarray, result: np.ndarray, max_abs: float = 0.0, max_count: int = 0
 ) -> ExactResult:
