@@ -1,39 +1,29 @@
 """
-比对引擎
+比对引擎 (重构版)
 
-统一协调精确比对、模糊比对和 Golden 自检，输出最终状态。
+使用策略模式，灵活组合不同的比对策略。
 
-状态判定矩阵:
-    DUT vs Golden | Golden 自检 | 判定状态
-    --------------|-------------|---------------
-    PASS          | PASS        | PASS
-    PASS          | FAIL        | GOLDEN_SUSPECT
-    FAIL          | PASS        | DUT_ISSUE
-    FAIL          | FAIL        | BOTH_SUSPECT
+架构设计:
+- CompareEngine: 执行引擎，负责调度策略
+- CompareStrategy: 策略接口，具体比对逻辑
+- CompareContext: 上下文，携带共享数据
+- _PreparedPair: 预处理缓存，避免重复计算
 
-架构优化:
-- 使用 _PreparedPair 预处理一次数据，exact/fuzzy 共享中间结果
-- golden_qnt=None 时自动短路，避免重复计算和无意义的 QSNR 自检
-- determine_status() 委托给 CompareResult.determine_status()，消除逻辑重复
+优势:
+- 易于扩展新策略
+- 策略可灵活组合
+- 解耦比对逻辑
+- 易于单元测试
 """
 
-from typing import Optional
-
+from typing import Optional, List, Dict, Any
 import numpy as np
 
-from .blocked import compare_blocked
-from .bitwise import compare_bitwise
-from .exact import _compare_exact_prepared
-from .fuzzy import _compare_fuzzy_prepared
-from .sanity import check_golden_sanity
-from .types import (
-    CompareConfig,
-    CompareResult,
-    CompareStatus,
-    ExactResult,
-    FuzzyResult,
-    SanityResult,
-    _PreparedPair,
+from .types import CompareConfig, CompareStatus, _PreparedPair
+from .strategy import (
+    CompareStrategy,
+    CompareContext,
+    StandardStrategy,
 )
 
 
@@ -42,224 +32,284 @@ class CompareEngine:
     比对引擎
 
     使用示例:
-        engine = CompareEngine()
-        result = engine.compare(
-            dut_output=dut,
-            golden_pure=golden_fp32,
-            golden_qnt=golden_qnt,
-        )
-        print(f"Status: {result.status.value}")
+        # 方式1: 使用预定义策略
+        engine = CompareEngine.standard()
+        results = engine.run(dut, golden)
+
+        # 方式2: 自定义策略
+        from aidevtools.compare.strategy import ExactStrategy, FuzzyStrategy
+        engine = CompareEngine([
+            ExactStrategy(),
+            FuzzyStrategy(),
+        ])
+        results = engine.run(dut, golden)
+
+        # 方式3: 使用组合策略
+        from aidevtools.compare.strategy import DeepAnalysisStrategy
+        engine = CompareEngine(DeepAnalysisStrategy())
+        results = engine.run(dut, golden)
     """
 
-    def __init__(self, config: CompareConfig = None):
+    def __init__(
+        self,
+        strategy: Optional[CompareStrategy] = None,
+        config: Optional[CompareConfig] = None,
+    ):
         """
         Args:
+            strategy: 比对策略（可以是单个策略或组合策略）
             config: 比对配置
         """
+        self.strategy = strategy or StandardStrategy()
         self.config = config or CompareConfig()
 
-    def compare(
+    def run(
         self,
-        dut_output: np.ndarray,
-        golden_pure: np.ndarray,
-        golden_qnt: np.ndarray = None,
-        name: str = "",
-        op_id: int = 0,
-    ) -> CompareResult:
-        """
-        执行完整比对
-
-        步骤:
-        1. 精确比对 (DUT vs Golden_pure)
-        2. 模糊比对 - 纯 fp32 (DUT vs Golden_pure)
-        3. 模糊比对 - 量化感知 (DUT vs Golden_qnt)
-        4. Golden 自检 (Golden_qnt vs Golden_pure)
-        5. Bit 级分析 (可选, enable_bitwise=True)
-        6. 分块比对 (可选, enable_blocked=True)
-
-        优化:
-        - _PreparedPair 预处理一次，exact/fuzzy 共享 diff/abs_err/g_abs
-        - golden_qnt=None 时复用 fuzzy_pure 结果，跳过无意义的 QSNR 自检
-
-        Args:
-            dut_output: DUT 输出数据
-            golden_pure: 纯 fp32 Golden
-            golden_qnt: 量化感知 Golden (可选，默认使用 golden_pure)
-            name: 算子/比对名称
-            op_id: 算子 ID
-
-        Returns:
-            CompareResult
-        """
-        has_separate_qnt = golden_qnt is not None
-
-        # 预处理一次: golden_pure vs dut_output
-        prep_pure = _PreparedPair.from_arrays(golden_pure, dut_output)
-
-        # 1. 精确比对 — 复用 prep_pure.abs_err
-        exact = _compare_exact_prepared(
-            prep_pure,
-            golden_pure,
-            dut_output,
-            max_abs=self.config.exact_max_abs,
-            max_count=self.config.exact_max_count,
-        )
-
-        # 2. 模糊比对 - 纯 fp32 — 复用 prep_pure 全部中间结果
-        fuzzy_pure = _compare_fuzzy_prepared(prep_pure, self.config)
-
-        # 3. 模糊比对 - 量化感知
-        if has_separate_qnt:
-            prep_qnt = _PreparedPair.from_arrays(golden_qnt, dut_output)
-            fuzzy_qnt = _compare_fuzzy_prepared(prep_qnt, self.config)
-        else:
-            # golden_qnt=None: 复用 fuzzy_pure 结果，避免重复计算
-            fuzzy_qnt = fuzzy_pure
-
-        # 4. Golden 自检
-        if has_separate_qnt:
-            sanity = check_golden_sanity(golden_pure, golden_qnt, self.config)
-        else:
-            # 跳过无意义的 golden_pure vs golden_pure QSNR 检查
-            sanity = check_golden_sanity(golden_pure, None, self.config)
-
-        # 5. Bit 级分析 (可选)
-        bitwise_result = None
-        if self.config.enable_bitwise:
-            bitwise_result = compare_bitwise(
-                golden_pure, dut_output, fmt=self.config.bitwise_fmt,
-            )
-
-        # 6. 分块比对 (可选)
-        blocked_result = None
-        if self.config.enable_blocked:
-            blocked_result = compare_blocked(
-                golden_pure, dut_output,
-                block_size=self.config.blocked_block_size,
-                min_qsnr=self.config.fuzzy_min_qsnr,
-                min_cosine=self.config.fuzzy_min_cosine,
-            )
-
-        # 构建结果 + 判定最终状态
-        result = CompareResult(
-            name=name,
-            op_id=op_id,
-            exact=exact,
-            fuzzy_pure=fuzzy_pure,
-            fuzzy_qnt=fuzzy_qnt,
-            sanity=sanity,
-            bitwise=bitwise_result,
-            blocked=blocked_result,
-        )
-        result.status = result.determine_status()
-
-        return result
-
-    def compare_exact_only(
-        self,
-        dut_output: np.ndarray,
+        dut: np.ndarray,
         golden: np.ndarray,
-        name: str = "",
-    ) -> CompareResult:
+        golden_qnt: Optional[np.ndarray] = None,
+        metadata: Optional[dict] = None,
+    ) -> Dict[str, Any]:
         """
-        仅执行精确比对 (不做 Golden 自检)
+        执行比对
 
         Args:
-            dut_output: DUT 输出数据
-            golden: Golden 数据
-            name: 比对名称
+            dut: DUT输出数据
+            golden: Golden数据（纯FP32/FP64）
+            golden_qnt: Golden量化数据（可选）
+            metadata: 额外元数据
 
         Returns:
-            CompareResult
+            {strategy_name: result} 字典
         """
-        p = _PreparedPair.from_arrays(golden, dut_output)
-        exact = _compare_exact_prepared(
-            p,
-            golden,
-            dut_output,
-            max_abs=self.config.exact_max_abs,
-            max_count=self.config.exact_max_count,
+        # 创建上下文
+        ctx = CompareContext(
+            golden=golden,
+            dut=dut,
+            config=self.config,
+            golden_qnt=golden_qnt,
+            metadata=metadata,
         )
 
-        result = CompareResult(name=name, exact=exact)
-        result.status = (
-            CompareStatus.PASS if exact.passed else CompareStatus.DUT_ISSUE
-        )
-        return result
+        # 预处理数据（创建PreparedPair缓存）
+        ctx.prepared = _PreparedPair.from_arrays(golden, dut)
 
-    def compare_fuzzy_only(
+        # 执行策略预处理
+        self.strategy.prepare(ctx)
+
+        # 执行比对
+        return self.strategy.run(ctx)
+
+    def determine_status(
         self,
-        dut_output: np.ndarray,
-        golden: np.ndarray,
-        name: str = "",
-    ) -> CompareResult:
+        dut_pass: bool,
+        golden_sanity_pass: bool,
+    ) -> CompareStatus:
         """
-        仅执行模糊比对 (不做 Golden 自检)
+        判定最终状态
+
+        状态矩阵:
+            DUT vs Golden | Golden 自检 | 判定状态
+            --------------|-------------|---------------
+            PASS          | PASS        | PASS
+            PASS          | FAIL        | GOLDEN_SUSPECT
+            FAIL          | PASS        | DUT_ISSUE
+            FAIL          | FAIL        | BOTH_SUSPECT
 
         Args:
-            dut_output: DUT 输出数据
-            golden: Golden 数据
-            name: 比对名称
+            dut_pass: DUT比对是否通过
+            golden_sanity_pass: Golden自检是否通过
 
         Returns:
-            CompareResult
+            CompareStatus
         """
-        p = _PreparedPair.from_arrays(golden, dut_output)
-        fuzzy = _compare_fuzzy_prepared(p, self.config)
+        if dut_pass and golden_sanity_pass:
+            return CompareStatus.PASS
+        elif dut_pass and not golden_sanity_pass:
+            return CompareStatus.GOLDEN_SUSPECT
+        elif not dut_pass and golden_sanity_pass:
+            return CompareStatus.DUT_ISSUE
+        else:
+            return CompareStatus.BOTH_SUSPECT
 
-        result = CompareResult(name=name, fuzzy_qnt=fuzzy)
-        result.status = (
-            CompareStatus.PASS if fuzzy.passed else CompareStatus.DUT_ISSUE
-        )
-        return result
+    # ========================================================================
+    # 便捷工厂方法
+    # ========================================================================
+
+    @classmethod
+    def standard(cls, config: Optional[CompareConfig] = None) -> "CompareEngine":
+        """
+        创建标准比对引擎
+
+        包含策略:
+        - 精确比对
+        - 模糊比对（纯FP32）
+        - 模糊比对（量化感知）
+        - Golden自检
+        """
+        from .strategy import StandardStrategy
+        return cls(strategy=StandardStrategy(), config=config)
+
+    @classmethod
+    def quick(cls, config: Optional[CompareConfig] = None) -> "CompareEngine":
+        """
+        创建快速检查引擎
+
+        包含策略:
+        - 精确比对
+        - 模糊比对（纯FP32）
+        """
+        from .strategy import QuickCheckStrategy
+        return cls(strategy=QuickCheckStrategy(), config=config)
+
+    @classmethod
+    def deep(
+        cls,
+        config: Optional[CompareConfig] = None,
+        block_size: int = 1024,
+    ) -> "CompareEngine":
+        """
+        创建深度分析引擎
+
+        包含策略:
+        - 精确比对
+        - 模糊比对（纯FP32）
+        - 模糊比对（量化感知）
+        - Golden自检
+        - Bit级分析
+        - 分块分析
+        """
+        from .strategy import DeepAnalysisStrategy
+        return cls(strategy=DeepAnalysisStrategy(block_size=block_size), config=config)
+
+    @classmethod
+    def minimal(cls, config: Optional[CompareConfig] = None) -> "CompareEngine":
+        """
+        创建最小比对引擎（性能优先）
+
+        包含策略:
+        - 模糊比对（纯FP32）
+        """
+        from .strategy import MinimalStrategy
+        return cls(strategy=MinimalStrategy(), config=config)
+
+    @classmethod
+    def progressive(
+        cls,
+        config: Optional[CompareConfig] = None,
+        block_size: int = 64,
+    ) -> "CompareEngine":
+        """
+        创建渐进式分级引擎
+
+        三级策略:
+        - L1: Exact + Bitwise（初步检查）
+        - L2: Fuzzy + Sanity（中度诊断）
+        - L3: BitwisePro + Blocked（深度定位）
+
+        适用场景:
+        - 单算子渐进式分析
+        - 不确定错误类型
+
+        注意:
+        - 每个算子独立分级
+        - 如需模型级协调，使用 CompareEngine.model_progressive()
+        """
+        from .strategy import ProgressiveStrategy
+        return cls(strategy=ProgressiveStrategy(block_size=block_size), config=config)
+
+    @classmethod
+    def quick_then_deep(
+        cls,
+        config: Optional[CompareConfig] = None,
+        block_size: int = 64,
+    ) -> "CompareEngine":
+        """
+        创建快速检查后深度分析引擎
+
+        两级策略:
+        - L1: Exact + Bitwise（快速判断）
+        - L2: Fuzzy + Sanity + Blocked（深度分析，如果L1失败）
+
+        适用场景:
+        - 预期大部分数据一致
+        - 需要快速筛选问题
+        """
+        from .strategy import QuickThenDeepStrategy
+        return cls(strategy=QuickThenDeepStrategy(block_size=block_size), config=config)
+
+    @staticmethod
+    def model_progressive(config: Optional[CompareConfig] = None) -> "ModelTieredAnalyzer":
+        """
+        创建模型级渐进式分析器
+
+        支持全局协调的三级分析:
+        - L1: 所有算子快速检查
+        - L2: 失败算子中度分析（可根据L1通过率跳过）
+        - L3: 仍失败的深度分析（可根据L2通过率跳过）
+
+        适用场景:
+        - 大模型调试（几十到几百个算子）
+        - 需要节省计算资源
+        - 需要全局协调决策
+
+        Returns:
+            ModelTieredAnalyzer 实例
+
+        示例:
+            analyzer = CompareEngine.model_progressive()
+            results = analyzer.progressive_analyze(
+                per_op_pairs,
+                l1_threshold=0.85,  # 85%通过则停止
+            )
+            analyzer.print_summary(results)
+        """
+        from .model import ModelTieredAnalyzer
+        return ModelTieredAnalyzer(config=config)
+
+
+# ============================================================================
+# 便捷函数
+# ============================================================================
 
 
 def compare_full(
-    dut_output: np.ndarray,
-    golden_pure: np.ndarray,
-    golden_qnt: np.ndarray = None,
-    config: CompareConfig = None,
-    name: str = "",
-) -> CompareResult:
+    dut: np.ndarray,
+    golden: np.ndarray,
+    golden_qnt: Optional[np.ndarray] = None,
+    config: Optional[CompareConfig] = None,
+) -> Dict[str, Any]:
     """
-    便捷函数: 执行完整比对
+    一键完整比对（使用标准策略）
 
     Args:
-        dut_output: DUT 输出数据
-        golden_pure: 纯 fp32 Golden
-        golden_qnt: 量化感知 Golden
+        dut: DUT输出
+        golden: Golden数据
+        golden_qnt: Golden量化数据（可选）
         config: 比对配置
-        name: 比对名称
 
     Returns:
-        CompareResult
+        比对结果字典
     """
-    engine = CompareEngine(config)
-    return engine.compare(dut_output, golden_pure, golden_qnt, name=name)
+    engine = CompareEngine.standard(config=config)
+    return engine.run(dut, golden, golden_qnt)
 
 
-def determine_status(
-    exact: Optional[ExactResult],
-    _fuzzy_pure: Optional[FuzzyResult],
-    fuzzy_qnt: Optional[FuzzyResult],
-    sanity: Optional[SanityResult],
-) -> CompareStatus:
+def compare_quick(
+    dut: np.ndarray,
+    golden: np.ndarray,
+    config: Optional[CompareConfig] = None,
+) -> Dict[str, Any]:
     """
-    根据各项比对结果判定最终状态
-
-    委托给 CompareResult.determine_status()，消除逻辑重复。
+    快速比对
 
     Args:
-        exact: 精确比对结果
-        _fuzzy_pure: 模糊比对结果 (纯 fp32), 保留用于未来扩展
-        fuzzy_qnt: 模糊比对结果 (量化感知)
-        sanity: Golden 自检结果
+        dut: DUT输出
+        golden: Golden数据
+        config: 比对配置
 
     Returns:
-        CompareStatus
+        比对结果字典
     """
-    tmp = CompareResult(
-        exact=exact, fuzzy_pure=_fuzzy_pure,
-        fuzzy_qnt=fuzzy_qnt, sanity=sanity,
-    )
-    return tmp.determine_status()
+    engine = CompareEngine.quick(config=config)
+    return engine.run(dut, golden)

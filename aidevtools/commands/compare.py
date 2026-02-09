@@ -13,17 +13,23 @@ from aidevtools.ops.base import clear as do_clear
 from aidevtools.ops.base import dump as do_dump
 from aidevtools.ops.base import get_records
 from aidevtools.tools.compare.diff import compare_full
-from aidevtools.compare.bitwise import (
-    FloatFormat,
-    BitLayout,
-    BFP8,
-    BFP4,
-    compare_bitwise,
-    print_bit_analysis,
-    print_bit_heatmap,
-    gen_bit_heatmap_svg,
-    gen_perbit_bar_svg,
-)
+
+# bitwise 功能已重构到 strategy.bit_analysis 模块
+try:
+    from aidevtools.compare.strategy import (
+        BitAnalysisStrategy,
+        FloatFormat,
+        BitLayout,
+        FP32,
+        FP16,
+        BFLOAT16,
+        BFP16,
+        BFP8,
+        BFP4,
+    )
+    BITWISE_AVAILABLE = True
+except ImportError:
+    BITWISE_AVAILABLE = False
 
 
 def _action_dump(output, **kwargs):
@@ -135,6 +141,10 @@ def _action_qtypes(**kwargs):
 
 def _action_bitwise(golden, result, dtype, shape, output, **kwargs):
     """Bit 级比对分析"""
+    if not BITWISE_AVAILABLE:
+        logger.error("Bitwise 比对功能暂时不可用（compare.bitwise 模块重构中）")
+        print("提示: 可使用 'compare fuzzy' 进行模糊比对")
+        return 1
     if not golden or not result:
         logger.error(
             "请指定文件: compare bitwise --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32"
@@ -147,32 +157,33 @@ def _action_bitwise(golden, result, dtype, shape, output, **kwargs):
 
     # 自动检测浮点格式 (支持标准浮点 + BFP)
     fmt_map = {
-        "float32": FloatFormat.FLOAT32,
-        "float16": FloatFormat.FLOAT16,
-        "bfloat16": FloatFormat.BFLOAT16,
+        "float32": FP32,
+        "float16": FP16,
+        "bfloat16": BFLOAT16,
+        "bfp16": BFP16,
         "bfp8": BFP8,
         "bfp4": BFP4,
     }
-    fmt = fmt_map.get(dtype, FloatFormat.FLOAT32)
+    fmt = fmt_map.get(dtype, FP32)
 
     # Bit 级分析
-    bit_result = compare_bitwise(g, r, fmt=fmt)
-    print_bit_analysis(bit_result, name=golden)
+    bit_result = BitAnalysisStrategy.compare(g, r, fmt=fmt)
 
-    # Bit 热力图 (文本)
-    print_bit_heatmap(g, r, fmt=fmt, block_size=256)
+    # 打印分析结果
+    print(f"\n=== Bit 级分析: {golden} ===")
+    print(f"格式: {fmt.name}")
+    print(f"总元素数: {bit_result.summary.total_elements}")
+    print(f"差异元素数: {bit_result.summary.diff_elements}")
+    print(f"符号位翻转: {bit_result.summary.sign_flip_count}")
+    print(f"指数差异: {bit_result.summary.exponent_diff_count} (max={bit_result.summary.max_exponent_diff})")
+    print(f"尾数差异: {bit_result.summary.mantissa_diff_count}")
 
-    # 生成 SVG (热力图 + per-bit 条形图)
-    import os
-    os.makedirs(output, exist_ok=True)
-
-    svg_heatmap = os.path.join(output, "bit_heatmap.svg")
-    gen_bit_heatmap_svg(g, r, svg_heatmap, fmt=fmt, block_size=256)
-    print(f"Bit 热力图 SVG: {svg_heatmap}")
-
-    svg_perbit = os.path.join(output, "perbit_bar.svg")
-    gen_perbit_bar_svg(bit_result, svg_perbit)
-    print(f"Per-bit 分布图 SVG: {svg_perbit}")
+    # 打印告警
+    print("\n告警:")
+    for warn in bit_result.warnings:
+        print(f"  [{warn.level.value}] {warn.message}")
+        if warn.indices:
+            print(f"    示例索引: {warn.indices[:5]}")
 
     return 0 if not bit_result.has_critical else 1
 

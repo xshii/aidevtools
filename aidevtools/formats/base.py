@@ -149,8 +149,8 @@ def load(
 def _infer_name(path: str, bm: str = "") -> str:
     """从文件名提取 tensor 名
 
-    encoder_linear_0_weight_64x64.bfp4.bin → linear_0_weight
-    (去掉 bm 前缀、shape 后缀、qtype.bin 后缀)
+    encoder_20260209082417_linear_0_weight_64x64.bfp4.bin → linear_0_weight
+    (去掉 bm 前缀、时间戳版本号、shape 后缀、qtype.bin 后缀)
     """
     import os
     import re
@@ -163,6 +163,11 @@ def _infer_name(path: str, bm: str = "") -> str:
     # 去掉 bm 前缀
     if bm and base.startswith(bm + "_"):
         base = base[len(bm) + 1:]
+    # 去掉时间戳版本号（14位数字，格式：YYYYMMDDHHMMSS）
+    if "_" in base:
+        parts = base.split("_", 1)
+        if len(parts) == 2 and re.fullmatch(r"\d{14}", parts[0]):
+            base = parts[1]
     # 去掉 shape 后缀
     if "_" in base:
         head, last = base.rsplit("_", 1)
