@@ -1,20 +1,21 @@
 """
-Golden 自检
+数据自检策略
 
-验证 Golden 数据的有效性:
-1. 数值非全零/全一
-2. 无 NaN/Inf
-3. 数值范围合理
-4. Golden_qnt vs Golden_pure 的 QSNR >= 阈值
+检查Golden数据的有效性。
 """
-
 import numpy as np
 
-from .metrics import calc_qsnr, check_nan_inf, check_nonzero
-from .types import SanityResult, CompareConfig
+from .base import CompareStrategy, CompareContext
+from ..metrics import calc_qsnr, check_nan_inf, check_nonzero
+from ..types import SanityResult, CompareConfig
 
 
-def check_golden_sanity(
+# ============================================================================
+# 底层实现函数
+# ============================================================================
+
+
+def _check_golden_sanity_impl(
     golden_pure: np.ndarray,
     golden_qnt: np.ndarray = None,
     config: CompareConfig = None,
@@ -98,7 +99,7 @@ def check_golden_sanity(
     return result
 
 
-def check_data_sanity(data: np.ndarray, name: str = "data") -> SanityResult:
+def _check_data_sanity_impl(data: np.ndarray, name: str = "data") -> SanityResult:
     """
     通用数据自检
 
@@ -133,3 +134,80 @@ def check_data_sanity(data: np.ndarray, name: str = "data") -> SanityResult:
         result.valid = False
 
     return result
+
+
+# ============================================================================
+# 策略类
+# ============================================================================
+
+
+class SanityStrategy(CompareStrategy):
+    """
+    Golden自检策略
+
+    验证Golden数据是否合法、有效。
+
+    使用场景：
+    - 比对前预检查
+    - 排查Golden生成问题
+
+    使用方式：
+        # 方式1: 直接调用静态方法
+        result = SanityStrategy.compare(golden_pure, golden_qnt, config)
+        result = SanityStrategy.check_data(data, name="input")
+
+        # 方式2: 通过引擎
+        engine = CompareEngine(SanityStrategy())
+        result = engine.run(dut, golden)
+    """
+
+    @staticmethod
+    def compare(
+        golden_pure: np.ndarray,
+        golden_qnt: np.ndarray = None,
+        config: CompareConfig = None,
+    ) -> SanityResult:
+        """
+        Golden 自检（静态方法）
+
+        检查项:
+        1. non_zero: 数据非全零
+        2. no_nan_inf: 无 NaN/Inf
+        3. range_valid: 数值范围合理
+        4. qsnr_valid: golden_qnt vs golden_pure QSNR >= 阈值
+
+        Args:
+            golden_pure: 纯 fp32 Golden
+            golden_qnt: 量化感知 Golden (可选)
+            config: 比对配置
+
+        Returns:
+            SanityResult
+        """
+        return _check_golden_sanity_impl(golden_pure, golden_qnt, config)
+
+    @staticmethod
+    def check_data(data: np.ndarray, name: str = "data") -> SanityResult:
+        """
+        通用数据自检（静态方法）
+
+        Args:
+            data: 输入数据
+            name: 数据名称
+
+        Returns:
+            SanityResult
+        """
+        return _check_data_sanity_impl(data, name)
+
+    def run(self, ctx: CompareContext) -> SanityResult:
+        """执行Golden自检（Strategy 协议方法）"""
+        return self.compare(
+            golden_pure=ctx.golden,
+            golden_qnt=ctx.golden_qnt if ctx.golden_qnt is not None else ctx.golden,
+            config=ctx.config,
+        )
+
+    @property
+    def name(self) -> str:
+        return "sanity"

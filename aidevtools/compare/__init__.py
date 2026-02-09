@@ -1,41 +1,44 @@
 """
-比对模块
+比对模块 (重构版)
 
-提供精确比对、模糊比对、Golden 自检功能，支持 4 种状态判定。
+基于策略模式的数据比对框架。
 
-状态判定矩阵:
-    DUT vs Golden | Golden 自检 | 判定状态
-    --------------|-------------|---------------
-    PASS          | PASS        | PASS
-    PASS          | FAIL        | GOLDEN_SUSPECT
-    FAIL          | PASS        | DUT_ISSUE
-    FAIL          | FAIL        | BOTH_SUSPECT
+快速开始:
+    from aidevtools.compare import CompareEngine
 
-基本使用:
-    from aidevtools.compare import compare_full, CompareConfig, FP32
+    # 方式1: 使用预定义策略
+    engine = CompareEngine.standard()
+    results = engine.run(dut, golden)
 
-    # 执行完整比对
-    result = compare_full(
-        dut_output=dut,
-        golden_pure=golden_fp32,
-        golden_qnt=golden_qnt,
-    )
-    print(f"Status: {result.status.value}")
+    # 方式2: 自定义策略组合
+    from aidevtools.compare.strategy import ExactStrategy, FuzzyStrategy, CompositeStrategy
+    engine = CompareEngine(CompositeStrategy([
+        ExactStrategy(),
+        FuzzyStrategy(),
+    ]))
+    results = engine.run(dut, golden)
 
-    # 统一管线: 四态 + bitwise + blocked 一步到位
-    config = CompareConfig(
-        fuzzy_min_qsnr=25.0,
-        fuzzy_min_cosine=0.99,
-        enable_bitwise=True,
-        bitwise_fmt=FP32,
-        enable_blocked=True,
-        blocked_block_size=64,
-    )
-    result = compare_full(dut, golden, config=config)
-    # result.status / result.bitwise / result.blocked 均可访问
+架构:
+    CompareEngine ← 执行引擎
+        ↓
+    CompareStrategy ← 策略接口
+        ├─ ExactStrategy ← 精确比对
+        ├─ FuzzyStrategy ← 模糊比对
+        ├─ SanityStrategy ← 自检
+        ├─ BitXorStrategy ← Bit XOR比对
+        ├─ BitAnalysisStrategy ← Bit级分析（可选）
+        ├─ BlockedStrategy ← 分块分析
+        └─ CompositeStrategy ← 组合策略
+            ├─ StandardStrategy ← 标准比对（推荐）
+            ├─ QuickCheckStrategy ← 快速检查
+            ├─ DeepAnalysisStrategy ← 深度分析
+            └─ MinimalStrategy ← 最小比对
 """
 
-# --- 核心类型 ---
+# ============================================================================
+# 核心类型
+# ============================================================================
+
 from .types import (
     CompareConfig,
     CompareResult,
@@ -45,111 +48,160 @@ from .types import (
     SanityResult,
 )
 
-# --- 引擎 ---
-from .engine import CompareEngine, compare_full, determine_status
+# ============================================================================
+# 引擎
+# ============================================================================
 
-# --- 比对函数 ---
-from .exact import compare_exact, compare_bit
-from .fuzzy import compare_fuzzy, compare_isclose
-from .sanity import check_golden_sanity, check_data_sanity
-
-# --- 指标计算 ---
-from .metrics import (
-    AllMetrics,
-    calc_all_metrics,
-    calc_all_metrics_early_exit,
-    calc_qsnr,
-    calc_cosine,
-    calc_abs_error,
-    calc_rel_error,
-    calc_exceed_count,
-    check_nan_inf,
-    check_nonzero,
+from .engine import (
+    CompareEngine,
+    compare_full,
+    compare_quick,
 )
 
-# --- 分块比对 ---
-from .blocked import (
+# ============================================================================
+# 策略
+# ============================================================================
+
+from .strategy import (
+    # 基础设施
+    CompareContext,
+    CompareStrategy,
+    # 具体策略
+    ExactStrategy,
+    FuzzyStrategy,
+    SanityStrategy,
+    BlockedStrategy,
+    BitXorStrategy,
+    BitAnalysisStrategy,  # 高级调试工具（可选）
+    # 组合策略
+    CompositeStrategy,
+    StandardStrategy,
+    QuickCheckStrategy,
+    DeepAnalysisStrategy,
+    MinimalStrategy,
+    # 分级策略
+    TieredStrategy,
+    ProgressiveStrategy,
+    QuickThenDeepStrategy,
+    StrategyLevel,
+)
+
+# ============================================================================
+# 结果类型和格式定义
+# ============================================================================
+
+from .strategy import (
     BlockResult,
-    compare_blocked,
-    print_block_heatmap,
-    find_worst_blocks,
-)
-
-# --- Bit 级分析 ---
-from .bitwise import (
+    BitXorResult,
+    BitAnalysisResult,
     FloatFormat,
     BitLayout,
     FP32,
     FP16,
+    BFLOAT16,
     BFP16,
     BFP8,
     BFP4,
-    INT8,
-    UINT8,
-    WarnLevel,
-    BitDiffSummary,
-    BitWarning,
-    BitAnalysisResult,
-    ModelBitAnalysis,
-    compare_bitwise,
-    compare_model_bitwise,
-    print_bit_template,
-    print_bit_analysis,
-    print_bit_heatmap,
-    print_model_bit_analysis,
-    gen_bit_heatmap_svg,
-    gen_perbit_bar_svg,
 )
 
-# --- 报告 ---
+
+# ============================================================================
+# 指标计算（高级用户）
+# ============================================================================
+
+from .metrics import (
+    AllMetrics,
+    calc_all_metrics,
+    calc_qsnr,
+    calc_cosine,
+)
+
+# ============================================================================
+# 模型级分析
+# ============================================================================
+
+from .model import (
+    ModelTieredAnalyzer,
+)
+
+# ============================================================================
+# 报告生成
+# ============================================================================
+
 from .report import (
+    # 新API
+    print_strategy_table,
+    format_strategy_results,
+    generate_strategy_json,
+    # 旧API（已废弃）
     print_compare_table,
     generate_text_report,
     generate_json_report,
 )
 
+# ============================================================================
+# 导出列表
+# ============================================================================
 
-# 公共 API — 仅包含 demos/CLI 实际使用的功能
-# 其余符号仍可通过子模块直接导入 (如 from aidevtools.compare.metrics import ...)
 __all__ = [
     # 核心类型
     "CompareConfig",
     "CompareResult",
     "CompareStatus",
+    "ExactResult",
+    "FuzzyResult",
+    "SanityResult",
     # 引擎
     "CompareEngine",
     "compare_full",
-    # 比对函数
-    "compare_exact",
-    "compare_bit",
-    "compare_fuzzy",
-    "compare_isclose",
-    "check_golden_sanity",
-    # 指标
-    "calc_all_metrics",
-    "calc_qsnr",
-    "calc_cosine",
-    # 分块比对
-    "compare_blocked",
-    "print_block_heatmap",
-    "find_worst_blocks",
-    # 报告
-    "print_compare_table",
-    "generate_text_report",
-    "generate_json_report",
-    # Bit 级分析
+    "compare_quick",
+    # 策略基础设施
+    "CompareContext",
+    "CompareStrategy",
+    # 具体策略
+    "ExactStrategy",
+    "FuzzyStrategy",
+    "SanityStrategy",
+    "BlockedStrategy",
+    "BitXorStrategy",
+    "BitAnalysisStrategy",  # 高级调试工具（可选）
+    # 组合策略
+    "CompositeStrategy",
+    "StandardStrategy",
+    "QuickCheckStrategy",
+    "DeepAnalysisStrategy",
+    "MinimalStrategy",
+    # 分级策略
+    "TieredStrategy",
+    "ProgressiveStrategy",
+    "QuickThenDeepStrategy",
+    "StrategyLevel",
+    # 结果类型
+    "BlockResult",
+    "BitXorResult",
+    "BitAnalysisResult",
+    # 格式定义
     "FloatFormat",
     "BitLayout",
     "FP32",
     "FP16",
+    "BFLOAT16",
     "BFP16",
     "BFP8",
     "BFP4",
-    "compare_bitwise",
-    "compare_model_bitwise",
-    "print_bit_analysis",
-    "print_bit_heatmap",
-    "print_model_bit_analysis",
-    "gen_bit_heatmap_svg",
-    "gen_perbit_bar_svg",
+    # 指标计算
+    "AllMetrics",
+    "calc_all_metrics",
+    "calc_qsnr",
+    "calc_cosine",
+    # 模型级分析
+    "ModelTieredAnalyzer",
+    # 报告生成（新API）
+    "print_strategy_table",
+    "format_strategy_results",
+    "generate_strategy_json",
+    # 报告生成（旧API，已废弃）
+    "print_compare_table",
+    "generate_text_report",
+    "generate_json_report",
 ]

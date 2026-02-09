@@ -342,22 +342,24 @@ class TestCpuGoldenCLI:
         skip_if_not_built()
 
     def test_help(self):
-        """--help 选项"""
+        """无参数调用显示使用说明"""
         result = subprocess.run(
-            [str(CPU_GOLDEN_PATH), "--help"],
+            [str(CPU_GOLDEN_PATH)],
             capture_output=True, text=True
         )
-        assert result.returncode == 0
-        assert "CPU Golden CLI" in result.stderr
+        assert result.returncode == 1
+        assert "insufficient arguments" in result.stderr
+        assert "Usage:" in result.stderr
+        assert "Supported dtypes:" in result.stderr
 
     def test_unknown_op(self):
-        """未知算子"""
+        """未知算子（缺少 dtype 参数）"""
         result = subprocess.run(
             [str(CPU_GOLDEN_PATH), "unknown_op"],
             capture_output=True, text=True
         )
         assert result.returncode == 1
-        assert "unknown op" in result.stderr
+        assert "insufficient arguments" in result.stderr
 
     def test_missing_args(self):
         """缺少参数"""

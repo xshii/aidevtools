@@ -188,6 +188,8 @@ class DataGenerator:
             qtype: 默认量化类型
             precision: PrecisionConfig，算子级精度配置
         """
+        import datetime
+
         self.seed = seed
         self.l2_base = l2_base
         self.alignment = alignment
@@ -196,6 +198,9 @@ class DataGenerator:
         self._l2_offset = 0
         self._tensors: Dict[str, GeneratedTensor] = {}
         self._op_counter: Dict[str, int] = {}
+
+        # 生成时间戳版本号 (YYYYMMDDHHMMSS)
+        self._version = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
         # 精度配置
         if precision is None:
@@ -663,8 +668,8 @@ class DataGenerator:
         """
         导出为 DUT 格式
 
-        文件命名: {bm}_{name}_{shape}.{qtype}.bin
-        示例: encoder_linear_0_weight_64x64.bfp4.bin
+        文件命名: {bm}_{version}_{name}_{shape}.{qtype}.bin
+        示例: encoder_20260208_143025_linear_0_weight_64x64.bfp4.bin
 
         Args:
             output_dir: 输出目录
@@ -685,7 +690,7 @@ class DataGenerator:
             # 量化
             packed, _ = quantize(tensor.array, tensor.qtype)
 
-            # 文件名: {bm}_{name}_{shape}.{qtype}.bin
+            # 文件名: {bm}_{version}_{name}_{shape}.{qtype}.bin
             safe_name = tensor.name.replace(".", "_")
             shape_suffix = "x".join(str(s) for s in tensor.shape)
             parts = []
@@ -693,6 +698,8 @@ class DataGenerator:
                 parts.append(prefix)
             if bm:
                 parts.append(bm)
+            # 自动添加时间戳版本号
+            parts.append(self._version)
             parts.append(safe_name)
             parts.append(shape_suffix)
             basename = "_".join(parts)
@@ -702,7 +709,7 @@ class DataGenerator:
             result[tensor.name] = filepath
 
         # 保存内存布局
-        layout_prefix = f"{bm}_" if bm else prefix
+        layout_prefix = f"{bm}_{self._version}_" if bm else f"{self._version}_" if not prefix else f"{prefix}_"
         (output_dir / f"{layout_prefix}memory_layout.txt").write_text(self.memory_summary())
 
         return result

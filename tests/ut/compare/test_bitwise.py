@@ -3,30 +3,32 @@
 import numpy as np
 import pytest
 
-from aidevtools.compare.bitwise import (
+from aidevtools.compare.strategy import (
     FloatFormat,
     BitLayout,
     FP32,
     FP16,
+    BFLOAT16,
     BFP16,
     BFP8,
     BFP4,
-    INT8,
-    UINT8,
-    WarnLevel,
-    BitDiffSummary,
-    BitWarning,
+    BitAnalysisStrategy,
     BitAnalysisResult,
-    ModelBitAnalysis,
-    compare_bitwise,
-    compare_model_bitwise,
-    print_bit_template,
-    print_bit_analysis,
-    print_bit_heatmap,
-    print_model_bit_analysis,
-    gen_bit_heatmap_svg,
-    gen_perbit_bar_svg,
 )
+
+# WarnLevel 没有在 __init__.py 中导出，直接从模块导入
+from aidevtools.compare.strategy.bit_analysis import WarnLevel
+
+# 旧 API 兼容层 - 将 compare_bitwise 映射到新的静态方法
+def compare_bitwise(golden, result, fmt=FP32):
+    """兼容旧 API - 自动推断格式"""
+    return BitAnalysisStrategy.compare(golden, result, fmt=fmt)
+
+# 删除已移除的类型/函数（测试中如果用到需要更新）
+# INT8, UINT8, BitDiffSummary, BitWarning, ModelBitAnalysis
+# compare_model_bitwise, print_bit_template, print_bit_analysis
+# print_bit_heatmap, print_model_bit_analysis
+# gen_bit_heatmap_svg, gen_perbit_bar_svg
 
 
 class TestCompareBitwise:

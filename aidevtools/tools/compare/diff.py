@@ -15,10 +15,7 @@ from aidevtools.compare.metrics import (
     calc_qsnr,
     calc_cosine,
 )
-from aidevtools.compare.exact import (
-    compare_bit,
-    compare_exact as _core_compare_exact,
-)
+from aidevtools.compare.strategy import ExactStrategy
 
 
 # === 本模块专有类型 (保持向后兼容) ===
@@ -139,7 +136,7 @@ def compare_exact(
     Returns:
         ExactResult
     """
-    core_result = _core_compare_exact(golden, result, max_abs, max_count)
+    core_result = ExactStrategy.compare(golden, result, max_abs, max_count)
     return ExactResult(
         passed=core_result.passed,
         mismatch_count=core_result.mismatch_count,
