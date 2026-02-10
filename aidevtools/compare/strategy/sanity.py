@@ -208,6 +208,54 @@ class SanityStrategy(CompareStrategy):
             config=ctx.config,
         )
 
+    @staticmethod
+    def visualize(result: SanityResult) -> "Page":
+        """
+        Sanity 策略级可视化
+
+        体现比对原理：Golden 自检
+        - 各项检查结果
+        - 整体有效性
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        page = Visualizer.create_page(title="Sanity Check Report")
+
+        # 1. 整体状态饼图
+        status_data = {
+            "✅ Valid" if result.valid else "❌ Invalid": 1,
+        }
+        pie = Visualizer.create_pie(status_data, title="Overall Status")
+        page.add(pie)
+
+        # 2. 各项检查结果
+        if result.checks:
+            check_names = list(result.checks.keys())
+            check_values = [1 if v else 0 for v in result.checks.values()]
+
+            bar = Visualizer.create_bar(
+                check_names,
+                {"Passed": check_values},
+                title="Sanity Checks (1=Pass, 0=Fail)",
+            )
+            page.add(bar)
+
+        # 3. 检查详情（如有消息）
+        if result.messages:
+            # 简单展示前10条消息
+            msg_summary = {
+                f"Msg {i+1}": len(msg) for i, msg in enumerate(result.messages[:10])
+            }
+            if msg_summary:
+                msg_bar = Visualizer.create_bar(
+                    list(msg_summary.keys()),
+                    {"Length": list(msg_summary.values())},
+                    title="Message Summary (char count)",
+                )
+                page.add(msg_bar)
+
+        return page
+
     @property
     def name(self) -> str:
         return "sanity"

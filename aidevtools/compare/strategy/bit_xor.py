@@ -171,6 +171,60 @@ class BitXorStrategy(CompareStrategy):
         print("=" * 60)
         print()
 
+    @staticmethod
+    def visualize(result: BitXorResult) -> "Page":
+        """
+        BitXor 策略级可视化
+
+        体现比对原理：bit-by-bit XOR（无语义理解）
+        - 元素差异率
+        - bit 差异率
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        try:
+            from pyecharts.charts import Gauge
+            from pyecharts import options as opts
+        except ImportError:
+            raise ImportError("pyecharts is required for visualization. Install: pip install pyecharts")
+
+        page = Visualizer.create_page(title="Bit XOR Analysis Report")
+
+        # 1. 元素差异率仪表盘
+        elem_diff_pct = result.diff_element_ratio * 100
+        gauge_elem = (
+            Gauge()
+            .add("", [("Diff Element %", elem_diff_pct)])
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title=f"Element Diff Rate ({result.diff_elements}/{result.total_elements})"),
+            )
+        )
+        page.add(gauge_elem)
+
+        # 2. Bit 差异率仪表盘
+        bit_diff_pct = result.diff_bit_ratio * 100
+        gauge_bit = (
+            Gauge()
+            .add("", [("Diff Bit %", bit_diff_pct)])
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title=f"Bit Diff Rate ({result.diff_bits}/{result.total_bits})"),
+            )
+        )
+        page.add(gauge_bit)
+
+        # 3. 统计对比
+        bar = Visualizer.create_bar(
+            ["Elements", "Bits"],
+            {
+                "Total": [result.total_elements, result.total_bits],
+                "Diff": [result.diff_elements, result.diff_bits],
+            },
+            title="XOR Statistics",
+        )
+        page.add(bar)
+
+        return page
+
     @property
     def name(self) -> str:
         return "bit_xor"

@@ -135,6 +135,12 @@ def _to_uint(arr: np.ndarray) -> np.ndarray:
         return flat.astype(np.float32).view(np.uint32)
 
 
+def _get_layout_from_format(fmt: FloatFormat) -> BitLayout:
+    """从 FloatFormat 获取 BitLayout"""
+    s, e, m = _FORMAT_LAYOUT[fmt]
+    return BitLayout(s, e, m, fmt.value)
+
+
 def _generate_warnings(
     summary: BitAnalysisSummary,
     sign_diff_mask: np.ndarray,
@@ -461,6 +467,69 @@ class BitAnalysisStrategy(CompareStrategy):
     def run(self, ctx: CompareContext) -> BitAnalysisResult:
         """执行 bit 级分析（Strategy 协议方法）"""
         return self.compare(ctx.golden, ctx.dut, fmt=self.format)
+
+    @staticmethod
+    def visualize(result: BitAnalysisResult) -> "Page":
+        """
+        BitAnalysis 策略级可视化
+
+        体现比对原理：bit 语义分析
+        - 展示 sign/exponent/mantissa 错误分类
+        - 突出格式理解
+        - 严重度分级
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        page = Visualizer.create_page(title="Bit Analysis Report")
+
+        # 1. 错误类型分布饼图（体现语义分析）
+        no_diff = result.summary.total_elements - result.summary.diff_elements
+        error_data = {
+            "✅ No Diff": no_diff,
+            "🟡 Mantissa Only": result.summary.mantissa_diff_count,
+            "🟠 Exponent Diff": result.summary.exponent_diff_count,
+            "🔴 Sign Flip": result.summary.sign_flip_count,
+        }
+
+        fmt_name = result.fmt.value if isinstance(result.fmt, FloatFormat) else result.fmt.name
+        pie = Visualizer.create_pie(
+            error_data,
+            title=f"Error Type Distribution ({fmt_name})",
+        )
+        page.add(pie)
+
+        # 2. Bit 布局柱状图（体现格式理解）
+        layout = result.fmt if isinstance(result.fmt, BitLayout) else _get_layout_from_format(result.fmt)
+        x_data = [
+            f"Sign (b{layout.total_bits-1})",
+            f"Exponent (b{layout.total_bits-2}:b{layout.mantissa_bits})",
+            f"Mantissa (b{layout.mantissa_bits-1}:b0)",
+        ]
+        y_data = {
+            "Error Count": [
+                result.summary.sign_flip_count,
+                result.summary.exponent_diff_count,
+                result.summary.mantissa_diff_count,
+            ]
+        }
+        bar = Visualizer.create_bar(x_data, y_data, title=f"Bit Layout Analysis ({fmt_name})")
+        page.add(bar)
+
+        # 3. 告警摘要（体现严重度分级）
+        if result.warnings:
+            critical = sum(1 for w in result.warnings if w.level == WarnLevel.CRITICAL)
+            warning = sum(1 for w in result.warnings if w.level == WarnLevel.WARNING)
+            info = sum(1 for w in result.warnings if w.level == WarnLevel.INFO)
+
+            warn_data = {"🔴 CRITICAL": critical, "🟠 WARNING": warning, "🟡 INFO": info}
+            warn_bar = Visualizer.create_bar(
+                list(warn_data.keys()),
+                {"Count": list(warn_data.values())},
+                title="Warning Summary",
+            )
+            page.add(warn_bar)
+
+        return page
 
     @property
     def name(self) -> str:

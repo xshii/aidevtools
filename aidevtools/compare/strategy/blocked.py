@@ -295,6 +295,72 @@ class BlockedStrategy(CompareStrategy):
             rtol=ctx.config.fuzzy_rtol,
         )
 
+    @staticmethod
+    def visualize(blocks: List[BlockResult], threshold: float = 20.0, cols: int = 8) -> "Page":
+        """
+        Blocked 策略级可视化
+
+        体现比对原理：块级分析（局部 vs 全局）
+        - QSNR 空间分布热力图
+        - QSNR 统计分布
+        - 异常块定位
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        page = Visualizer.create_page(title="Blocked Analysis Report")
+
+        # 1. QSNR 热力图（体现空间分布）
+        rows = (len(blocks) + cols - 1) // cols
+        qsnr_matrix = []
+        for r in range(rows):
+            row = []
+            for c in range(cols):
+                idx = r * cols + c
+                if idx < len(blocks):
+                    row.append(blocks[idx].qsnr)
+                else:
+                    row.append(0.0)
+            qsnr_matrix.append(row)
+
+        heatmap = Visualizer.create_heatmap(
+            x_data=[f"C{i}" for i in range(cols)],
+            y_data=[f"R{i}" for i in range(rows)],
+            values=qsnr_matrix,
+            title=f"Block QSNR Heatmap ({len(blocks)} blocks)",
+        )
+        page.add(heatmap)
+
+        # 2. QSNR 分布直方图（体现统计特征）
+        bins = [0, 10, 20, 30, 40, 50, 100]
+        counts = [0] * (len(bins) - 1)
+        for block in blocks:
+            for i in range(len(bins) - 1):
+                if bins[i] <= block.qsnr < bins[i + 1]:
+                    counts[i] += 1
+                    break
+
+        x_data = [f"[{bins[i]}-{bins[i+1]})" for i in range(len(bins) - 1)]
+        bar = Visualizer.create_bar(
+            x_data,
+            {"Block Count": counts},
+            title=f"QSNR Distribution (threshold={threshold} dB)",
+        )
+        page.add(bar)
+
+        # 3. 失败块详情（体现局部分析）
+        failed = [b for b in blocks if not b.passed]
+        if failed:
+            worst = sorted(failed, key=lambda b: b.qsnr)[:10]
+            worst_bar = Visualizer.create_bar(
+                [f"Block@{b.offset}" for b in worst],
+                {"QSNR (dB)": [b.qsnr for b in worst]},
+                title="Top 10 Failed Blocks",
+                horizontal=True,
+            )
+            page.add(worst_bar)
+
+        return page
+
     @property
     def name(self) -> str:
         return f"blocked_{self.block_size}"

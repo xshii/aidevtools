@@ -140,6 +140,60 @@ class ExactStrategy(CompareStrategy):
                 max_count=ctx.config.exact_max_count,
             )
 
+    @staticmethod
+    def visualize(result: ExactResult) -> "Page":
+        """
+        Exact 策略级可视化
+
+        体现比对原理：精确匹配
+        - 通过率仪表盘
+        - 误差分布（如有不匹配）
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        try:
+            from pyecharts.charts import Gauge
+            from pyecharts import options as opts
+        except ImportError:
+            raise ImportError("pyecharts is required for visualization. Install: pip install pyecharts")
+
+        page = Visualizer.create_page(title="Exact Analysis Report")
+
+        # 1. 通过率仪表盘
+        pass_rate = (1 - result.mismatch_count / result.total_elements) * 100 if result.total_elements > 0 else 100.0
+
+        gauge = (
+            Gauge()
+            .add("", [("Pass Rate", pass_rate)])
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title=f"Exact Match ({result.mismatch_count}/{result.total_elements} mismatch)"),
+            )
+        )
+        page.add(gauge)
+
+        # 2. 状态饼图
+        status_data = {
+            "✅ Match": result.total_elements - result.mismatch_count,
+            "❌ Mismatch": result.mismatch_count,
+        }
+        pie = Visualizer.create_pie(status_data, title="Match Status")
+        page.add(pie)
+
+        # 3. 关键指标
+        if result.mismatch_count > 0:
+            metric_data = {
+                "First Diff Offset": result.first_diff_offset,
+                "Max Abs Diff": result.max_abs,
+            }
+            bar = Visualizer.create_bar(
+                list(metric_data.keys()),
+                {"Value": [float(v) for v in metric_data.values()]},
+                title="Error Metrics",
+            )
+            page.add(bar)
+
+        return page
+
     @property
     def name(self) -> str:
         return "exact" if not self.use_bit_compare else "exact_bit"

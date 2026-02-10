@@ -157,6 +157,63 @@ class FuzzyStrategy(CompareStrategy):
         golden_ref = ctx.golden_qnt if (self.use_golden_qnt and ctx.golden_qnt is not None) else ctx.golden
         return self.compare(golden_ref, ctx.dut, config=ctx.config)
 
+    @staticmethod
+    def visualize(result: FuzzyResult, config: CompareConfig = None) -> "Page":
+        """
+        Fuzzy 策略级可视化
+
+        体现比对原理：统计指标（QSNR/Cosine/MaxAbs/MaxRel）
+        - 多指标雷达图
+        - 阈值对比
+        - 通过率展示
+        """
+        from aidevtools.compare.visualizer import Visualizer
+
+        if config is None:
+            config = CompareConfig()
+
+        page = Visualizer.create_page(title="Fuzzy Analysis Report")
+
+        # 1. 多指标雷达图（体现统计特征）
+        schema = [
+            {"name": "QSNR (dB)", "max_": 50.0},
+            {"name": "Cosine", "max_": 1.0},
+            {"name": "Pass Rate", "max_": 1.0},
+        ]
+
+        pass_rate = 1.0 - (result.exceed_count / result.total_elements if result.total_elements > 0 else 0)
+        series_data = {
+            "Metrics": [
+                min(result.qsnr, 50.0),
+                result.cosine,
+                pass_rate,
+            ]
+        }
+
+        radar = Visualizer.create_radar(schema, series_data, title="Fuzzy Metrics")
+        page.add(radar)
+
+        # 2. 阈值对比柱状图（体现判定规则）
+        x_data = ["QSNR", "Cosine", "Pass Rate"]
+        actual = [result.qsnr, result.cosine * 100, pass_rate * 100]
+        threshold = [config.fuzzy_min_qsnr, config.fuzzy_min_cosine * 100, (1 - config.fuzzy_max_exceed_ratio) * 100]
+
+        bar = Visualizer.create_bar(
+            x_data,
+            {"Actual": actual, "Threshold": threshold},
+            title="Metrics vs Threshold",
+        )
+        page.add(bar)
+
+        # 3. 状态指示
+        status_data = {
+            "✅ Passed" if result.passed else "❌ Failed": 1,
+        }
+        pie = Visualizer.create_pie(status_data, title=f"Status (QSNR={result.qsnr:.1f} dB)")
+        page.add(pie)
+
+        return page
+
     @property
     def name(self) -> str:
         suffix = "_qnt" if self.use_golden_qnt else "_pure"
