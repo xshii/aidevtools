@@ -1,88 +1,6 @@
-"""Compare 命令系统测试
-
-通过命令行接口进行端到端测试
-"""
+"""Compare 命令系统测试"""
 import numpy as np
 import pytest
-
-
-class TestCompareSingleCmd:
-    """single 子命令测试"""
-
-    def test_single_pass(self, tmp_path):
-        """单次比对 - 通过"""
-        from aidevtools.commands.compare import cmd_compare
-
-        # 创建相同的测试数据
-        data = np.random.randn(2, 8, 64).astype(np.float32)
-        golden_path = tmp_path / "golden.bin"
-        result_path = tmp_path / "result.bin"
-        data.tofile(golden_path)
-        data.tofile(result_path)
-
-        ret = cmd_compare(
-            action="single",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-            shape="2,8,64",
-        )
-
-        assert ret == 0  # 通过
-
-    def test_single_fail(self, tmp_path):
-        """单次比对 - 失败"""
-        from aidevtools.commands.compare import cmd_compare
-
-        golden = np.random.randn(2, 8, 64).astype(np.float32)
-        result = golden + 0.1  # 较大差异
-
-        golden_path = tmp_path / "golden.bin"
-        result_path = tmp_path / "result.bin"
-        golden.tofile(golden_path)
-        result.tofile(result_path)
-
-        ret = cmd_compare(
-            action="single",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-            shape="2,8,64",
-        )
-
-        assert ret == 1  # 失败
-
-    def test_single_missing_args(self):
-        """缺少参数"""
-        from aidevtools.commands.compare import cmd_compare
-
-        ret = cmd_compare(action="single", golden="", result="")
-        assert ret == 1
-
-
-class TestCompareFuzzyCmd:
-    """fuzzy 子命令测试"""
-
-    def test_fuzzy_compare(self, tmp_path):
-        """模糊比对"""
-        from aidevtools.commands.compare import cmd_compare
-
-        golden = np.random.randn(100).astype(np.float32)
-        result = golden + np.random.randn(100).astype(np.float32) * 0.01
-
-        golden_path = tmp_path / "golden.bin"
-        result_path = tmp_path / "result.bin"
-        golden.tofile(golden_path)
-        result.tofile(result_path)
-
-        ret = cmd_compare(
-            action="fuzzy",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-        )
-
-        assert ret == 0
 
 
 class TestCompareConvertCmd:
@@ -102,13 +20,12 @@ class TestCompareConvertCmd:
             golden=str(input_path),
             output=str(output_path),
             target_dtype="float16",
-            dtype="float32",
+            qtype="float32",
         )
 
         assert ret == 0
         assert output_path.exists()
 
-        # 验证输出是 float16
         converted = np.fromfile(output_path, dtype=np.float16)
         assert len(converted) == 3
 
@@ -124,7 +41,7 @@ class TestCompareConvertCmd:
             action="convert",
             golden=str(input_path),
             target_dtype="unknown_type",
-            dtype="float32",
+            qtype="float32",
         )
 
         assert ret == 1
@@ -160,7 +77,6 @@ class TestCompareClearCmd:
 
         clear()
 
-        # 使用 F 触发记录 (使用有 cpu_golden 的算子)
         x = np.random.randn(2, 4).astype(np.float32)
         F.softmax(x)
         assert len(get_records()) == 1
@@ -168,86 +84,6 @@ class TestCompareClearCmd:
         ret = cmd_compare(action="clear")
         assert ret == 0
         assert len(get_records()) == 0
-
-
-class TestCompareBitwiseCmd:
-    """bitwise 子命令测试"""
-
-    def test_bitwise_pass(self, tmp_path):
-        """bit 级比对 - 仅尾数差异"""
-        from aidevtools.commands.compare import cmd_compare
-
-        golden = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        # 微小差异 (仅尾数)
-        result = golden + np.array([1e-7, 0, 0], dtype=np.float32)
-
-        golden_path = tmp_path / "golden.bin"
-        result_path = tmp_path / "result.bin"
-        golden.tofile(golden_path)
-        result.tofile(result_path)
-
-        ret = cmd_compare(
-            action="bitwise",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-            shape="3",
-            output=str(tmp_path / "output"),
-        )
-
-        assert ret == 0  # 无 CRITICAL
-        # Note: SVG生成功能已在重构中删除，不再检查SVG文件
-
-    def test_bitwise_critical(self, tmp_path):
-        """bit 级比对 - 符号翻转 → CRITICAL"""
-        from aidevtools.commands.compare import cmd_compare
-
-        golden = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        result = np.array([-1.0, 2.0, 3.0], dtype=np.float32)  # sign flip
-
-        golden_path = tmp_path / "golden.bin"
-        result_path = tmp_path / "result.bin"
-        golden.tofile(golden_path)
-        result.tofile(result_path)
-
-        ret = cmd_compare(
-            action="bitwise",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-            shape="3",
-            output=str(tmp_path / "output"),
-        )
-
-        assert ret == 1  # has CRITICAL
-
-    def test_bitwise_missing_args(self):
-        """bitwise 缺少参数"""
-        from aidevtools.commands.compare import cmd_compare
-
-        ret = cmd_compare(action="bitwise", golden="", result="")
-        assert ret == 1
-
-    def test_bitwise_alias(self, tmp_path):
-        """bit 别名"""
-        from aidevtools.commands.compare import cmd_compare
-
-        data = np.array([1.0, 2.0], dtype=np.float32)
-        golden_path = tmp_path / "g.bin"
-        result_path = tmp_path / "r.bin"
-        data.tofile(golden_path)
-        data.tofile(result_path)
-
-        ret = cmd_compare(
-            action="bit",
-            golden=str(golden_path),
-            result=str(result_path),
-            dtype="float32",
-            shape="2",
-            output=str(tmp_path / "output"),
-        )
-
-        assert ret == 0
 
 
 class TestCompareUnknownCmd:
@@ -283,5 +119,4 @@ class TestCompareDumpCmd:
         ret = cmd_compare(action="dump", output=str(tmp_path))
         assert ret == 0
 
-        # 检查文件生成
         assert (tmp_path / "softmax_0_golden.bin").exists()

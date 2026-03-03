@@ -6,23 +6,19 @@ import numpy as np
 from prettycli import command
 
 from aidevtools.core.log import logger
-from aidevtools.core.utils import parse_dtype, parse_list, parse_shape
+from aidevtools.core.utils import parse_list, parse_shape
 from aidevtools.formats.base import load
 from aidevtools.formats.quantize import list_quantize
 from aidevtools.ops.base import clear as do_clear
 from aidevtools.ops.base import dump as do_dump
 from aidevtools.ops.base import get_records
-from aidevtools.tools.compare.diff import compare_full
 
-# bitwise 功能已重构到 strategy.bit_analysis 模块
 try:
     from aidevtools.compare.strategy import (
         BitAnalysisStrategy,
-        FloatFormat,
         BitLayout,
         FP32,
         FP16,
-        BFLOAT16,
         BFP16,
         BFP8,
         BFP4,
@@ -46,91 +42,6 @@ def _action_clear(**kwargs):
     return 0
 
 
-def _action_single(golden, result, dtype, shape, **kwargs):
-    """单次比对两个文件"""
-    if not golden or not result:
-        logger.error(
-            "请指定文件: compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32"
-        )
-        return 1
-    dt = parse_dtype(dtype)
-    sh = parse_shape(shape)
-    g = load(golden, fmt="raw", dtype=dt, shape=sh)
-    r = load(result, fmt="raw", dtype=dt, shape=sh)
-    diff = compare_full(g, r)
-    status = "PASS" if diff.passed else "FAIL"
-    print(f"状态: {status}")
-    print(f"shape: {g.shape}")
-    print(f"max_abs: {diff.max_abs:.6e}")
-    print(f"qsnr: {diff.qsnr:.2f} dB")
-    print(f"cosine: {diff.cosine:.6f}")
-    return 0 if diff.passed else 1
-
-
-def _action_fuzzy(golden, result, dtype, shape, **kwargs):
-    """模糊比对"""
-    if not golden or not result:
-        logger.error("请指定文件: compare fuzzy --golden=a.bin --result=b.bin")
-        return 1
-    dt = parse_dtype(dtype)
-    sh = parse_shape(shape)
-    g = load(golden, fmt="raw", dtype=dt, shape=sh)
-    r = load(result, fmt="raw", dtype=dt, shape=sh)
-
-    g_f64 = g.astype(np.float64).flatten()
-    r_f64 = r.astype(np.float64).flatten()
-
-    diff_val = g_f64 - r_f64
-    signal_power = np.mean(g_f64**2)
-    noise_power = np.mean(diff_val**2)
-    qsnr = 10 * np.log10(signal_power / noise_power) if noise_power > 0 else float("inf")
-
-    norm_g = np.linalg.norm(g_f64)
-    norm_r = np.linalg.norm(r_f64)
-    cosine = np.dot(g_f64, r_f64) / (norm_g * norm_r) if norm_g > 0 and norm_r > 0 else 0.0
-    max_abs = np.max(np.abs(diff_val))
-
-    print("模式: 模糊比对 (fuzzy)")
-    print(f"shape: {g.shape}")
-    print(f"max_abs: {max_abs:.6e}")
-    print(f"qsnr: {qsnr:.2f} dB")
-    print(f"cosine: {cosine:.6f}")
-    return 0
-
-
-def _action_convert(golden, output, dtype, shape, target_dtype, **kwargs):
-    """类型转换导出"""
-    from aidevtools.formats.quantize import quantize
-
-    if not golden:
-        logger.error(
-            "请指定输入文件: compare convert --golden=a.bin --output=out.bin --target_dtype=float16"
-        )
-        return 1
-    if not target_dtype:
-        logger.error("请指定目标类型: --target_dtype=float16 (可用: compare qtypes 查看)")
-        return 1
-    out_path = output if output != "./workspace" else golden.replace(".bin", f"_{target_dtype}.bin")
-
-    dt = parse_dtype(dtype)
-    sh = parse_shape(shape)
-    data = load(golden, fmt="raw", dtype=dt, shape=sh)
-
-    try:
-        converted, meta = quantize(data, target_dtype)
-    except (NotImplementedError, ValueError) as e:
-        logger.error(str(e))
-        return 1
-
-    converted.tofile(out_path)
-    print(f"转换: {dtype} → {target_dtype}")
-    print(f"shape: {data.shape}")
-    print(f"输出: {out_path}")
-    if meta:
-        print(f"meta: {meta}")
-    return 0
-
-
 def _action_qtypes(**kwargs):
     """列出支持的量化类型"""
     print("支持的量化类型:")
@@ -139,65 +50,168 @@ def _action_qtypes(**kwargs):
     return 0
 
 
-def _action_bitwise(golden, result, dtype, shape, output, **kwargs):
-    """Bit 级比对分析"""
-    if not BITWISE_AVAILABLE:
-        logger.error("Bitwise 比对功能暂时不可用（compare.bitwise 模块重构中）")
-        print("提示: 可使用 'compare fuzzy' 进行模糊比对")
+def _action_convert(golden, output, qtype, shape, target_dtype, **kwargs):
+    """类型转换导出"""
+    from aidevtools.formats.quantize import quantize
+    from aidevtools.formats.filename_parser import parse_filename, infer_fmt
+
+    if not golden:
+        logger.error("请指定输入文件: compare convert --golden=a.bin --target_dtype=float16")
         return 1
+    if not target_dtype:
+        logger.error("请指定目标类型: --target_dtype=float16 (可用: compare qtypes 查看)")
+        return 1
+    out_path = output if output != "./workspace" else golden.rsplit(".", 1)[0] + f"_{target_dtype}.bin"
+
+    # 自动解读
+    parsed = parse_filename(golden)
+    fmt = kwargs.get("format") or (parsed["fmt"] if parsed else infer_fmt(golden))
+    qt = qtype or (parsed["qtype"] if parsed else "float32")
+    sh = parse_shape(shape) if shape else (parsed["shape"] if parsed else None)
+
+    data = load(golden, fmt=fmt, qtype=qt, shape=sh)
+
+    try:
+        converted, meta = quantize(data, target_dtype)
+    except (NotImplementedError, ValueError) as e:
+        logger.error(str(e))
+        return 1
+
+    converted.tofile(out_path)
+    print(f"转换: {qt} → {target_dtype}")
+    print(f"shape: {data.shape}")
+    print(f"输出: {out_path}")
+    if meta:
+        print(f"meta: {meta}")
+    return 0
+
+
+def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
+    """多级比数 (双路径: 源格式 exact/bit/block + fp32 fuzzy/sanity)
+
+    架构:
+        raw_g, raw_r   → exact (字节级) / bit_analysis (源格式 bit layout)
+             │
+             ▼ dequantize
+        fp32_g, fp32_r → fuzzy / sanity / blocked (源 block_size)
+
+    未指定 qtype / shape / format 时，从文件名自动解读。
+    """
     if not golden or not result:
         logger.error(
-            "请指定文件: compare bitwise --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32"
+            "请指定文件: compare diff --golden=softmax_bfp8_2x16x64.txt "
+            "--result=softmax_bfp8_2x16x64_result.txt"
         )
         return 1
-    dt = parse_dtype(dtype)
-    sh = parse_shape(shape)
-    g = load(golden, fmt="raw", dtype=dt, shape=sh)
-    r = load(result, fmt="raw", dtype=dt, shape=sh)
+    from math import ceil
 
-    # 自动检测浮点格式 (支持标准浮点 + BFP)
-    fmt_map = {
-        "float32": FP32,
-        "float16": FP16,
-        "bfloat16": BFLOAT16,
+    from aidevtools.compare.engine import CompareEngine
+    from aidevtools.compare.report import print_strategy_table
+    from aidevtools.compare.strategy import ExactStrategy, BlockedStrategy
+    from aidevtools.compare.strategy.bit_analysis import BitLayout as _BitLayout
+    from aidevtools.formats._registry import get as get_fmt
+    from aidevtools.formats.base import _BFP_DEFAULTS, _GFLOAT_DTYPES
+    from aidevtools.formats.filename_parser import parse_filename, infer_fmt
+
+    # ── 自动解读: 从 golden 文件名提取 qtype / shape / fmt ──
+    parsed = parse_filename(golden)
+    fmt = format if format != "raw" else (parsed["fmt"] if parsed else infer_fmt(golden))
+    qt = qtype or (parsed["qtype"] if parsed else None)
+    sh = parse_shape(shape) if shape else (parsed["shape"] if parsed else None)
+
+    # ── Path A: 加载源格式原始字节 ──
+    _RAW_DTYPES = {
+        "float16": np.float16,
+        "float32": np.float32,
+    }
+    if qt in _BFP_DEFAULTS:
+        raw_dtype = np.int8
+    elif qt in _GFLOAT_DTYPES:
+        raw_dtype = _GFLOAT_DTYPES[qt]
+    else:
+        raw_dtype = _RAW_DTYPES.get(qt, np.float32)
+    raw_g = get_fmt(fmt).load(golden, dtype=raw_dtype)
+    raw_r = get_fmt(fmt).load(result, dtype=raw_dtype)
+
+    # ── Path B: 反量化为 fp32 ──
+    fp32_g = load(golden, fmt=fmt, qtype=qt, shape=sh)
+    fp32_r = load(result, fmt=fmt, qtype=qt, shape=sh)
+
+    # ── 1. Exact: 源格式字节级比对 ──
+    exact_result = ExactStrategy.compare(raw_g, raw_r)
+
+    # ── 2. Fuzzy / Sanity: fp32 ──
+    _engines = {
+        "standard": CompareEngine.standard,
+        "quick": CompareEngine.quick,
+        "deep": CompareEngine.deep,
+        "minimal": CompareEngine.minimal,
+    }
+    factory = _engines.get(engine or "standard", CompareEngine.standard)
+    fp32_results = factory().run(dut=fp32_r, golden=fp32_g)
+
+    # ── 3. Bit Analysis: 源格式 bit layout ──
+    _BIT_LAYOUTS = {
         "bfp16": BFP16,
         "bfp8": BFP8,
         "bfp4": BFP4,
+        "gfloat16": _BitLayout(1, 8, 7, "gfloat16"),
+        "gfloat8": _BitLayout(1, 4, 3, "gfloat8"),
+        "float16": FP16,
+        "float32": FP32,
     }
-    fmt = fmt_map.get(dtype, FP32)
+    bit_result = None
+    bit_layout = _BIT_LAYOUTS.get(qt) if BITWISE_AVAILABLE and qt else None
+    if bit_layout is not None:
+        if qt in _BFP_DEFAULTS and sh is not None:
+            # BFP 打包格式 = [shared_exps..., mantissas...], 只分析 mantissa
+            block_size = _BFP_DEFAULTS[qt][0]
+            size = 1
+            for s in sh:
+                size *= s
+            num_blocks = ceil(size / block_size)
+            mant_g = raw_g[num_blocks:].view(np.uint8)
+            mant_r = raw_r[num_blocks:].view(np.uint8)
+            bit_result = BitAnalysisStrategy.compare(mant_g, mant_r, fmt=bit_layout)
+        else:
+            bit_result = BitAnalysisStrategy.compare(raw_g, raw_r, fmt=bit_layout)
 
-    # Bit 级分析
-    bit_result = BitAnalysisStrategy.compare(g, r, fmt=fmt)
+    # ── 4. Blocked: fp32 + 源格式 block_size ──
+    blocked_result = None
+    if qt in _BFP_DEFAULTS:
+        source_block_size = _BFP_DEFAULTS[qt][0]
+        blocked_result = BlockedStrategy.compare(
+            fp32_g, fp32_r, block_size=source_block_size,
+        )
 
-    # 打印分析结果
-    print(f"\n=== Bit 级分析: {golden} ===")
-    print(f"格式: {fmt.name}")
-    print(f"总元素数: {bit_result.summary.total_elements}")
-    print(f"差异元素数: {bit_result.summary.diff_elements}")
-    print(f"符号位翻转: {bit_result.summary.sign_flip_count}")
-    print(f"指数差异: {bit_result.summary.exponent_diff_count} (max={bit_result.summary.max_exponent_diff})")
-    print(f"尾数差异: {bit_result.summary.mantissa_diff_count}")
+    # ── 合并结果 & 输出报告 ──
+    merged = {
+        "exact": exact_result,
+        "fuzzy_pure": fp32_results.get("fuzzy_pure"),
+        "fuzzy_qnt": fp32_results.get("fuzzy_qnt"),
+        "sanity": fp32_results.get("sanity"),
+    }
+    name = parsed["op"] if parsed else (golden.rsplit("/", 1)[-1] if "/" in golden else golden)
+    print_strategy_table([merged], names=[name])
 
-    # 打印告警
-    print("\n告警:")
-    for warn in bit_result.warnings:
-        print(f"  [{warn.level.value}] {warn.message}")
-        if warn.indices:
-            print(f"    示例索引: {warn.indices[:5]}")
+    if bit_result is not None:
+        BitAnalysisStrategy.print_result(bit_result, name)
+    if blocked_result is not None:
+        BlockedStrategy.print_heatmap(blocked_result)
 
-    return 0 if not bit_result.has_critical else 1
+    # 判定退出码
+    fuzzy = merged.get("fuzzy_qnt") or merged.get("fuzzy_pure")
+    passed = fuzzy.passed if fuzzy else exact_result.passed
+    return 0 if passed else 1
 
 
 # Action 分发表
 _ACTIONS = {
     "dump": _action_dump,
     "clear": _action_clear,
-    "single": _action_single,
-    "fuzzy": _action_fuzzy,
     "convert": _action_convert,
     "qtypes": _action_qtypes,
-    "bitwise": _action_bitwise,
-    "bit": _action_bitwise,
+    "diff": _action_diff,
 }
 
 
@@ -211,10 +225,11 @@ def cmd_compare(
     format: str = "raw",  # pylint: disable=redefined-builtin  # CLI 参数名
     golden: str = "",
     result: str = "",
-    dtype: str = "float32",
     shape: str = "",
     target_dtype: str = "",
     ops: str = "",
+    qtype: str = "",
+    engine: str = "standard",
 ):
     """
     比数工具
@@ -223,12 +238,10 @@ def cmd_compare(
         compare <action>        执行指定步骤
 
     子命令:
+        diff       多级比数 (自动解读文件名 / hex-text + dequantize + 报告)
+        convert    类型转换导出
         dump       导出 Golden 数据
         clear      清空 Golden 记录
-        single     单次比对两个文件
-        fuzzy      模糊比对（跳过 bit 级比对）
-        bitwise    Bit 级比对分析 (sign/exponent/mantissa 告警 + 热力图)
-        convert    类型转换导出
         qtypes     列出支持的量化类型
 
     xlsx 子命令:
@@ -239,28 +252,27 @@ def cmd_compare(
         xlsx ops        列出可用算子
 
     参数:
+        --qtype            DUT 量化类型 (bfp8/gfloat8/...) 不指定则从文件名解读
+        --shape            输出 shape (2,16,64) 不指定则从文件名解读
+        --format           文件格式 (hex_text/raw/numpy) 不指定则从扩展名解读
+        --engine           比对引擎 (standard/quick/deep/minimal)
         --target_dtype     转换目标类型 (float16/bfloat16/...)
         --xlsx=xxx.xlsx    指定 xlsx 文件
         --ops=linear,relu  限定算子列表（xlsx template 用）
 
-    示例:
-        compare dump --output=./workspace                       导出数据
-        compare single --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64,32,32
-        compare fuzzy --golden=a.bin --result=b.bin --dtype=float32
-        compare bitwise --golden=a.bin --result=b.bin --dtype=float32 --shape=1,64  Bit级分析
-        compare convert --golden=a.bin --output=a_fp16.bin --target_dtype=float16
-        compare qtypes                                          列出量化类型
+    文件名约定:
+        {op}_{qtype}_{NxMxK}.txt              — golden
+        {op}_{qtype}_{NxMxK}_result.txt        — result
 
-    xlsx 示例:
-        compare xlsx template --output=config.xlsx              生成空模板
-        compare xlsx template --output=config.xlsx --ops=linear,relu  限定算子
-        compare xlsx export --xlsx=config.xlsx                  从 trace 导出
-        compare xlsx import --xlsx=config.xlsx --output=gen.py  生成 Python
-        compare xlsx run --xlsx=config.xlsx                     运行比数
+    示例:
+        compare diff --golden=softmax_bfp8_2x16x64.txt --result=softmax_bfp8_2x16x64_result.txt
+        compare diff --golden=a.txt --result=b.txt --qtype=bfp8 --shape=2,16,64 --format=hex_text
+        compare convert --golden=a.bin --target_dtype=float16
+        compare qtypes
     """
     # 无 action 时显示帮助
     if not action:
-        print("请指定子命令，例如: compare xlsx run --xlsx=config.xlsx")
+        print("请指定子命令，例如: compare diff --golden=a.txt --result=b.txt")
         print("查看帮助: compare --help")
         return 1
 
@@ -271,14 +283,15 @@ def cmd_compare(
             format=format,
             golden=golden,
             result=result,
-            dtype=dtype,
             shape=shape,
             target_dtype=target_dtype,
+            qtype=qtype,
+            engine=engine,
         )
     if action == "xlsx":
         return _handle_xlsx(subaction, xlsx, output, model, fmt=format, ops_str=ops)
     logger.error(f"未知子命令: {action}")
-    print("可用子命令: dump, clear, single, fuzzy, convert, qtypes, xlsx")
+    print("可用子命令: diff, convert, dump, clear, qtypes, xlsx")
     return 1
 
 

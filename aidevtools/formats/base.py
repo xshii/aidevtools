@@ -35,7 +35,13 @@ _BFP_DEFAULTS = {
 }
 
 
-_KNOWN_QTYPES = set(_BFP_DEFAULTS) | {"float16", "float32"}
+_GFLOAT_DTYPES = {
+    "gfloat16": np.uint16,
+    "gfloat8": np.uint8,
+    "gfloat4": np.uint8,
+}
+
+_KNOWN_QTYPES = set(_BFP_DEFAULTS) | set(_GFLOAT_DTYPES) | {"float16", "float32"}
 
 
 def _infer_qtype(path: str) -> Optional[str]:
@@ -133,7 +139,7 @@ def load(
         for s in shape:
             size *= s
         num_blocks = ceil(size / block_size)
-        packed = np.fromfile(path, dtype=np.int8)
+        packed = get(fmt).load(path, dtype=np.int8)
         from aidevtools.formats.quantize import dequantize
         meta = {
             "block_size": block_size,
@@ -142,6 +148,16 @@ def load(
             "original_shape": tuple(shape),
         }
         return dequantize(packed, qtype, meta)
+
+    if qtype in _GFLOAT_DTYPES:
+        raw_dtype = _GFLOAT_DTYPES[qtype]
+        raw = get(fmt).load(path, dtype=raw_dtype)
+        from aidevtools.formats.quantize import dequantize
+        meta = {"original_shape": tuple(shape) if shape else None}
+        result = dequantize(raw, qtype, meta)
+        if shape is not None:
+            result = result.reshape(shape)
+        return result
 
     raise ValueError(f"load: 不支持的 qtype '{qtype}'")
 

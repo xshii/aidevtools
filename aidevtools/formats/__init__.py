@@ -14,6 +14,7 @@ from aidevtools.formats.base import FormatBase, load, load_dir, save  # noqa: F4
 # 2. 加载内置格式以触发注册
 from aidevtools.formats import numpy_fmt  # noqa: F401
 from aidevtools.formats import raw  # noqa: F401
+from aidevtools.formats import hex_text  # noqa: F401
 
 # 3. 加载量化模块
 from aidevtools.formats import quantize  # noqa: F401
