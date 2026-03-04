@@ -293,7 +293,7 @@ class TestFourTrackGolden:
         from aidevtools.datagen import DataGenerator
         from aidevtools.frontend.types import PrecisionConfig
 
-        pc = PrecisionConfig(input_dtype="bfp16")
+        pc = PrecisionConfig(input_dtype="bfpp16")
         gen = DataGenerator(seed=42, precision=pc)
         tracks = gen.generate_four_track("relu", input_shape=(4, 16), precision=pc)
 
@@ -680,13 +680,13 @@ class TestParamDtypes:
         pc = PrecisionConfig(
             input_dtype="fp32",
             weight_dtype="fp32",
-            param_dtypes={"x": "bfp8"},  # 仅 x 用 bfp8
+            param_dtypes={"x": "bfpp8"},  # 仅 x 用 bfpp8
         )
         gen = DataGenerator(seed=42, precision=pc)
         tracks = gen.generate_four_track("relu", input_shape=(4, 16), precision=pc)
 
         assert tracks.golden_pure is not None
-        # param_dtypes 中有 bfp8，应触发 hw track
+        # param_dtypes 中有 bfpp8，应触发 hw track
         assert tracks.golden_hw is not None
 
     def test_four_track_per_param_local(self):

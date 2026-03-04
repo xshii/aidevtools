@@ -301,12 +301,12 @@ class TestQuantizeSimulation:
         b = rng.generate((64,), method="normal")
         np.testing.assert_array_equal(a, b)
 
-    def test_qtype_bfp16_introduces_loss(self):
-        """qtype='bfp16' 经过量化→反量化后数据有精度损失"""
+    def test_qtype_bfpp16_introduces_loss(self):
+        """qtype='bfpp16' 经过量化→反量化后数据有精度损失"""
         rng = RandomGenerator(seed=42)
         exact = rng.generate((256,), method="normal")
         rng.reset()
-        lossy = rng.generate((256,), method="normal", qtype="bfp16")
+        lossy = rng.generate((256,), method="normal", qtype="bfpp16")
         # 形状一致
         assert exact.shape == lossy.shape
         # 不完全相等 (有量化损失)
@@ -314,16 +314,16 @@ class TestQuantizeSimulation:
         # 但应该接近
         np.testing.assert_allclose(exact, lossy, rtol=0.05, atol=0.05)
 
-    def test_qtype_bfp8_larger_loss(self):
-        """bfp8 的精度损失大于 bfp16"""
+    def test_qtype_bfpp8_larger_loss(self):
+        """bfpp8 的精度损失大于 bfpp16"""
         rng = RandomGenerator(seed=42)
         exact = rng.generate((256,), method="normal")
 
         rng.reset()
-        lossy_16 = rng.generate((256,), method="normal", qtype="bfp16")
+        lossy_16 = rng.generate((256,), method="normal", qtype="bfpp16")
 
         rng.reset()
-        lossy_8 = rng.generate((256,), method="normal", qtype="bfp8")
+        lossy_8 = rng.generate((256,), method="normal", qtype="bfpp8")
 
         err_16 = np.abs(exact - lossy_16).mean()
         err_8 = np.abs(exact - lossy_8).mean()
@@ -336,7 +336,7 @@ class TestQuantizeSimulation:
         data_exact, _ = rng.generate_from_strategy("input", ctx)
 
         rng.reset()
-        data_lossy, _ = rng.generate_from_strategy("input", ctx, qtype="bfp16")
+        data_lossy, _ = rng.generate_from_strategy("input", ctx, qtype="bfpp16")
 
         assert data_exact.shape == data_lossy.shape
         assert not np.array_equal(data_exact, data_lossy)

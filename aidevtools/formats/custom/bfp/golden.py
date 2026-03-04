@@ -181,3 +181,33 @@ for _name, _block_size, _mantissa_bits, _desc in _BFP_FORMATS:
         dequantize_fn=_make_bfp_dequantizer(_block_size, _mantissa_bits),
         description=_desc,
     ))
+
+
+# ==================== BFP 坑位 (待用户实现) ====================
+
+def _bfp_not_implemented(name: str):
+    """生成 NotImplementedError 占位函数"""
+    def _quantize_stub(data: np.ndarray, **kwargs):
+        raise NotImplementedError(f"{name} quantize 待实现")
+    def _dequantize_stub(data: np.ndarray, meta: dict):
+        raise NotImplementedError(f"{name} dequantize 待实现")
+    return _quantize_stub, _dequantize_stub
+
+
+# BFP 格式配置: (format_name, default_block_size, mantissa_bits, description)
+_BFP_STUB_FORMATS = [
+    ("bfp16", 16, 8, "BFP16 (block_size=16, mantissa=8bit) - 待实现"),
+    ("bfp8", 32, 4, "BFP8 (block_size=32, mantissa=4bit) - 待实现"),
+    ("bfp4", 64, 2, "BFP4 (block_size=64, mantissa=2bit) - 待实现"),
+]
+
+for _name, _block_size, _mantissa_bits, _desc in _BFP_STUB_FORMATS:
+    _q, _dq = _bfp_not_implemented(_name)
+    register_block_format(BlockFormatSpec(
+        name=_name,
+        block_size=_block_size,
+        mantissa_bits=_mantissa_bits,
+        quantize_fn=_q,
+        dequantize_fn=_dq,
+        description=_desc,
+    ))

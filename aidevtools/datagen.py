@@ -417,7 +417,9 @@ class DataGenerator:
         hw_dtype = pc.output_dtype  # 使用 output_dtype 确定硬件格式
         golden_hw = None
         hw_data = None
-        hw_qtypes = ("bfp16", "bfp8", "bfp4", "gfloat16", "gfloat8", "gfloat4",
+        hw_qtypes = ("bfp16", "bfp8", "bfp4",
+                     "bfpp16", "bfpp8", "bfpp4",
+                     "gfloat16", "gfloat8", "gfloat4",
                      "gfp16", "gfp8", "gfp4")
         # 检查是否有任何精度配置使用了硬件格式
         all_dtypes = {getattr(pc, f) for f in ("input_dtype", "weight_dtype", "output_dtype")}

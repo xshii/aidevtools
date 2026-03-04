@@ -102,6 +102,9 @@ from .strategy import (
     BFPP16,
     BFPP8,
     BFPP4,
+    BFP16,
+    BFP8,
+    BFP4,
 )
 
 
@@ -189,6 +192,9 @@ __all__ = [
     "BFPP16",
     "BFPP8",
     "BFPP4",
+    "BFP16",
+    "BFP8",
+    "BFP4",
     # 指标计算
     "AllMetrics",
     "calc_all_metrics",

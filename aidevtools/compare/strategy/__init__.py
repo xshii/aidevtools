@@ -24,6 +24,9 @@ from .bit_analysis import (
     BFPP16,
     BFPP8,
     BFPP4,
+    BFP16,
+    BFP8,
+    BFP4,
 )
 
 # 组合策略
@@ -87,4 +90,7 @@ __all__ = [
     "BFPP16",
     "BFPP8",
     "BFPP4",
+    "BFP16",
+    "BFP8",
+    "BFP4",
 ]

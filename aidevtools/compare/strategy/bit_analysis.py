@@ -89,6 +89,11 @@ BFPP16 = BitLayout(1, 0, 7, "bfpp16", precision_bits=8)   # 8 有效位，占满
 BFPP8 = BitLayout(1, 0, 7, "bfpp8", precision_bits=4)     # 4 有效位，高 4 位符号扩展
 BFPP4 = BitLayout(1, 0, 7, "bfpp4", precision_bits=2)     # 2 有效位，高 6 位符号扩展
 
+# BFP 格式（坑位，待用户实现后生效，BitLayout 与 BFPP 相同）
+BFP16 = BitLayout(1, 0, 7, "bfp16", precision_bits=8)
+BFP8 = BitLayout(1, 0, 7, "bfp8", precision_bits=4)
+BFP4 = BitLayout(1, 0, 7, "bfp4", precision_bits=2)
+
 
 # ============================================================================
 # 结果类型
@@ -564,6 +569,9 @@ __all__ = [
     "BFPP16",
     "BFPP8",
     "BFPP4",
+    "BFP16",
+    "BFP8",
+    "BFP4",
     "WarnLevel",
     "BitAnalysisSummary",
     "BitAnalysisWarning",
