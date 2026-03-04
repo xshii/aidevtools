@@ -27,21 +27,18 @@ class FormatBase:
             register(cls.name, cls())
 
 
-# BFP 格式默认参数: {qtype: (block_size, mantissa_bits)}
-_BFP_DEFAULTS = {
-    "bfp16": (16, 8),
-    "bfp8": (32, 4),
-    "bfp4": (64, 2),
-}
-
-
 _GFLOAT_DTYPES = {
     "gfloat16": np.uint16,
     "gfloat8": np.uint8,
     "gfloat4": np.uint8,
 }
 
-_KNOWN_QTYPES = set(_BFP_DEFAULTS) | set(_GFLOAT_DTYPES) | {"float16", "float32"}
+_STATIC_QTYPES = set(_GFLOAT_DTYPES) | {"float16", "float32"}
+
+
+def _is_known_qtype(name):
+    from aidevtools.formats.block_format import is_block_format
+    return name in _STATIC_QTYPES or is_block_format(name)
 
 
 def _infer_qtype(path: str) -> Optional[str]:
@@ -56,7 +53,7 @@ def _infer_qtype(path: str) -> Optional[str]:
         base = base[:-4]
     if "." in base:
         suffix = base.rsplit(".", 1)[-1]
-        if suffix in _KNOWN_QTYPES:
+        if _is_known_qtype(suffix):
             return suffix
     return None
 
@@ -131,19 +128,20 @@ def load(
             data = data.reshape(shape)
         return data
 
-    if qtype in _BFP_DEFAULTS:
+    from aidevtools.formats.block_format import is_block_format, get_block_format
+    if is_block_format(qtype):
+        spec = get_block_format(qtype)
         if shape is None:
-            raise ValueError(f"load(qtype='{qtype}') 需要指定 shape 参数")
-        block_size, mantissa_bits = _BFP_DEFAULTS[qtype]
+            raise ValueError(f"load(qtype='{qtype}') 需要指定 shape")
         size = 1
         for s in shape:
             size *= s
-        num_blocks = ceil(size / block_size)
-        packed = get(fmt).load(path, dtype=np.int8)
+        num_blocks = ceil(size / spec.block_size)
+        packed = get(fmt).load(path, dtype=spec.storage_dtype)
         from aidevtools.formats.quantize import dequantize
         meta = {
-            "block_size": block_size,
-            "mantissa_bits": mantissa_bits,
+            "block_size": spec.block_size,
+            "mantissa_bits": spec.mantissa_bits,
             "num_blocks": num_blocks,
             "original_shape": tuple(shape),
         }

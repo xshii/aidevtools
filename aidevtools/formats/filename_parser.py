@@ -20,10 +20,11 @@ import os
 import re
 from typing import Dict, Optional, Tuple
 
-# 已知量化类型 (长的在前，避免 bfp1 匹配到 bfp16 的前缀)
+# 已知量化类型 (长的在前，避免前缀匹配)
 _KNOWN_QTYPES = [
     "gfloat16", "gfloat8", "gfloat4",
-    "bfp16", "bfp8", "bfp4",
+    "bfpp16", "bfpp8", "bfpp4",
+    "bfp16", "bfp8", "bfp4",       # 预留: 用户通过 register_block_format 注册
     "float32", "float16",
 ]
 

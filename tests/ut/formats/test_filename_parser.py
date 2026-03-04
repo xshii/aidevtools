@@ -5,19 +5,19 @@ from aidevtools.formats.filename_parser import parse_filename, infer_fmt
 class TestParseFilename:
     """parse_filename 测试"""
 
-    def test_basic_bfp8(self):
-        r = parse_filename("softmax_bfp8_2x16x64.txt")
+    def test_basic_bfpp8(self):
+        r = parse_filename("softmax_bfpp8_2x16x64.txt")
         assert r["op"] == "softmax"
-        assert r["qtype"] == "bfp8"
+        assert r["qtype"] == "bfpp8"
         assert r["shape"] == (2, 16, 64)
         assert r["is_result"] is False
         assert r["fmt"] == "hex_text"
         assert r["ext"] == ".txt"
 
     def test_result_suffix(self):
-        r = parse_filename("softmax_bfp8_2x16x64_result.txt")
+        r = parse_filename("softmax_bfpp8_2x16x64_result.txt")
         assert r["op"] == "softmax"
-        assert r["qtype"] == "bfp8"
+        assert r["qtype"] == "bfpp8"
         assert r["shape"] == (2, 16, 64)
         assert r["is_result"] is True
 
@@ -30,13 +30,13 @@ class TestParseFilename:
 
     def test_op_with_multiple_underscores(self):
         """算子名含多段下划线"""
-        r = parse_filename("batch_norm_2_bfp16_128.txt")
+        r = parse_filename("batch_norm_2_bfpp16_128.txt")
         assert r["op"] == "batch_norm_2"
-        assert r["qtype"] == "bfp16"
+        assert r["qtype"] == "bfpp16"
         assert r["shape"] == (128,)
 
     def test_1d_shape(self):
-        r = parse_filename("relu_bfp4_256.txt")
+        r = parse_filename("relu_bfpp4_256.txt")
         assert r["shape"] == (256,)
 
     def test_gfloat16(self):
@@ -66,19 +66,26 @@ class TestParseFilename:
 
     def test_full_path(self):
         """支持完整路径 (取 basename)"""
-        r = parse_filename("/some/dir/softmax_bfp8_64.txt")
+        r = parse_filename("/some/dir/softmax_bfpp8_64.txt")
         assert r["op"] == "softmax"
-        assert r["qtype"] == "bfp8"
+        assert r["qtype"] == "bfpp8"
         assert r["shape"] == (64,)
 
     def test_npy_extension(self):
-        r = parse_filename("op_bfp8_64.npy")
+        r = parse_filename("op_bfpp8_64.npy")
         assert r["fmt"] == "numpy"
 
     def test_unknown_extension(self):
         """未知扩展名 → fmt=raw"""
-        r = parse_filename("op_bfp8_64.dat")
+        r = parse_filename("op_bfpp8_64.dat")
         assert r["fmt"] == "raw"
+
+    def test_bfp_placeholder(self):
+        """预留 bfp 格式名 — 文件名解析能识别"""
+        r = parse_filename("softmax_bfp8_64.txt")
+        assert r is not None
+        assert r["qtype"] == "bfp8"
+        assert r["shape"] == (64,)
 
 
 class TestInferFmt:

@@ -50,16 +50,29 @@ class BitLayout:
 
     示例:
         FP32 = BitLayout(sign_bits=1, exponent_bits=8, mantissa_bits=23, name="fp32")
-        BFP8 = BitLayout(sign_bits=1, exponent_bits=0, mantissa_bits=7, name="bfp8")
+        BFP8 = BitLayout(sign_bits=1, exponent_bits=0, mantissa_bits=7, name="bfp8",
+                          precision_bits=4)
+
+    precision_bits:
+        实际有效位数（含符号位）。BFP 格式的尾数均以 int8 存储，
+        但有效精度可能低于 8 bit。例如 BFP8 mantissa_bits=4，
+        有效值范围 [-7, 7]，高 4 位为符号扩展。
+        0 表示与 total_bits 相同（标准浮点格式）。
     """
     sign_bits: int
     exponent_bits: int
     mantissa_bits: int
     name: str = ""
+    precision_bits: int = 0
 
     @property
     def total_bits(self) -> int:
         return self.sign_bits + self.exponent_bits + self.mantissa_bits
+
+    @property
+    def significant_bits(self) -> int:
+        """实际有效位数（含符号位），0 时等于 total_bits"""
+        return self.precision_bits if self.precision_bits > 0 else self.total_bits
 
     def as_tuple(self) -> Tuple[int, int, int]:
         return (self.sign_bits, self.exponent_bits, self.mantissa_bits)
@@ -69,9 +82,12 @@ class BitLayout:
 FP32 = BitLayout(1, 8, 23, "fp32")
 FP16 = BitLayout(1, 5, 10, "fp16")
 BFLOAT16 = BitLayout(1, 8, 7, "bfloat16")
-BFP16 = BitLayout(1, 0, 15, "bfp16")
-BFP8 = BitLayout(1, 0, 7, "bfp8")
-BFP4 = BitLayout(1, 0, 3, "bfp4")
+
+# BFPP 格式：尾数均以 int8 存储 (1 sign + 7 mantissa = 8 bits)
+# precision_bits 记录实际有效位数（= 量化参数中的 mantissa_bits）
+BFPP16 = BitLayout(1, 0, 7, "bfpp16", precision_bits=8)   # 8 有效位，占满 int8
+BFPP8 = BitLayout(1, 0, 7, "bfpp8", precision_bits=4)     # 4 有效位，高 4 位符号扩展
+BFPP4 = BitLayout(1, 0, 7, "bfpp4", precision_bits=2)     # 2 有效位，高 6 位符号扩展
 
 
 # ============================================================================
@@ -545,9 +561,9 @@ __all__ = [
     "FP32",
     "FP16",
     "BFLOAT16",
-    "BFP16",
-    "BFP8",
-    "BFP4",
+    "BFPP16",
+    "BFPP8",
+    "BFPP4",
     "WarnLevel",
     "BitAnalysisSummary",
     "BitAnalysisWarning",

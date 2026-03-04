@@ -19,6 +19,9 @@ from aidevtools.formats import hex_text  # noqa: F401
 # 3. 加载量化模块
 from aidevtools.formats import quantize  # noqa: F401
 
+# 3.5. block format 注册框架
+from aidevtools.formats import block_format  # noqa: F401
+
 # 4. 加载自定义格式以触发注册 (必须在 quantize 之后)
 from aidevtools.formats.custom import gfloat  # noqa: F401
 from aidevtools.formats.custom.bfp import golden as _bfp_golden  # noqa: F401

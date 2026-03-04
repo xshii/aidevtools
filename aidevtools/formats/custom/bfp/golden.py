@@ -11,7 +11,7 @@ from typing import Tuple
 
 import numpy as np
 
-from aidevtools.formats._quantize_registry import register_quantize
+from aidevtools.formats.block_format import BlockFormatSpec, register_block_format
 
 
 def _compute_shared_exponent(data: np.ndarray, block_size: int) -> np.ndarray:
@@ -133,11 +133,11 @@ def bfp_to_fp32(
 
 # ==================== 量化注册 ====================
 
-# BFP 格式配置: (format_name, default_block_size, mantissa_bits, description)
+# BFPP 格式配置: (format_name, default_block_size, mantissa_bits, description)
 _BFP_FORMATS = [
-    ("bfp16", 16, 8, "BFP16 (block_size=16, mantissa=8bit)"),
-    ("bfp8", 32, 4, "BFP8 (block_size=32, mantissa=4bit)"),
-    ("bfp4", 64, 2, "BFP4 (block_size=64, mantissa=2bit) - 极端量化"),
+    ("bfpp16", 16, 8, "BFPP16 (block_size=16, mantissa=8bit)"),
+    ("bfpp8", 32, 4, "BFPP8 (block_size=32, mantissa=4bit)"),
+    ("bfpp4", 64, 2, "BFPP4 (block_size=64, mantissa=2bit) - 极端量化"),
 ]
 
 
@@ -155,8 +155,29 @@ def _make_bfp_quantizer(default_block_size: int, mantissa_bits: int):
     return quantizer
 
 
-# 批量注册 BFP 格式
+def _make_bfp_dequantizer(default_block_size: int, mantissa_bits: int):
+    """生成 BFP 反量化函数"""
+
+    def dequantizer(data: np.ndarray, meta: dict) -> np.ndarray:
+        block_size = meta.get("block_size", default_block_size)
+        m_bits = meta.get("mantissa_bits", mantissa_bits)
+        num_blocks = meta.get("num_blocks", 1)
+        original_shape = meta.get("original_shape", data.shape)
+
+        shared_exps = data[:num_blocks]
+        mantissas = data[num_blocks:]
+        return bfp_to_fp32(mantissas, shared_exps, block_size, m_bits, original_shape)
+
+    return dequantizer
+
+
+# 批量注册 BFPP 格式 (通过 block_format 统一注册)
 for _name, _block_size, _mantissa_bits, _desc in _BFP_FORMATS:
-    _fn = _make_bfp_quantizer(_block_size, _mantissa_bits)
-    _fn.__doc__ = f"fp32 -> {_desc}"
-    register_quantize(_name)(_fn)
+    register_block_format(BlockFormatSpec(
+        name=_name,
+        block_size=_block_size,
+        mantissa_bits=_mantissa_bits,
+        quantize_fn=_make_bfp_quantizer(_block_size, _mantissa_bits),
+        dequantize_fn=_make_bfp_dequantizer(_block_size, _mantissa_bits),
+        description=_desc,
+    ))

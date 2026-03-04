@@ -57,35 +57,35 @@ class TestBfpPython:
 class TestBfpQuantize:
     """通过 quantize 接口测试"""
 
-    def test_bfp16_quantize(self):
-        """BFP16 量化"""
+    def test_bfpp16_quantize(self):
+        """BFPP16 量化"""
         from aidevtools.formats.quantize import quantize
 
         data = np.random.randn(32).astype(np.float32)
-        packed, meta = quantize(data, "bfp16")
+        packed, meta = quantize(data, "bfpp16")
 
         assert meta["format"] == "bfp"
         assert meta["block_size"] == 16
         assert meta["mantissa_bits"] == 8
 
-    def test_bfp8_quantize(self):
-        """BFP8 量化"""
+    def test_bfpp8_quantize(self):
+        """BFPP8 量化"""
         from aidevtools.formats.quantize import quantize
 
         data = np.random.randn(64).astype(np.float32)
-        packed, meta = quantize(data, "bfp8")
+        packed, meta = quantize(data, "bfpp8")
 
         assert meta["format"] == "bfp"
         assert meta["block_size"] == 32
         assert meta["mantissa_bits"] == 4
 
-    def test_list_quantize_includes_bfp(self):
-        """检查 BFP 在量化类型列表中"""
+    def test_list_quantize_includes_bfpp(self):
+        """检查 BFPP 在量化类型列表中"""
         from aidevtools.formats.quantize import list_quantize
 
         qtypes = list_quantize()
-        assert "bfp16" in qtypes
-        assert "bfp8" in qtypes
+        assert "bfpp16" in qtypes
+        assert "bfpp8" in qtypes
 
 
 class TestBfpGolden:

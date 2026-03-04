@@ -84,22 +84,11 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
     if qtype == "float16":
         return data.astype(np.float32)
 
-    if qtype in ("bfp16", "bfp8", "bfp4"):
-        from aidevtools.formats.custom.bfp.golden import bfp_to_fp32
-        # 从打包数据中提取 mantissas 和 shared_exps
-        default_block = {"bfp16": 16, "bfp8": 32, "bfp4": 64}.get(qtype, 16)
-        default_mantissa = {"bfp16": 8, "bfp8": 4, "bfp4": 2}.get(qtype, 8)
-        block_size = meta.get("block_size", default_block)
-        mantissa_bits = meta.get("mantissa_bits", default_mantissa)
-        num_blocks = meta.get("num_blocks", 1)
-        original_shape = meta.get("original_shape", data.shape)
+    # 优先查注册表 (register_block_format 自动注册到这里)
+    if qtype in _dequantize_registry:
+        return _dequantize_registry[qtype](data, meta)
 
-        # 打包格式: [shared_exps..., mantissas...]
-        shared_exps = data[:num_blocks]
-        mantissas = data[num_blocks:]
-
-        return bfp_to_fp32(mantissas, shared_exps, block_size, mantissa_bits, original_shape)
-
+    # 旧的 hardcoded 保留为 fallback
     if qtype in ("gfloat16", "gfloat8", "gfloat4"):
         from aidevtools.formats.custom.gfloat.golden import (
             from_gfloat4,
@@ -111,9 +100,6 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
         if qtype == "gfloat8":
             return from_gfloat8(data, meta.get("original_shape"))
         return from_gfloat4(data, meta.get("original_shape"))
-
-    if qtype in _dequantize_registry:
-        return _dequantize_registry[qtype](data, meta)
 
     raise ValueError(f"未知量化类型或无法反量化: {qtype}")
 
@@ -140,7 +126,7 @@ def to_int8_asymmetric(data: np.ndarray, **kwargs) -> tuple:
 
 def generate_fake_dut(
     reference: np.ndarray,
-    qtype: str = "bfp8",
+    qtype: str = "bfpp8",
     noise_level: float = 0.001,
 ) -> np.ndarray:
     """

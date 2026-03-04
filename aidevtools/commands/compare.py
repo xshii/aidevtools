@@ -19,9 +19,6 @@ try:
         BitLayout,
         FP32,
         FP16,
-        BFP16,
-        BFP8,
-        BFP4,
     )
     BITWISE_AVAILABLE = True
 except ImportError:
@@ -110,7 +107,8 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     from aidevtools.compare.strategy import ExactStrategy, BlockedStrategy
     from aidevtools.compare.strategy.bit_analysis import BitLayout as _BitLayout
     from aidevtools.formats._registry import get as get_fmt
-    from aidevtools.formats.base import _BFP_DEFAULTS, _GFLOAT_DTYPES
+    from aidevtools.formats.base import _GFLOAT_DTYPES
+    from aidevtools.formats.block_format import is_block_format, get_block_format, get_bit_layout
     from aidevtools.formats.filename_parser import parse_filename, infer_fmt
 
     # ── 自动解读: 从 golden 文件名提取 qtype / shape / fmt ──
@@ -124,8 +122,8 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
         "float16": np.float16,
         "float32": np.float32,
     }
-    if qt in _BFP_DEFAULTS:
-        raw_dtype = np.int8
+    if is_block_format(qt):
+        raw_dtype = get_block_format(qt).storage_dtype
     elif qt in _GFLOAT_DTYPES:
         raw_dtype = _GFLOAT_DTYPES[qt]
     else:
@@ -151,25 +149,28 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     fp32_results = factory().run(dut=fp32_r, golden=fp32_g)
 
     # ── 3. Bit Analysis: 源格式 bit layout ──
-    _BIT_LAYOUTS = {
-        "bfp16": BFP16,
-        "bfp8": BFP8,
-        "bfp4": BFP4,
+    _FLOAT_LAYOUTS = {
         "gfloat16": _BitLayout(1, 8, 7, "gfloat16"),
         "gfloat8": _BitLayout(1, 4, 3, "gfloat8"),
         "float16": FP16,
         "float32": FP32,
     }
     bit_result = None
-    bit_layout = _BIT_LAYOUTS.get(qt) if BITWISE_AVAILABLE and qt else None
+    if BITWISE_AVAILABLE and qt:
+        if is_block_format(qt):
+            bit_layout = get_bit_layout(qt)
+        else:
+            bit_layout = _FLOAT_LAYOUTS.get(qt)
+    else:
+        bit_layout = None
     if bit_layout is not None:
-        if qt in _BFP_DEFAULTS and sh is not None:
-            # BFP 打包格式 = [shared_exps..., mantissas...], 只分析 mantissa
-            block_size = _BFP_DEFAULTS[qt][0]
+        if is_block_format(qt) and sh is not None:
+            # Block format 打包格式 = [shared_exps..., mantissas...], 只分析 mantissa
+            spec = get_block_format(qt)
             size = 1
             for s in sh:
                 size *= s
-            num_blocks = ceil(size / block_size)
+            num_blocks = ceil(size / spec.block_size)
             mant_g = raw_g[num_blocks:].view(np.uint8)
             mant_r = raw_r[num_blocks:].view(np.uint8)
             bit_result = BitAnalysisStrategy.compare(mant_g, mant_r, fmt=bit_layout)
@@ -178,8 +179,8 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
 
     # ── 4. Blocked: fp32 + 源格式 block_size ──
     blocked_result = None
-    if qt in _BFP_DEFAULTS:
-        source_block_size = _BFP_DEFAULTS[qt][0]
+    if is_block_format(qt):
+        source_block_size = get_block_format(qt).block_size
         blocked_result = BlockedStrategy.compare(
             fp32_g, fp32_r, block_size=source_block_size,
         )

@@ -18,9 +18,9 @@ from aidevtools.compare.strategy import (
     FP32,
     FP16,
     BFLOAT16,
-    BFP16,
-    BFP8,
-    BFP4,
+    BFPP16,
+    BFPP8,
+    BFPP4,
     BitAnalysisStrategy,
     BitAnalysisResult,
 )
@@ -175,28 +175,34 @@ class TestBitLayout:
         assert FP16.total_bits == 16
         assert FP16.name == "fp16"
 
-    def test_bfp8_preset(self):
-        """BFP8 预设: 1 sign + 0 exponent + 7 mantissa"""
-        assert BFP8.sign_bits == 1
-        assert BFP8.exponent_bits == 0
-        assert BFP8.mantissa_bits == 7
-        assert BFP8.total_bits == 8
-        assert BFP8.name == "bfp8"
-        assert BFP8.as_tuple() == (1, 0, 7)
+    def test_bfpp8_preset(self):
+        """BFPP8 预设: int8 存储 (1+7), 有效精度 4 位"""
+        assert BFPP8.sign_bits == 1
+        assert BFPP8.exponent_bits == 0
+        assert BFPP8.mantissa_bits == 7
+        assert BFPP8.total_bits == 8
+        assert BFPP8.name == "bfpp8"
+        assert BFPP8.as_tuple() == (1, 0, 7)
+        assert BFPP8.precision_bits == 4
+        assert BFPP8.significant_bits == 4
 
-    def test_bfp16_preset(self):
-        """BFP16 预设: 1 sign + 0 exponent + 15 mantissa"""
-        assert BFP16.sign_bits == 1
-        assert BFP16.exponent_bits == 0
-        assert BFP16.mantissa_bits == 15
-        assert BFP16.total_bits == 16
-        assert BFP16.name == "bfp16"
-        assert BFP16.as_tuple() == (1, 0, 15)
+    def test_bfpp16_preset(self):
+        """BFPP16 预设: int8 存储 (1+7), 有效精度 8 位 (占满)"""
+        assert BFPP16.sign_bits == 1
+        assert BFPP16.exponent_bits == 0
+        assert BFPP16.mantissa_bits == 7
+        assert BFPP16.total_bits == 8
+        assert BFPP16.name == "bfpp16"
+        assert BFPP16.as_tuple() == (1, 0, 7)
+        assert BFPP16.precision_bits == 8
+        assert BFPP16.significant_bits == 8
 
-    def test_bfp4_preset(self):
-        """BFP4 预设"""
-        assert BFP4.total_bits == 4
-        assert BFP4.name == "bfp4"
+    def test_bfpp4_preset(self):
+        """BFPP4 预设: int8 存储 (1+7), 有效精度 2 位"""
+        assert BFPP4.total_bits == 8
+        assert BFPP4.name == "bfpp4"
+        assert BFPP4.precision_bits == 2
+        assert BFPP4.significant_bits == 2
 
     def test_custom_layout(self):
         """自定义 BitLayout"""
@@ -204,42 +210,49 @@ class TestBitLayout:
         assert fp8.total_bits == 8
         assert fp8.name == "fp8_e5m2"
         assert fp8.as_tuple() == (1, 5, 2)
+        assert fp8.significant_bits == 8  # precision_bits=0 → 等于 total_bits
 
     def test_layout_auto_name(self):
         """无 name 时为空字符串"""
         layout = BitLayout(sign_bits=1, exponent_bits=4, mantissa_bits=3)
         assert layout.name == ""
 
+    def test_fp32_significant_bits(self):
+        """标准浮点格式 significant_bits == total_bits"""
+        assert FP32.significant_bits == 32
+        assert FP16.significant_bits == 16
+        assert BFLOAT16.significant_bits == 16
+
 
 class TestBitLayoutCompare:
     """使用 BitLayout 的 compare_bitwise"""
 
     def test_bfp8_identical_uint8(self):
-        """BFP8 uint8 数据 — 完全相同"""
+        """BFPP8 uint8 数据 — 完全相同"""
         data = np.array([0x3F, 0x7E, 0x01, 0xFF], dtype=np.uint8)
-        r = compare_bitwise(data, data, fmt=BFP8)
+        r = compare_bitwise(data, data, fmt=BFPP8)
 
         assert r.summary.total_elements == 4
         assert r.summary.diff_elements == 0
         assert not r.has_critical
-        assert r.fmt.name == "bfp8"
+        assert r.fmt.name == "bfpp8"
 
     def test_bfp8_sign_flip(self):
-        """BFP8 uint8 — 符号位翻转 (bit 7)"""
+        """BFPP8 uint8 — 符号位翻转 (bit 7)"""
         golden = np.array([0b00111111, 0b01010101], dtype=np.uint8)
         result = np.array([0b10111111, 0b01010101], dtype=np.uint8)
 
-        r = compare_bitwise(golden, result, fmt=BFP8)
+        r = compare_bitwise(golden, result, fmt=BFPP8)
 
         assert r.summary.sign_flip_count == 1
         assert r.has_critical
 
     def test_bfp8_mantissa_only(self):
-        """BFP8 uint8 — 仅尾数差异"""
+        """BFPP8 uint8 — 仅尾数差异"""
         golden = np.array([0b00111111], dtype=np.uint8)
         result = np.array([0b00111110], dtype=np.uint8)  # LSB flip
 
-        r = compare_bitwise(golden, result, fmt=BFP8)
+        r = compare_bitwise(golden, result, fmt=BFPP8)
 
         assert r.summary.diff_elements == 1
         assert r.summary.sign_flip_count == 0
@@ -259,9 +272,9 @@ class TestBitLayoutCompare:
         assert r.fmt.name == "fp8_e5m2"
 
     def test_bfp8_from_float32(self):
-        """BFP8 格式但输入是 float32 — 取低 8 bit 的 uint32 表示"""
+        """BFPP8 格式但输入是 float32 — 取低 8 bit 的 uint32 表示"""
         golden = np.array([1.0, 2.0], dtype=np.float32)
         result = np.array([-1.0, 2.0], dtype=np.float32)
-        # 对 float32 用 BFP8 会走 view(uint32) 路径
-        r = compare_bitwise(golden, result, fmt=BFP8)
+        # 对 float32 用 BFPP8 会走 view(uint32) 路径
+        r = compare_bitwise(golden, result, fmt=BFPP8)
         assert r.summary.total_elements == 2

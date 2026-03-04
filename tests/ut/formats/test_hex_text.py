@@ -69,12 +69,12 @@ class TestHexTextWithQtype:
         from aidevtools.formats.quantize import quantize
 
         original = np.random.randn(64).astype(np.float32) * 0.5
-        packed, meta = quantize(original, "bfp8")
+        packed, meta = quantize(original, "bfpp8")
         # 将 packed 存为 hex-text
         path = str(tmp_workspace / "data.txt")
         save(path, packed, fmt="hex_text")
         # 通过 load 全链路: hex_text → bytes → dequantize → fp32
-        loaded = load(path, fmt="hex_text", qtype="bfp8", shape=(64,))
+        loaded = load(path, fmt="hex_text", qtype="bfpp8", shape=(64,))
         assert loaded.dtype == np.float32
         assert loaded.shape == (64,)
 
