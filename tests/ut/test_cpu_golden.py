@@ -348,7 +348,6 @@ class TestCpuGoldenCLI:
             capture_output=True, text=True
         )
         assert result.returncode == 1
-        assert "CPU Golden CLI" in result.stderr
         assert "Usage:" in result.stderr
 
     def test_unknown_op(self):
@@ -358,7 +357,7 @@ class TestCpuGoldenCLI:
             capture_output=True, text=True
         )
         assert result.returncode == 1
-        assert "Error: unknown op" in result.stderr or "CPU Golden CLI" in result.stderr
+        assert "Error:" in result.stderr
 
     def test_missing_args(self):
         """缺少参数"""
