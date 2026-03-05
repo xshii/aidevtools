@@ -23,7 +23,6 @@ from .exact import ExactStrategy
 from .fuzzy import FuzzyStrategy
 from .sanity import SanityStrategy
 from .blocked import BlockedStrategy
-from .bit_xor import BitXorStrategy
 from .bit_analysis import BitAnalysisStrategy
 
 
@@ -168,71 +167,34 @@ class TieredStrategy(CompareStrategy):
 # ============================================================================
 
 
-class QuickThenDeepStrategy(TieredStrategy):
-    """
-    快速检查 → 深度分析（如果失败）
-
-    两级策略：
-    - L1: Exact + Bitwise（快速判断是否有差异）
-    - L2: Fuzzy + Sanity + Blocked（深度分析，如果L1失败）
-
-    适用场景：
-        - 大部分数据预期一致
-        - 需要快速筛选出有问题的算子
-    """
-
-    def __init__(self, block_size: int = 64):
-        """
-        Args:
-            block_size: 分块大小（用于 BlockedStrategy）
-        """
-        super().__init__(
-            levels=[
-                StrategyLevel(
-                    name="L1_quick",
-                    strategies=[ExactStrategy(), BitXorStrategy()],
-                    condition=stop_if_exact_passed,
-                ),
-                StrategyLevel(
-                    name="L2_deep",
-                    strategies=[
-                        FuzzyStrategy(),
-                        SanityStrategy(),
-                        BlockedStrategy(block_size=block_size),
-                    ],
-                    condition=never_continue,
-                ),
-            ],
-            name="quick_then_deep",
-        )
-
-
 class ProgressiveStrategy(TieredStrategy):
     """
     渐进式三级分析
 
     三级策略：
-    - L1: Exact + Bitwise（初步检查）
+    - L1: Exact（初步检查）
     - L2: Fuzzy + Sanity（中度诊断）
-    - L3: BitwisePro + Blocked（深度定位）
+    - L3: BitAnalysis + Blocked（深度定位）
 
-    适用场景：
-        - 需要逐级定位问题根因
-        - 大模型调试（节省计算资源）
-        - 不确定错误类型
+    默认模式（deep=False）：
+        L1 过就停，L2 fuzzy 过就停，节省计算资源。
+
+    深度模式（deep=True）：
+        L1/L2/L3 全部执行，用于完整诊断。
     """
 
-    def __init__(self, block_size: int = 64):
+    def __init__(self, block_size: int = 64, deep: bool = False):
         """
         Args:
             block_size: 分块大小（用于 BlockedStrategy）
+            deep: True 时三级全部执行，不做早停
         """
         super().__init__(
             levels=[
                 StrategyLevel(
                     name="L1_quick",
-                    strategies=[ExactStrategy(), BitXorStrategy()],
-                    condition=stop_if_exact_passed,
+                    strategies=[ExactStrategy()],
+                    condition=always_continue if deep else stop_if_exact_passed,
                 ),
                 StrategyLevel(
                     name="L2_medium",
@@ -241,7 +203,7 @@ class ProgressiveStrategy(TieredStrategy):
                         FuzzyStrategy(use_golden_qnt=True),
                         SanityStrategy(),
                     ],
-                    condition=stop_if_fuzzy_passed,
+                    condition=always_continue if deep else stop_if_fuzzy_passed,
                 ),
                 StrategyLevel(
                     name="L3_deep",
@@ -259,7 +221,6 @@ class ProgressiveStrategy(TieredStrategy):
 __all__ = [
     "StrategyLevel",
     "TieredStrategy",
-    "QuickThenDeepStrategy",
     "ProgressiveStrategy",
     # 条件函数
     "always_continue",

@@ -1,19 +1,12 @@
 """
-比对报告生成 (重构版)
+比对报告生成
 
-支持新的策略模式API（字典格式结果）。
+支持策略模式API（字典格式结果）。
 """
 
-import json
-from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from .types import CompareStatus, ExactResult, FuzzyResult, SanityResult
-
-
-# ============================================================================
-# 新API - 支持策略模式的字典结果
-# ============================================================================
+from .types import ExactResult, FuzzyResult, SanityResult
 
 
 def format_strategy_results(
@@ -136,6 +129,101 @@ def print_strategy_table(results_list: List[Dict[str, Any]], names: Optional[Lis
     print()
 
 
+def print_joint_report(results: Dict[str, Any], name: str = ""):
+    """
+    联合文字报告 — 汇总表格 + 各策略详细输出
+
+    自动遍历 results 中所有策略结果，调用对应的 print_result / print_heatmap。
+    """
+    from .strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
+    from .strategy.blocked import BlockedStrategy, BlockResult
+
+    # 1. 汇总表格
+    print_strategy_table([results], names=[name])
+
+    # 2. Exact bit 统计
+    exact = results.get("exact")
+    if isinstance(exact, ExactResult) and exact.diff_bits > 0:
+        print(f"\n[{name}] Bit Statistics")
+        print("=" * 60)
+        print(f"  Diff elements:     {exact.mismatch_count:,}/{exact.total_elements:,}")
+        print(f"  Diff bits:         {exact.diff_bits:,}/{exact.total_bits:,} ({exact.diff_bit_ratio:.4%})")
+        print("=" * 60)
+
+    # 3. Bit Analysis 详细 (key = "bit_analysis_<format>")
+    for k, v in results.items():
+        if k.startswith("bit_analysis") and isinstance(v, BitAnalysisResult):
+            BitAnalysisStrategy.print_result(v, name)
+            break
+
+    # 4. Block Heatmap 详细 (key = "blocked_<size>")
+    for k, v in results.items():
+        if k.startswith("blocked") and isinstance(v, list) and v:
+            if isinstance(v[0], BlockResult):
+                BlockedStrategy.print_heatmap(v)
+                break
+
+
+def visualize_joint_report(results: Dict[str, Any], name: str = "") -> "Page":
+    """
+    联合可视化报告 — 将所有策略的图表合并到一个 Page
+
+    Returns:
+        pyecharts Page，可 render 为 HTML
+    """
+    from .visualizer import Visualizer
+    from .strategy.exact import ExactStrategy
+    from .strategy.fuzzy import FuzzyStrategy
+    from .strategy.sanity import SanityStrategy
+    from .strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
+    from .strategy.blocked import BlockedStrategy, BlockResult
+
+    page = Visualizer.create_page(title=f"Joint Report: {name}" if name else "Joint Report")
+
+    # 策略 key → (类型检查, visualize 函数) 的有序列表
+    _VIS = [
+        ("exact",      ExactResult,        ExactStrategy.visualize),
+        ("fuzzy_pure", FuzzyResult,        FuzzyStrategy.visualize),
+        ("fuzzy_qnt",  FuzzyResult,        FuzzyStrategy.visualize),
+        ("sanity",     SanityResult,       SanityStrategy.visualize),
+    ]
+
+    for key, result_type, vis_fn in _VIS:
+        result = results.get(key)
+        if isinstance(result, result_type):
+            try:
+                sub_page = vis_fn(result)
+                for chart in sub_page:
+                    page.add(chart)
+            except Exception:
+                pass
+
+    # Bit Analysis (key 含格式后缀)
+    for k, v in results.items():
+        if k.startswith("bit_analysis") and isinstance(v, BitAnalysisResult):
+            try:
+                sub_page = BitAnalysisStrategy.visualize(v)
+                for chart in sub_page:
+                    page.add(chart)
+            except Exception:
+                pass
+            break
+
+    # Blocked (key 含 block_size 后缀)
+    for k, v in results.items():
+        if k.startswith("blocked") and isinstance(v, list) and v:
+            if isinstance(v[0], BlockResult):
+                try:
+                    sub_page = BlockedStrategy.visualize(v)
+                    for chart in sub_page:
+                        page.add(chart)
+                except Exception:
+                    pass
+                break
+
+    return page
+
+
 def generate_strategy_json(
     results: Dict[str, Any],
     name: str = "",
@@ -171,150 +259,3 @@ def generate_strategy_json(
             output["strategies"][strategy_name] = str(result)
 
     return output
-
-
-# ============================================================================
-# 旧API - 向后兼容（已废弃，仅供迁移）
-# ============================================================================
-
-
-def format_result_row(result) -> str:
-    """
-    格式化单行结果（旧API，已废弃）
-
-    注意：此函数仅为向后兼容保留，新代码请使用 format_strategy_results
-    """
-    marks = (
-        "Y" if result.exact and result.exact.passed else "N",
-        "Y" if result.fuzzy_pure and result.fuzzy_pure.passed else "N",
-        "Y" if result.fuzzy_qnt and result.fuzzy_qnt.passed else "N",
-        "Y" if result.sanity and result.sanity.valid else "N",
-    )
-
-    max_abs = "N/A"
-    qsnr = "N/A"
-    cosine = "N/A"
-
-    if result.fuzzy_qnt:
-        max_abs = f"{result.fuzzy_qnt.max_abs:.2e}"
-        qsnr = (
-            f"{result.fuzzy_qnt.qsnr:.1f}"
-            if result.fuzzy_qnt.qsnr != float("inf")
-            else "inf"
-        )
-        cosine = f"{result.fuzzy_qnt.cosine:.6f}"
-
-    name = result.name or f"op_{result.op_id}"
-    status = result.status.value if result.status else "UNKNOWN"
-
-    return (
-        f"{name:<15} {marks[0]:^6} {marks[1]:^8} {marks[2]:^8} {marks[3]:^8} "
-        f"{max_abs:>10} {qsnr:>8} {cosine:>8} {status:^14}"
-    )
-
-
-def print_compare_table(results):
-    """
-    打印比对结果表格（旧API，已废弃）
-
-    注意：此函数仅为向后兼容保留，新代码请使用 print_strategy_table
-    """
-    print()
-    print("=" * 110)
-    header = (
-        f"{'name':<15} {'exact':^6} {'f_pure':^8} {'f_qnt':^8} {'sanity':^8} "
-        f"{'max_abs':>10} {'qsnr':>8} {'cosine':>8} {'status':^14}"
-    )
-    print(header)
-    print("-" * 110)
-
-    for r in results:
-        print(format_result_row(r))
-
-    print("=" * 110)
-
-    # 汇总统计
-    status_counts = {s: 0 for s in CompareStatus}
-    for r in results:
-        if r.status in status_counts:
-            status_counts[r.status] += 1
-
-    summary = (
-        f"\nSummary: "
-        f"{status_counts[CompareStatus.PASS]} PASS, "
-        f"{status_counts[CompareStatus.GOLDEN_SUSPECT]} GOLDEN_SUSPECT, "
-        f"{status_counts[CompareStatus.DUT_ISSUE]} DUT_ISSUE, "
-        f"{status_counts[CompareStatus.BOTH_SUSPECT]} BOTH_SUSPECT "
-        f"(total: {len(results)})"
-    )
-    print(summary)
-    print()
-
-
-def generate_text_report(results, output_path: Optional[Path] = None) -> str:
-    """生成文本报告（旧API，已废弃）"""
-    lines = []
-    lines.append("=" * 80)
-    lines.append("Compare Results Report")
-    lines.append("=" * 80)
-    lines.append("")
-
-    for r in results:
-        lines.append(f"Operation: {r.name or f'op_{r.op_id}'}")
-        lines.append(f"  Status: {r.status.value if r.status else 'UNKNOWN'}")
-        if r.exact:
-            lines.append(f"  Exact: {'PASS' if r.exact.passed else 'FAIL'}")
-        if r.fuzzy_pure:
-            lines.append(
-                f"  Fuzzy (pure): QSNR={r.fuzzy_pure.qsnr:.2f}, "
-                f"Cosine={r.fuzzy_pure.cosine:.6f}"
-            )
-        if r.fuzzy_qnt:
-            lines.append(
-                f"  Fuzzy (qnt): QSNR={r.fuzzy_qnt.qsnr:.2f}, "
-                f"Cosine={r.fuzzy_qnt.cosine:.6f}"
-            )
-        if r.sanity:
-            lines.append(f"  Sanity: {'VALID' if r.sanity.valid else 'INVALID'}")
-        lines.append("")
-
-    report = "\n".join(lines)
-
-    if output_path:
-        output_path.write_text(report)
-
-    return report
-
-
-def generate_json_report(results, output_path: Optional[Path] = None) -> str:
-    """生成JSON报告（旧API，已废弃）"""
-    output = []
-    for r in results:
-        item = {
-            "name": r.name or f"op_{r.op_id}",
-            "status": r.status.value if r.status else "UNKNOWN",
-        }
-        if r.exact:
-            item["exact"] = {"passed": r.exact.passed}
-        if r.fuzzy_pure:
-            item["fuzzy_pure"] = {
-                "passed": r.fuzzy_pure.passed,
-                "qsnr": r.fuzzy_pure.qsnr,
-                "cosine": r.fuzzy_pure.cosine,
-            }
-        if r.fuzzy_qnt:
-            item["fuzzy_qnt"] = {
-                "passed": r.fuzzy_qnt.passed,
-                "qsnr": r.fuzzy_qnt.qsnr,
-                "cosine": r.fuzzy_qnt.cosine,
-            }
-        if r.sanity:
-            item["sanity"] = {"valid": r.sanity.valid}
-        output.append(item)
-
-    json_str = json.dumps(output, indent=2)
-
-    if output_path:
-        output_path.write_text(json_str)
-
-    return json_str

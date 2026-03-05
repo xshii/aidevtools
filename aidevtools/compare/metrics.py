@@ -3,12 +3,6 @@
 
 提供 QSNR、余弦相似度等指标的计算函数。
 支持单次遍历合并计算 (calc_all_metrics) 以减少重复的 flatten/convert 开销。
-
-架构优化:
-- _calc_all_metrics_prepared / _calc_all_metrics_early_exit_prepared
-  接受 _PreparedPair，避免跨模块重复 astype + flatten。
-- 公共函数 calc_all_metrics / calc_all_metrics_early_exit 内部自动创建
-  _PreparedPair 后委托给 prepared 版本，保持向后兼容。
 """
 
 from dataclasses import dataclass
@@ -172,8 +166,6 @@ def _calc_all_metrics_early_exit_prepared(
     )
 
 
-# === 公共 API (向后兼容) ===
-
 def calc_all_metrics(
     golden: np.ndarray,
     result: np.ndarray,
@@ -210,8 +202,6 @@ def calc_all_metrics_early_exit(
     )
 
 
-# === 原始独立函数 (保持向后兼容) ===
-
 def calc_qsnr(golden: np.ndarray, result: np.ndarray) -> float:
     """计算量化信噪比 QSNR (dB)"""
     g = golden.astype(np.float64).flatten()
@@ -232,41 +222,6 @@ def calc_cosine(a: np.ndarray, b: np.ndarray) -> float:
     if norm_a < 1e-12 or norm_b < 1e-12:
         return 0.0
     return float(np.dot(a_flat, b_flat) / (norm_a * norm_b))
-
-
-def calc_abs_error(golden: np.ndarray, result: np.ndarray) -> tuple:
-    """计算绝对误差统计: (max_abs, mean_abs, abs_errors)"""
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-    abs_err = np.abs(g - r)
-    max_abs = float(abs_err.max()) if len(abs_err) > 0 else 0.0
-    mean_abs = float(abs_err.mean()) if len(abs_err) > 0 else 0.0
-    return max_abs, mean_abs, abs_err
-
-
-def calc_rel_error(golden: np.ndarray, result: np.ndarray) -> tuple:
-    """计算相对误差统计: (max_rel, mean_rel, rel_errors)"""
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-    abs_err = np.abs(g - r)
-    g_abs = np.abs(g)
-    rel_err = np.zeros_like(abs_err)
-    nonzero_mask = g_abs > 1e-12
-    np.divide(abs_err, g_abs, out=rel_err, where=nonzero_mask)
-    max_rel = float(rel_err.max()) if len(rel_err) > 0 else 0.0
-    mean_rel = float(rel_err.mean()) if len(rel_err) > 0 else 0.0
-    return max_rel, mean_rel, rel_err
-
-
-def calc_exceed_count(
-    golden: np.ndarray, result: np.ndarray, atol: float, rtol: float
-) -> int:
-    """计算超阈值元素数: |result - golden| > atol + rtol * |golden|"""
-    g = golden.astype(np.float64).flatten()
-    r = result.astype(np.float64).flatten()
-    abs_err = np.abs(g - r)
-    threshold = atol + rtol * np.abs(g)
-    return int(np.sum(abs_err > threshold))
 
 
 def check_nan_inf(data: np.ndarray) -> tuple:

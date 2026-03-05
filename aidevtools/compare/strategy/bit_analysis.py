@@ -8,9 +8,9 @@ Bit 级分析策略（高级调试工具 - 带格式理解）
   - 量化算法调试（理解精度损失来源）
   - 深度误差分析
 
-与 bit_xor 的区别：
-  - bit_xor: 纯 XOR，不理解格式
-  - bit_analysis: 理解格式，分析 sign/exp/mant，生成告警
+与 ExactStrategy 的 bit 统计的区别：
+  - ExactStrategy: 纯 XOR popcount，不理解格式
+  - BitAnalysisStrategy: 理解格式，分析 sign/exp/mant，生成告警
 """
 
 from dataclasses import dataclass

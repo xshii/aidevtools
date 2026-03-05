@@ -25,9 +25,10 @@ PyTorch 劫持:
     y = F.linear(x, w)  # 自动走 golden
 
 比对模块:
-    from aidevtools.compare import compare_full, CompareStatus
+    from aidevtools.compare import CompareEngine
 
-    result = compare_full(dut, golden_pure, golden_qnt)
+    engine = CompareEngine.progressive()
+    results = engine.run(dut, golden)
 
 优化器:
     from aidevtools.optimizer import extract_benchmark, FusionEvaluator

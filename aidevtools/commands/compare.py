@@ -13,16 +13,7 @@ from aidevtools.ops.base import clear as do_clear
 from aidevtools.ops.base import dump as do_dump
 from aidevtools.ops.base import get_records
 
-try:
-    from aidevtools.compare.strategy import (
-        BitAnalysisStrategy,
-        BitLayout,
-        FP32,
-        FP16,
-    )
-    BITWISE_AVAILABLE = True
-except ImportError:
-    BITWISE_AVAILABLE = False
+from aidevtools.compare.strategy import BitLayout
 
 
 def _action_dump(output, **kwargs):
@@ -141,10 +132,6 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
         return 1
 
     from aidevtools.compare.engine import CompareEngine
-    from aidevtools.compare.report import print_strategy_table
-    from aidevtools.compare.strategy import BlockedStrategy
-    from aidevtools.compare.strategy.base import CompareContext
-    from aidevtools.compare.strategy.bit_analysis import BitAnalysisResult
     from aidevtools.formats._registry import get as get_fmt
     from aidevtools.formats.block_format import is_block_format, get_block_format
     from aidevtools.formats.filename_parser import parse_filename, infer_fmt
@@ -183,15 +170,11 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     raw_dut_elem = _strip_shared_bytes(raw_r, spec, sh) if spec else raw_r
 
     # ── 选择引擎, 构造 context, 执行 ──
-    _engines = {
-        "standard": CompareEngine.progressive,
-        "progressive": CompareEngine.progressive,
-        "quick": CompareEngine.quick_then_deep,
-        "deep": CompareEngine.deep,
-        "minimal": CompareEngine.minimal,
-    }
-    factory = _engines.get(engine or "standard", CompareEngine.progressive)
-    eng = factory()
+    _engine_name = engine or "standard"
+    if _engine_name in ("deep", "full"):
+        eng = CompareEngine.progressive(deep=True)
+    else:
+        eng = CompareEngine.progressive()
     results = eng.run(
         dut=fp32_r,
         golden=fp32_g,
@@ -203,26 +186,9 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     )
 
     # ── 输出报告 ──
+    from aidevtools.compare.report import print_joint_report
     name = parsed["op"] if parsed else (golden.rsplit("/", 1)[-1] if "/" in golden else golden)
-    print_strategy_table([results], names=[name])
-
-    # Bit Analysis 详细输出 (key = "bit_analysis_<format>")
-    bit_result = None
-    for k, v in results.items():
-        if k.startswith("bit_analysis") and isinstance(v, BitAnalysisResult):
-            bit_result = v
-            break
-    if bit_result is not None:
-        BitAnalysisStrategy.print_result(bit_result, name)
-
-    # Block Heatmap 详细输出 (key 含 block_size 后缀, 如 "blocked_1024")
-    blocked_result = None
-    for k, v in results.items():
-        if k.startswith("blocked") and isinstance(v, list):
-            blocked_result = v
-            break
-    if blocked_result:
-        BlockedStrategy.print_heatmap(blocked_result)
+    print_joint_report(results, name)
 
     # 判定退出码
     fuzzy = results.get("fuzzy_qnt") or results.get("fuzzy_pure")
@@ -281,7 +247,7 @@ def cmd_compare(
         --qtype            DUT 量化类型 (bfp8/gfloat8/...) 不指定则从文件名解读
         --shape            输出 shape (2,16,64) 不指定则从文件名解读
         --format           文件格式 (hex_text/raw/numpy) 不指定则从扩展名解读
-        --engine           比对引擎 (standard/quick/deep/minimal)
+        --engine           比对引擎 (standard/deep)
         --target_dtype     转换目标类型 (float16/bfloat16/...)
         --xlsx=xxx.xlsx    指定 xlsx 文件
         --ops=linear,relu  限定算子列表（xlsx template 用）

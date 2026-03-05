@@ -29,7 +29,6 @@ from .strategy import (
     FuzzyStrategy,
     SanityStrategy,
     BlockedStrategy,
-    BitXorStrategy,
     BitAnalysisStrategy,
 )
 
@@ -123,7 +122,7 @@ class ModelTieredAnalyzer:
             print(f"\n[L1] 快速检查: Exact + Bitwise")
 
         engine_l1 = CompareEngine(
-            CompositeStrategy([ExactStrategy(), BitXorStrategy()]),
+            CompositeStrategy([ExactStrategy()]),
             config=self.config,
         )
 
@@ -134,7 +133,7 @@ class ModelTieredAnalyzer:
         # 统计L1通过率
         l1_passed = [
             name for name, r in results.items()
-            if r.get("exact", {}).get("passed", False)
+            if getattr(r.get("exact"), "passed", False)
         ]
         l1_pass_rate = len(l1_passed) / total_ops
 
@@ -168,8 +167,8 @@ class ModelTieredAnalyzer:
         # 统计L2通过率（在L1失败的算子中）
         l2_passed = [
             name for name in l1_failed
-            if (results[name].get("fuzzy_pure", {}).get("passed", False) or
-                results[name].get("fuzzy_qnt", {}).get("passed", False))
+            if (getattr(results[name].get("fuzzy_pure"), "passed", False) or
+                getattr(results[name].get("fuzzy_qnt"), "passed", False))
         ]
         l2_pass_rate = len(l2_passed) / len(l1_failed) if l1_failed else 0
 
@@ -248,15 +247,15 @@ class ModelTieredAnalyzer:
         # 最终状态统计
         exact_passed = sum(
             1 for r in results.values()
-            if r.get("exact", {}).get("passed", False)
+            if getattr(r.get("exact"), "passed", False)
         )
 
         # Fuzzy通过（在执行了L2的算子中）
         l2_ops = [r for r in results.values() if "L2" in r.get("_levels", [])]
         fuzzy_passed = sum(
             1 for r in l2_ops
-            if (r.get("fuzzy_pure", {}).get("passed", False) or
-                r.get("fuzzy_qnt", {}).get("passed", False))
+            if (getattr(r.get("fuzzy_pure"), "passed", False) or
+                getattr(r.get("fuzzy_qnt"), "passed", False))
         )
 
         still_failed = total - exact_passed - fuzzy_passed

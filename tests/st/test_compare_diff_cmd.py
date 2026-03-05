@@ -124,7 +124,7 @@ class TestDiffExactOnRawBytes:
         )
         captured = capsys.readouterr()
         lines = captured.out.split("\n")
-        data_line = [l for l in lines if "golden.txt" in l and "Bit Analysis" not in l]
+        data_line = [l for l in lines if "golden.txt" in l and "Bit" not in l]
         assert len(data_line) == 1
         assert "Y" in data_line[0].split()[1]  # exact 列
 
@@ -143,7 +143,7 @@ class TestDiffExactOnRawBytes:
         )
         captured = capsys.readouterr()
         lines = captured.out.split("\n")
-        data_line = [l for l in lines if "golden.txt" in l and "Bit Analysis" not in l]
+        data_line = [l for l in lines if "golden.txt" in l and "Bit" not in l]
         assert len(data_line) == 1
         assert "N" in data_line[0].split()[1]  # exact 列 = N
 
@@ -220,12 +220,13 @@ class TestDiffBlocked:
 class TestDiffEngine:
     """不同引擎选择"""
 
-    def test_diff_quick_engine(self, tmp_path):
+    def test_diff_deep_engine(self, tmp_path):
+        """deep 引擎: 三级全部执行"""
         data = np.random.randn(64).astype(np.float32) * 0.5
         g_path, r_path = _make_hex_pair(tmp_path, data, data, qtype="bfpp8")
         ret = cmd_compare(
             action="diff", golden=g_path, result=r_path,
-            format="hex_text", qtype="bfpp8", shape="64", engine="quick",
+            format="hex_text", qtype="bfpp8", shape="64", engine="deep",
         )
         assert ret == 0
 

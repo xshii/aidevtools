@@ -14,6 +14,28 @@ from ..types import ExactResult, _PreparedPair
 # ============================================================================
 
 
+def _to_uint(arr: np.ndarray):
+    """将数组转为同宽度 uint 视图用于 XOR"""
+    flat = arr.flatten()
+    if flat.dtype == np.float32:
+        return flat.view(np.uint32)
+    if flat.dtype == np.float16:
+        return flat.view(np.uint16)
+    if flat.dtype in (np.uint8, np.uint16, np.uint32, np.int8, np.int16):
+        return flat.view(np.dtype(f"u{flat.dtype.itemsize}"))
+    return flat.astype(np.float32).view(np.uint32)
+
+
+def _popcount(g: np.ndarray, r: np.ndarray) -> tuple:
+    """XOR + popcount，返回 (diff_bits, total_bits)"""
+    g_uint = _to_uint(g)
+    r_uint = _to_uint(r)
+    xor = g_uint ^ r_uint
+    diff_bits = int(np.unpackbits(xor.view(np.uint8)).sum())
+    total_bits = g_uint.size * g_uint.itemsize * 8
+    return diff_bits, total_bits
+
+
 def _compare_exact_prepared(
     p: _PreparedPair,
     golden_orig: np.ndarray,
@@ -25,6 +47,7 @@ def _compare_exact_prepared(
 
     当 max_abs > 0 时，直接使用 p.abs_err 而不再重新计算 |g - r|。
     当 max_abs == 0 时，仍需原始数组做字节级比对。
+    同时计算 XOR popcount 统计 bit 级差异。
     """
     max_abs_actual = float(p.abs_err.max()) if p.total > 0 else 0.0
 
@@ -41,12 +64,17 @@ def _compare_exact_prepared(
         mismatch_count = int(np.sum(exceed_mask))
         first_diff = int(np.argmax(exceed_mask)) if mismatch_count > 0 else -1
 
+    # bit 级统计 (popcount)
+    diff_bits, total_bits = _popcount(golden_orig, result_orig)
+
     return ExactResult(
         passed=mismatch_count <= max_count,
         mismatch_count=mismatch_count,
         first_diff_offset=first_diff,
         max_abs=max_abs_actual,
         total_elements=p.total,
+        diff_bits=diff_bits,
+        total_bits=total_bits,
     )
 
 
@@ -129,12 +157,15 @@ class ExactStrategy(CompareStrategy):
             g_bytes = g.tobytes()
             r_bytes = r.tobytes()
             passed = self.compare_bytes(g_bytes, r_bytes)
+            diff_bits, total_bits = _popcount(g, r)
             return ExactResult(
                 passed=passed,
                 mismatch_count=0 if passed else 1,
                 first_diff_offset=-1 if passed else 0,
                 max_abs=0.0,
                 total_elements=g.size,
+                diff_bits=diff_bits,
+                total_bits=total_bits,
             )
         else:
             return self.compare(
@@ -194,6 +225,20 @@ class ExactStrategy(CompareStrategy):
                 title="Error Metrics",
             )
             page.add(bar)
+
+        # 4. Bit 差异率仪表盘
+        if result.total_bits > 0 and result.diff_bits > 0:
+            bit_diff_pct = result.diff_bit_ratio * 100
+            gauge_bit = (
+                Gauge()
+                .add("", [("Diff Bit %", round(bit_diff_pct, 4))])
+                .set_global_opts(
+                    title_opts=opts.TitleOpts(
+                        title=f"Bit Diff Rate ({result.diff_bits}/{result.total_bits})"
+                    ),
+                )
+            )
+            page.add(gauge_bit)
 
         return page
 
