@@ -27,18 +27,9 @@ class FormatBase:
             register(cls.name, cls())
 
 
-_GFLOAT_DTYPES = {
-    "gfloat16": np.uint16,
-    "gfloat8": np.uint8,
-    "gfloat4": np.uint8,
-}
-
-_STATIC_QTYPES = set(_GFLOAT_DTYPES) | {"float16", "float32"}
-
-
 def _is_known_qtype(name):
     from aidevtools.formats.block_format import is_block_format
-    return name in _STATIC_QTYPES or is_block_format(name)
+    return is_block_format(name)
 
 
 def _infer_qtype(path: str) -> Optional[str]:
@@ -115,49 +106,36 @@ def load(
             kwargs["shape"] = shape
         return get(fmt).load(path, **kwargs)
 
-    if qtype == "float32":
-        data = get(fmt).load(path, dtype=np.float32, **kwargs)
-        if shape is not None:
-            data = data.reshape(shape)
-        return data
-
-    if qtype == "float16":
-        data = get(fmt).load(path, dtype=np.float16, **kwargs)
-        data = data.astype(np.float32)
-        if shape is not None:
-            data = data.reshape(shape)
-        return data
-
     from aidevtools.formats.block_format import is_block_format, get_block_format
-    if is_block_format(qtype):
-        spec = get_block_format(qtype)
-        if shape is None:
-            raise ValueError(f"load(qtype='{qtype}') 需要指定 shape")
+    if not is_block_format(qtype):
+        raise ValueError(f"load: 不支持的 qtype '{qtype}'")
+
+    spec = get_block_format(qtype)
+    packed = get(fmt).load(path, dtype=spec.storage_dtype)
+
+    if shape is not None:
         size = 1
         for s in shape:
             size *= s
-        num_blocks = ceil(size / spec.block_size)
-        packed = get(fmt).load(path, dtype=spec.storage_dtype)
-        from aidevtools.formats.quantize import dequantize
-        meta = {
-            "block_size": spec.block_size,
-            "mantissa_bits": spec.mantissa_bits,
-            "num_blocks": num_blocks,
-            "original_shape": tuple(shape),
-        }
-        return dequantize(packed, qtype, meta)
+    else:
+        if spec.block_size > 1:
+            raise ValueError(f"load(qtype='{qtype}') 需要指定 shape")
+        size = len(packed.flatten())
 
-    if qtype in _GFLOAT_DTYPES:
-        raw_dtype = _GFLOAT_DTYPES[qtype]
-        raw = get(fmt).load(path, dtype=raw_dtype)
-        from aidevtools.formats.quantize import dequantize
-        meta = {"original_shape": tuple(shape) if shape else None}
-        result = dequantize(raw, qtype, meta)
-        if shape is not None:
-            result = result.reshape(shape)
-        return result
+    num_blocks = ceil(size / spec.block_size)
+    original_shape = tuple(shape) if shape else (size,)
 
-    raise ValueError(f"load: 不支持的 qtype '{qtype}'")
+    from aidevtools.formats.quantize import dequantize
+    meta = {
+        "block_size": spec.block_size,
+        "num_blocks": num_blocks,
+        "bytes_per_block": spec.bytes_per_block,
+        "original_shape": original_shape,
+    }
+    result = dequantize(packed, qtype, meta)
+    if shape is not None:
+        result = result.reshape(shape)
+    return result
 
 
 def _infer_name(path: str, bm: str = "") -> str:

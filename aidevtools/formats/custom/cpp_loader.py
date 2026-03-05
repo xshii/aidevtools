@@ -40,7 +40,7 @@ class CppExtensionLoader:
         Args:
             name: 扩展名称 (用于日志和错误信息)
             module_path: 模块目录路径 (用于诊断)
-            import_path: 导入路径 (如 "aidevtools.formats.custom.bfp")
+            import_path: 导入路径 (如 "aidevtools.formats.custom.bfpp")
             module_name: 模块名称 (如 "bfp_golden")
         """
         self.name = name

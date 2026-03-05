@@ -140,6 +140,8 @@ class TestLoadQtype:
         assert _infer_qtype("data.bfpp16.bin") == "bfpp16"
         assert _infer_qtype("data.float16.bin") == "float16"
         assert _infer_qtype("data.float32.bin") == "float32"
+        assert _infer_qtype("data.gfloat16.bin") == "gfloat16"
+        assert _infer_qtype("data.gfloat8.bin") == "gfloat8"
         assert _infer_qtype("data.bin") is None
         assert _infer_qtype("data.unknown.bin") is None
 

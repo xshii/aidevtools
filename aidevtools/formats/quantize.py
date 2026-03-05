@@ -84,22 +84,9 @@ def dequantize(data: np.ndarray, qtype: str, meta: dict = None) -> np.ndarray:
     if qtype == "float16":
         return data.astype(np.float32)
 
-    # 优先查注册表 (register_block_format 自动注册到这里)
+    # 查注册表 (register_block_format 自动注册到这里，含 GFloat)
     if qtype in _dequantize_registry:
         return _dequantize_registry[qtype](data, meta)
-
-    # 旧的 hardcoded 保留为 fallback
-    if qtype in ("gfloat16", "gfloat8", "gfloat4"):
-        from aidevtools.formats.custom.gfloat.golden import (
-            from_gfloat4,
-            from_gfloat8,
-            from_gfloat16,
-        )
-        if qtype == "gfloat16":
-            return from_gfloat16(data, meta.get("original_shape"))
-        if qtype == "gfloat8":
-            return from_gfloat8(data, meta.get("original_shape"))
-        return from_gfloat4(data, meta.get("original_shape"))
 
     raise ValueError(f"未知量化类型或无法反量化: {qtype}")
 

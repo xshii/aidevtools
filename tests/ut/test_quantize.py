@@ -45,7 +45,7 @@ class TestBuiltinQuantize:
 
         assert q_data.dtype == np.float16
         assert np.allclose(q_data, data, atol=1e-3)
-        assert meta == {}
+        assert meta["format"] == "float16"
 
     def test_int8_symmetric_not_implemented(self):
         """int8 对称量化未实现"""

@@ -2,7 +2,7 @@
 import pytest
 import numpy as np
 
-from aidevtools.formats.custom.bfp.golden import fp32_to_bfp, bfp_to_fp32
+from aidevtools.formats.custom.bfpp.golden import fp32_to_bfp, bfp_to_fp32
 
 
 class TestBfpPython:
@@ -120,7 +120,7 @@ class TestBfpGolden:
     def test_cpp_python_consistency(self):
         """验证 C++ 和 Python 实现一致性"""
         from aidevtools.formats.custom.bfp.wrapper import fp32_to_bfp as cpp_fp32_to_bfp
-        from aidevtools.formats.custom.bfp.golden import fp32_to_bfp as py_fp32_to_bfp
+        from aidevtools.formats.custom.bfpp.golden import fp32_to_bfp as py_fp32_to_bfp
 
         data = np.array([1.0, 2.0, -3.0, 0.5, 1.5, -2.5, 0.25, 4.0], dtype=np.float32)
 
