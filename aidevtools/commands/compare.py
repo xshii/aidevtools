@@ -118,13 +118,18 @@ def _strip_shared_bytes(raw, spec, shape):
 
 
 def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
-    """多级比数 (双路径: 源格式 exact/bit/block + fp32 fuzzy/sanity)
+    """渐进式多级比数 (ProgressiveStrategy)
 
     架构:
-        raw_g, raw_r   → exact (字节级) / bit_analysis (源格式 bit layout)
-             │
-             ▼ dequantize
-        fp32_g, fp32_r → fuzzy / sanity / blocked (源 block_size)
+        raw_g, raw_r   ──┐
+             │           ├→ CompareContext (双路径数据)
+             ▼ deq       │
+        fp32_g, fp32_r ──┘
+                          ↓
+        ProgressiveStrategy 自动分级:
+          L1: Exact + BitXor       → exact 过就停
+          L2: Fuzzy + Sanity       → fuzzy 过就停
+          L3: BitAnalysis + Blocked → 深度定位
 
     未指定 qtype / shape / format 时，从文件名自动解读。
     """
@@ -134,12 +139,12 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
             "--result=softmax_bfp8_2x16x64_result.txt"
         )
         return 1
-    from math import ceil
 
     from aidevtools.compare.engine import CompareEngine
     from aidevtools.compare.report import print_strategy_table
-    from aidevtools.compare.strategy import ExactStrategy, BlockedStrategy
-    from aidevtools.compare.strategy.bit_analysis import BitLayout as _BitLayout
+    from aidevtools.compare.strategy import BlockedStrategy
+    from aidevtools.compare.strategy.base import CompareContext
+    from aidevtools.compare.strategy.bit_analysis import BitAnalysisResult
     from aidevtools.formats._registry import get as get_fmt
     from aidevtools.formats.block_format import is_block_format, get_block_format
     from aidevtools.formats.filename_parser import parse_filename, infer_fmt
@@ -150,68 +155,79 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     qt = qtype or (parsed["qtype"] if parsed else None)
     sh = parse_shape(shape) if shape else (parsed["shape"] if parsed else None)
 
-    # ── Path A: 加载源格式原始字节 ──
+    # ── 加载双路径数据 ──
+    # Path A: 源格式原始字节
     if is_block_format(qt):
-        raw_dtype = get_block_format(qt).storage_dtype
+        spec = get_block_format(qt)
+        raw_dtype = spec.storage_dtype
     else:
+        spec = None
         raw_dtype = np.float32
     raw_g = get_fmt(fmt).load(golden, dtype=raw_dtype)
     raw_r = get_fmt(fmt).load(result, dtype=raw_dtype)
 
-    # ── Path B: 反量化为 fp32 ──
+    # Path B: 反量化为 fp32
     fp32_g = load(golden, fmt=fmt, qtype=qt, shape=sh)
     fp32_r = load(result, fmt=fmt, qtype=qt, shape=sh)
 
-    # ── 1. Exact: 源格式字节级比对 ──
-    exact_result = ExactStrategy.compare(raw_g, raw_r)
+    # ── 构造 metadata: 格式感知信息 ──
+    metadata = {}
+    if spec is not None:
+        elem_layout = _per_element_layout(spec)
+        if elem_layout is not None:
+            metadata["bit_layout"] = elem_layout
+        metadata["source_block_size"] = spec.block_size
 
-    # ── 2. Fuzzy / Sanity: fp32 ──
+    # ── 构造 raw 数据: strip 共享指数字节 ──
+    raw_golden_elem = _strip_shared_bytes(raw_g, spec, sh) if spec else raw_g
+    raw_dut_elem = _strip_shared_bytes(raw_r, spec, sh) if spec else raw_r
+
+    # ── 选择引擎, 构造 context, 执行 ──
     _engines = {
-        "standard": CompareEngine.standard,
-        "quick": CompareEngine.quick,
+        "standard": CompareEngine.progressive,
+        "progressive": CompareEngine.progressive,
+        "quick": CompareEngine.quick_then_deep,
         "deep": CompareEngine.deep,
         "minimal": CompareEngine.minimal,
     }
-    factory = _engines.get(engine or "standard", CompareEngine.standard)
-    fp32_results = factory().run(dut=fp32_r, golden=fp32_g)
+    factory = _engines.get(engine or "standard", CompareEngine.progressive)
+    eng = factory()
+    results = eng.run(
+        dut=fp32_r,
+        golden=fp32_g,
+        metadata={
+            **metadata,
+            "_raw_golden": raw_golden_elem,
+            "_raw_dut": raw_dut_elem,
+        },
+    )
 
-    # ── 3. Bit Analysis: 源格式 bit layout ──
-    bit_result = None
-    if BITWISE_AVAILABLE and qt and is_block_format(qt):
-        spec = get_block_format(qt)
-        elem_layout = _per_element_layout(spec)
-        if elem_layout is not None:
-            g_elem, r_elem = _strip_shared_bytes(raw_g, spec, sh), \
-                             _strip_shared_bytes(raw_r, spec, sh)
-            bit_result = BitAnalysisStrategy.compare(g_elem, r_elem, fmt=elem_layout)
-
-    # ── 4. Blocked: fp32 + 源格式 block_size (block_size > 1 才有意义) ──
-    blocked_result = None
-    if is_block_format(qt):
-        source_block_size = get_block_format(qt).block_size
-        if source_block_size > 1:
-            blocked_result = BlockedStrategy.compare(
-                fp32_g, fp32_r, block_size=source_block_size,
-            )
-
-    # ── 合并结果 & 输出报告 ──
-    merged = {
-        "exact": exact_result,
-        "fuzzy_pure": fp32_results.get("fuzzy_pure"),
-        "fuzzy_qnt": fp32_results.get("fuzzy_qnt"),
-        "sanity": fp32_results.get("sanity"),
-    }
+    # ── 输出报告 ──
     name = parsed["op"] if parsed else (golden.rsplit("/", 1)[-1] if "/" in golden else golden)
-    print_strategy_table([merged], names=[name])
+    print_strategy_table([results], names=[name])
 
+    # Bit Analysis 详细输出 (key = "bit_analysis_<format>")
+    bit_result = None
+    for k, v in results.items():
+        if k.startswith("bit_analysis") and isinstance(v, BitAnalysisResult):
+            bit_result = v
+            break
     if bit_result is not None:
         BitAnalysisStrategy.print_result(bit_result, name)
-    if blocked_result is not None:
+
+    # Block Heatmap 详细输出 (key 含 block_size 后缀, 如 "blocked_1024")
+    blocked_result = None
+    for k, v in results.items():
+        if k.startswith("blocked") and isinstance(v, list):
+            blocked_result = v
+            break
+    if blocked_result:
         BlockedStrategy.print_heatmap(blocked_result)
 
     # 判定退出码
-    fuzzy = merged.get("fuzzy_qnt") or merged.get("fuzzy_pure")
-    passed = fuzzy.passed if fuzzy else exact_result.passed
+    fuzzy = results.get("fuzzy_qnt") or results.get("fuzzy_pure")
+    exact = results.get("exact")
+    passed = fuzzy.passed if fuzzy else (exact.passed if exact else False)
     return 0 if passed else 1
 
 

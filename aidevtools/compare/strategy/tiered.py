@@ -67,7 +67,10 @@ def stop_if_exact_passed(results: Dict[str, Any]) -> bool:
     exact = results.get("exact")
     if exact is None:
         return True  # 未执行exact，继续
-    return not exact.get("passed", False)
+    passed = getattr(exact, "passed", None)
+    if passed is None:
+        passed = exact.get("passed", False) if isinstance(exact, dict) else False
+    return not passed
 
 
 def stop_if_fuzzy_passed(results: Dict[str, Any]) -> bool:
@@ -76,8 +79,8 @@ def stop_if_fuzzy_passed(results: Dict[str, Any]) -> bool:
     fuzzy_qnt = results.get("fuzzy_qnt")
 
     # 任一fuzzy通过则停止
-    pure_passed = fuzzy_pure and fuzzy_pure.get("passed", False)
-    qnt_passed = fuzzy_qnt and fuzzy_qnt.get("passed", False)
+    pure_passed = fuzzy_pure and getattr(fuzzy_pure, "passed", False)
+    qnt_passed = fuzzy_qnt and getattr(fuzzy_qnt, "passed", False)
 
     return not (pure_passed or qnt_passed)
 
@@ -233,7 +236,11 @@ class ProgressiveStrategy(TieredStrategy):
                 ),
                 StrategyLevel(
                     name="L2_medium",
-                    strategies=[FuzzyStrategy(), SanityStrategy()],
+                    strategies=[
+                        FuzzyStrategy(use_golden_qnt=False),
+                        FuzzyStrategy(use_golden_qnt=True),
+                        SanityStrategy(),
+                    ],
                     condition=stop_if_fuzzy_passed,
                 ),
                 StrategyLevel(

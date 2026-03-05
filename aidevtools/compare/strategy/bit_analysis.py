@@ -480,8 +480,17 @@ class BitAnalysisStrategy(CompareStrategy):
         return _print_bit_analysis_result_impl(result, name)
 
     def run(self, ctx: CompareContext) -> BitAnalysisResult:
-        """执行 bit 级分析（Strategy 协议方法）"""
-        return self.compare(ctx.golden, ctx.dut, fmt=self.format)
+        """执行 bit 级分析（Strategy 协议方法）
+
+        优先级:
+        1. ctx.metadata["bit_layout"] — 外部传入的 BitLayout (格式感知)
+        2. ctx.raw_golden / ctx.raw_dut — 源格式原始字节
+        3. 回退到 self.format + ctx.golden / ctx.dut
+        """
+        fmt = ctx.metadata.get("bit_layout", self.format) if ctx.metadata else self.format
+        if ctx.raw_golden is not None and ctx.raw_dut is not None:
+            return self.compare(ctx.raw_golden, ctx.raw_dut, fmt=fmt)
+        return self.compare(ctx.golden, ctx.dut, fmt=fmt)
 
     @staticmethod
     def visualize(result: BitAnalysisResult) -> "Page":

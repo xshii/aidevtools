@@ -30,6 +30,8 @@ class CompareContext:
     dut: np.ndarray
     config: CompareConfig
     golden_qnt: Optional[np.ndarray] = None
+    raw_golden: Optional[np.ndarray] = None  # 源格式原始字节 (bit analysis 用)
+    raw_dut: Optional[np.ndarray] = None     # 源格式原始字节 (bit analysis 用)
     prepared: Optional[_PreparedPair] = None
     metadata: Optional[dict] = None
 

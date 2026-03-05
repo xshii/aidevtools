@@ -119,23 +119,26 @@ class ExactStrategy(CompareStrategy):
         return golden == result
 
     def run(self, ctx: CompareContext) -> ExactResult:
-        """执行精确比对（Strategy 协议方法）"""
+        """执行精确比对（Strategy 协议方法）
+
+        有 raw_golden/raw_dut 时优先比源格式字节，否则比 fp32。
+        """
+        g = ctx.raw_golden if ctx.raw_golden is not None else ctx.golden
+        r = ctx.raw_dut if ctx.raw_dut is not None else ctx.dut
         if self.use_bit_compare:
-            # 对于字节比对，需要先转换
-            g_bytes = ctx.golden.tobytes()
-            r_bytes = ctx.dut.tobytes()
+            g_bytes = g.tobytes()
+            r_bytes = r.tobytes()
             passed = self.compare_bytes(g_bytes, r_bytes)
             return ExactResult(
                 passed=passed,
                 mismatch_count=0 if passed else 1,
                 first_diff_offset=-1 if passed else 0,
                 max_abs=0.0,
-                total_elements=ctx.golden.size,
+                total_elements=g.size,
             )
         else:
             return self.compare(
-                ctx.golden,
-                ctx.dut,
+                g, r,
                 max_abs=ctx.config.exact_max_abs,
                 max_count=ctx.config.exact_max_count,
             )

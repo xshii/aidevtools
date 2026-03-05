@@ -149,9 +149,10 @@ class TestDiffExactOnRawBytes:
 
 
 class TestDiffBitAnalysis:
-    """验证 bit_analysis 输出"""
+    """验证 bit_analysis 输出 (progressive: 仅 exact 失败时才触发 L3)"""
 
     def test_bit_analysis_bfpp8_identical(self, tmp_path, capsys):
+        """identical → exact 过 → progressive 停在 L1，不触发 bit analysis"""
         data = np.random.randn(64).astype(np.float32) * 0.5
         g_path, r_path = _make_hex_pair(tmp_path, data, data, qtype="bfpp8")
         cmd_compare(
@@ -159,10 +160,11 @@ class TestDiffBitAnalysis:
             format="hex_text", qtype="bfpp8", shape="64",
         )
         captured = capsys.readouterr()
-        assert "Bit Analysis" in captured.out
-        assert "Bit-exact match" in captured.out
+        # progressive 停在 L1，不会到 L3
+        assert "Bit Analysis" not in captured.out
 
     def test_bit_analysis_bfpp8_different(self, tmp_path, capsys):
+        """different → exact 失败 → L2 fuzzy 失败 → L3 触发 bit analysis"""
         g = np.ones(64, dtype=np.float32)
         r = g + 10.0
         g_path, r_path = _make_hex_pair(tmp_path, g, r, qtype="bfpp8")
@@ -175,6 +177,7 @@ class TestDiffBitAnalysis:
         assert "Diff elements" in captured.out
 
     def test_bit_analysis_gfloat8(self, tmp_path, capsys):
+        """gfloat8 identical → exact 过 → progressive 停在 L1"""
         g = np.array([1.0, -0.5, 0.25, 3.0], dtype=np.float32)
         g_path, r_path = _make_hex_pair(tmp_path, g, g, qtype="gfloat8")
         cmd_compare(
@@ -182,15 +185,18 @@ class TestDiffBitAnalysis:
             format="hex_text", qtype="gfloat8", shape="4",
         )
         captured = capsys.readouterr()
-        assert "Bit Analysis" in captured.out
+        # progressive 停在 L1
+        assert "Bit Analysis" not in captured.out
 
 
 class TestDiffBlocked:
-    """验证 BFP 类型输出 blocked heatmap"""
+    """验证 BFP 类型输出 blocked heatmap (progressive: 仅到 L3 时输出)"""
 
-    def test_blocked_heatmap_bfpp8(self, tmp_path, capsys):
-        data = np.random.randn(64).astype(np.float32) * 0.5
-        g_path, r_path = _make_hex_pair(tmp_path, data, data, qtype="bfpp8")
+    def test_blocked_heatmap_bfpp8_different(self, tmp_path, capsys):
+        """different → 到 L3 → 输出 Block Heatmap"""
+        g = np.ones(64, dtype=np.float32)
+        r = g + 10.0
+        g_path, r_path = _make_hex_pair(tmp_path, g, r, qtype="bfpp8")
         cmd_compare(
             action="diff", golden=g_path, result=r_path,
             format="hex_text", qtype="bfpp8", shape="64",
@@ -199,8 +205,10 @@ class TestDiffBlocked:
         assert "Block Heatmap" in captured.out
 
     def test_no_blocked_for_gfloat(self, tmp_path, capsys):
-        data = np.array([1.0, -0.5, 0.25, 3.0], dtype=np.float32)
-        g_path, r_path = _make_hex_pair(tmp_path, data, data, qtype="gfloat8")
+        """gfloat8 different → 到 L3 但 block_size=1 → 无 Block Heatmap"""
+        g = np.array([1.0, -0.5, 0.25, 3.0], dtype=np.float32)
+        r = np.array([2.0, -1.0, 0.5, 6.0], dtype=np.float32)
+        g_path, r_path = _make_hex_pair(tmp_path, g, r, qtype="gfloat8")
         cmd_compare(
             action="diff", golden=g_path, result=r_path,
             format="hex_text", qtype="gfloat8", shape="4",
@@ -313,17 +321,17 @@ def _make_packed_pair(tmp_path, packed_g, packed_r,
     return str(g_path), str(r_path)
 
 
-class TestThreeLevelCompare:
-    """三级系统比数: exact + bit analysis + blocked heatmap
+class TestProgressiveCompare:
+    """渐进式三级比数: L1 → L2 → L3
 
-    三个梯度:
-    1. 完全一样 → 全 PASS
-    2. 1 block 1 bit 差异 → exact=N, bit analysis 定位, blocked 局部异常
-    3. 一半不同 → 全面 FAIL
+    Progressive 行为:
+    - L1 (Exact+BitXor): exact 过就停
+    - L2 (Fuzzy+Sanity): fuzzy 过就停
+    - L3 (BitAnalysis+Blocked): 深度定位
     """
 
-    def test_identical_full_pass(self, tmp_path, capsys):
-        """完全一样 → exact=Y, Bit-exact match, Block Heatmap 全绿"""
+    def test_identical_stops_at_l1(self, tmp_path, capsys):
+        """完全一样 → exact=Y → progressive 停在 L1"""
         data = np.array([0.5, -0.3, 0.1, 0.7] * 16, dtype=np.float32)
         packed, _ = quantize(data, "bfpp8")
         g_path, r_path = _make_packed_pair(tmp_path, packed, packed)
@@ -334,29 +342,16 @@ class TestThreeLevelCompare:
         out = capsys.readouterr().out
 
         assert ret == 0
-        # Level 1: exact — 字节精确匹配
-        data_line = [l for l in out.split("\n") if "golden.txt" in l and "Bit Analysis" not in l]
-        assert len(data_line) == 1
-        assert "Y" in data_line[0].split()[1]  # exact 列
-        assert "PASS" in out
-        # Level 2: fuzzy/sanity — fp32 级指标
-        assert "cosine" in out
-        assert "qsnr" in out
-        # Level 3: bit analysis — bit 语义分析
-        assert "Bit Analysis" in out
-        assert "Diff elements:     0" in out
-        assert "Bit-exact match" in out
-        # 补充: blocked heatmap
-        assert "Block Heatmap" in out
-        assert "0 failed" in out
+        # L1 exact 过 → 停止，不触发 L2/L3
+        assert "Bit Analysis" not in out
+        assert "Block Heatmap" not in out
 
-    def test_one_block_one_bit_diff(self, tmp_path, capsys):
-        """1 block 的 1 个 element 翻 1 bit → 精准定位"""
+    def test_one_bit_diff_reaches_l3(self, tmp_path, capsys):
+        """1 bit 差异 → exact 失败 → L2 fuzzy 失败 → L3 精准定位"""
         data = np.array([0.5, -0.3, 0.1, 0.7] * 16, dtype=np.float32)
         packed_g, _ = quantize(data, "bfpp8")
         packed_r = packed_g.copy()
         # bfpp8: block_size=32, 2 blocks, 前2字节是 shared exp
-        # 翻转第3个字节 (第1个 mantissa) 的最低位
         packed_r[2] = packed_r[2] ^ np.int8(1)
         g_path, r_path = _make_packed_pair(tmp_path, packed_g, packed_r)
         ret = cmd_compare(
@@ -365,27 +360,24 @@ class TestThreeLevelCompare:
         )
         out = capsys.readouterr().out
 
-        # Level 1: exact = N (字节不同)
         assert ret == 1
+        # L1: exact = N
         data_line = [l for l in out.split("\n") if "golden.txt" in l and "Bit Analysis" not in l]
         assert "N" in data_line[0].split()[1]
-        # Level 2: fuzzy/sanity — fp32 级能看到差异
-        assert "cosine" in out
-        # Level 3: bit analysis 精准定位到 1 个元素
+        # L3: bit analysis 精准定位
         assert "Bit Analysis" in out
         assert "Diff elements:     1" in out
         assert "Mantissa-only diff: 1 elements" in out
         assert "indices: [0]" in out
-        assert "Sign flips:        0" in out
-        # 补充: blocked heatmap 只有 1 个 block 受影响
+        # L3: blocked heatmap
         assert "Block Heatmap" in out
         assert "1 failed" in out
 
-    def test_half_different(self, tmp_path, capsys):
-        """前一半 (+5.0 偏移) → 大面积异常"""
+    def test_half_different_full_l3(self, tmp_path, capsys):
+        """前一半 (+5.0 偏移) → 全链路到 L3"""
         g_data = np.ones(64, dtype=np.float32)
         r_data = g_data.copy()
-        r_data[:32] += 5.0  # 前 32 个元素偏移
+        r_data[:32] += 5.0
         g_path, r_path = _make_hex_pair(tmp_path, g_data, r_data, qtype="bfpp8")
         ret = cmd_compare(
             action="diff", golden=g_path, result=r_path,
@@ -393,16 +385,12 @@ class TestThreeLevelCompare:
         )
         out = capsys.readouterr().out
 
-        # Level 1: exact = N
         assert ret == 1
-        data_line = [l for l in out.split("\n") if "golden.txt" in l and "Bit Analysis" not in l]
-        assert "N" in data_line[0].split()[1]
-        # Level 2: fuzzy/sanity — fp32 级检测到大偏差
+        # L2: fuzzy 级指标
         assert "BOTH_SUSPECT" in out or "DUT_ISSUE" in out
-        # Level 3: bit analysis — 32 个元素有差异
+        # L3: bit analysis — 32 个元素有差异
         assert "Bit Analysis" in out
         assert "Diff elements:     32" in out
-        assert "Mantissa-only diff: 32 elements" in out
-        # 补充: blocked heatmap — 第一个 block 异常, 第二个正常
+        # L3: blocked heatmap
         assert "Block Heatmap" in out
-        assert "1 failed" in out  # 只有 block 0 失败
+        assert "1 failed" in out

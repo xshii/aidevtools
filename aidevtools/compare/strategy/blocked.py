@@ -284,11 +284,20 @@ class BlockedStrategy(CompareStrategy):
         return _find_worst_blocks_impl(blocks, top_n)
 
     def run(self, ctx: CompareContext) -> List[BlockResult]:
-        """执行分块比对（Strategy 协议方法）"""
+        """执行分块比对（Strategy 协议方法）
+
+        从 ctx.metadata["source_block_size"] 获取源格式 block_size。
+        block_size <= 1 时跳过（per-element 格式无需分块）。
+        """
+        bs = self.block_size
+        if ctx.metadata:
+            bs = ctx.metadata.get("source_block_size", bs)
+        if bs <= 1:
+            return []
         return self.compare(
             ctx.golden,
             ctx.dut,
-            block_size=self.block_size,
+            block_size=bs,
             min_qsnr=ctx.config.fuzzy_min_qsnr,
             min_cosine=ctx.config.fuzzy_min_cosine,
             atol=ctx.config.fuzzy_atol,

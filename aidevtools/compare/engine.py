@@ -82,12 +82,18 @@ class CompareEngine:
         Returns:
             {strategy_name: result} 字典
         """
+        # 从 metadata 提取 raw 数据 (双路径: 源格式字节 + fp32)
+        raw_golden = metadata.pop("_raw_golden", None) if metadata else None
+        raw_dut = metadata.pop("_raw_dut", None) if metadata else None
+
         # 创建上下文
         ctx = CompareContext(
             golden=golden,
             dut=dut,
             config=self.config,
             golden_qnt=golden_qnt,
+            raw_golden=raw_golden,
+            raw_dut=raw_dut,
             metadata=metadata,
         )
 

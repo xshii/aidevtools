@@ -155,8 +155,13 @@ class BitXorStrategy(CompareStrategy):
         return BitXorStrategy.compare(g_arr, r_arr)
 
     def run(self, ctx: CompareContext) -> BitXorResult:
-        """执行 Bit XOR 比对（Strategy 协议方法）"""
-        return self.compare(ctx.golden, ctx.dut)
+        """执行 Bit XOR 比对（Strategy 协议方法）
+
+        有 raw_golden/raw_dut 时优先比源格式字节。
+        """
+        g = ctx.raw_golden if ctx.raw_golden is not None else ctx.golden
+        r = ctx.raw_dut if ctx.raw_dut is not None else ctx.dut
+        return self.compare(g, r)
 
     @staticmethod
     def print_result(result: BitXorResult, name: str = ""):
