@@ -83,6 +83,40 @@ def _action_convert(golden, output, qtype, shape, target_dtype, **kwargs):
     return 0
 
 
+def _per_element_layout(spec):
+    """从 bit_layout 字符串解析 element 0 的 BitLayout"""
+    bl = spec.bit_layout
+    if not bl:
+        return None
+    sign_bits = exp_bits = mant_bits = 0
+    for token in bl.split():
+        if token == "S0":
+            sign_bits = 1
+        elif token.startswith("E0*"):
+            exp_bits = int(token.split("*")[1])
+        elif token == "E0":
+            exp_bits = 1
+        elif token.startswith("M0*"):
+            mant_bits = int(token.split("*")[1])
+        elif token == "M0":
+            mant_bits = 1
+    if sign_bits + exp_bits + mant_bits == 0:
+        return None
+    return BitLayout(sign_bits, exp_bits, mant_bits, spec.name)
+
+
+def _strip_shared_bytes(raw, spec, shape):
+    """block format (block_size>1) 时去掉共享指数字节，只留 per-element 数据"""
+    if spec.block_size <= 1:
+        return raw
+    num_elements = int(np.prod(shape)) if shape is not None else len(raw)
+    num_blocks = int(np.ceil(num_elements / spec.block_size))
+    element_bytes = np.dtype(spec.storage_dtype).itemsize
+    exp_bytes_per_block = spec.bytes_per_block - spec.block_size * element_bytes
+    exp_total = num_blocks * exp_bytes_per_block
+    return raw[exp_total:]
+
+
 def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     """多级比数 (双路径: 源格式 exact/bit/block + fp32 fuzzy/sanity)
 
@@ -107,8 +141,7 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     from aidevtools.compare.strategy import ExactStrategy, BlockedStrategy
     from aidevtools.compare.strategy.bit_analysis import BitLayout as _BitLayout
     from aidevtools.formats._registry import get as get_fmt
-    from aidevtools.formats.base import _GFLOAT_DTYPES
-    from aidevtools.formats.block_format import is_block_format, get_block_format, get_bit_layout
+    from aidevtools.formats.block_format import is_block_format, get_block_format
     from aidevtools.formats.filename_parser import parse_filename, infer_fmt
 
     # ── 自动解读: 从 golden 文件名提取 qtype / shape / fmt ──
@@ -118,16 +151,10 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     sh = parse_shape(shape) if shape else (parsed["shape"] if parsed else None)
 
     # ── Path A: 加载源格式原始字节 ──
-    _RAW_DTYPES = {
-        "float16": np.float16,
-        "float32": np.float32,
-    }
     if is_block_format(qt):
         raw_dtype = get_block_format(qt).storage_dtype
-    elif qt in _GFLOAT_DTYPES:
-        raw_dtype = _GFLOAT_DTYPES[qt]
     else:
-        raw_dtype = _RAW_DTYPES.get(qt, np.float32)
+        raw_dtype = np.float32
     raw_g = get_fmt(fmt).load(golden, dtype=raw_dtype)
     raw_r = get_fmt(fmt).load(result, dtype=raw_dtype)
 
@@ -149,41 +176,23 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     fp32_results = factory().run(dut=fp32_r, golden=fp32_g)
 
     # ── 3. Bit Analysis: 源格式 bit layout ──
-    _FLOAT_LAYOUTS = {
-        "gfloat16": _BitLayout(1, 8, 7, "gfloat16"),
-        "gfloat8": _BitLayout(1, 4, 3, "gfloat8"),
-        "float16": FP16,
-        "float32": FP32,
-    }
     bit_result = None
-    if BITWISE_AVAILABLE and qt:
-        if is_block_format(qt):
-            bit_layout = get_bit_layout(qt)
-        else:
-            bit_layout = _FLOAT_LAYOUTS.get(qt)
-    else:
-        bit_layout = None
-    if bit_layout is not None:
-        if is_block_format(qt) and sh is not None:
-            # Block format 打包格式 = [shared_exps..., mantissas...], 只分析 mantissa
-            spec = get_block_format(qt)
-            size = 1
-            for s in sh:
-                size *= s
-            num_blocks = ceil(size / spec.block_size)
-            mant_g = raw_g[num_blocks:].view(np.uint8)
-            mant_r = raw_r[num_blocks:].view(np.uint8)
-            bit_result = BitAnalysisStrategy.compare(mant_g, mant_r, fmt=bit_layout)
-        else:
-            bit_result = BitAnalysisStrategy.compare(raw_g, raw_r, fmt=bit_layout)
+    if BITWISE_AVAILABLE and qt and is_block_format(qt):
+        spec = get_block_format(qt)
+        elem_layout = _per_element_layout(spec)
+        if elem_layout is not None:
+            g_elem, r_elem = _strip_shared_bytes(raw_g, spec, sh), \
+                             _strip_shared_bytes(raw_r, spec, sh)
+            bit_result = BitAnalysisStrategy.compare(g_elem, r_elem, fmt=elem_layout)
 
-    # ── 4. Blocked: fp32 + 源格式 block_size ──
+    # ── 4. Blocked: fp32 + 源格式 block_size (block_size > 1 才有意义) ──
     blocked_result = None
     if is_block_format(qt):
         source_block_size = get_block_format(qt).block_size
-        blocked_result = BlockedStrategy.compare(
-            fp32_g, fp32_r, block_size=source_block_size,
-        )
+        if source_block_size > 1:
+            blocked_result = BlockedStrategy.compare(
+                fp32_g, fp32_r, block_size=source_block_size,
+            )
 
     # ── 合并结果 & 输出报告 ──
     merged = {

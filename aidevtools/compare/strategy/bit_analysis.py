@@ -78,21 +78,11 @@ class BitLayout:
         return (self.sign_bits, self.exponent_bits, self.mantissa_bits)
 
 
-# 预定义格式
+# 预定义格式 (非 block format 的标准浮点)
+# block format (BFPP/BFP/GFloat) 的 per-element BitLayout 需手动构造
 FP32 = BitLayout(1, 8, 23, "fp32")
 FP16 = BitLayout(1, 5, 10, "fp16")
 BFLOAT16 = BitLayout(1, 8, 7, "bfloat16")
-
-# BFPP 格式：尾数均以 int8 存储 (1 sign + 7 mantissa = 8 bits)
-# precision_bits 记录实际有效位数（= 量化参数中的 mantissa_bits）
-BFPP16 = BitLayout(1, 0, 7, "bfpp16", precision_bits=8)   # 8 有效位，占满 int8
-BFPP8 = BitLayout(1, 0, 7, "bfpp8", precision_bits=4)     # 4 有效位，高 4 位符号扩展
-BFPP4 = BitLayout(1, 0, 7, "bfpp4", precision_bits=2)     # 2 有效位，高 6 位符号扩展
-
-# BFP 格式（坑位，待用户实现后生效，BitLayout 与 BFPP 相同）
-BFP16 = BitLayout(1, 0, 7, "bfp16", precision_bits=8)
-BFP8 = BitLayout(1, 0, 7, "bfp8", precision_bits=4)
-BFP4 = BitLayout(1, 0, 7, "bfp4", precision_bits=2)
 
 
 # ============================================================================
@@ -149,6 +139,10 @@ def _to_uint(arr: np.ndarray) -> np.ndarray:
     if flat.dtype == np.float32:
         return flat.view(np.uint32)
     elif flat.dtype == np.float16:
+        return flat.view(np.uint16)
+    elif flat.dtype in (np.int8,):
+        return flat.view(np.uint8)
+    elif flat.dtype in (np.int16,):
         return flat.view(np.uint16)
     elif flat.dtype in (np.uint8, np.uint16, np.uint32):
         return flat
@@ -566,12 +560,6 @@ __all__ = [
     "FP32",
     "FP16",
     "BFLOAT16",
-    "BFPP16",
-    "BFPP8",
-    "BFPP4",
-    "BFP16",
-    "BFP8",
-    "BFP4",
     "WarnLevel",
     "BitAnalysisSummary",
     "BitAnalysisWarning",

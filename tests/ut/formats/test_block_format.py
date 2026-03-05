@@ -4,11 +4,14 @@ import pytest
 
 from aidevtools.formats.block_format import (
     BlockFormatSpec,
+    DecodeResult,
+    FormatInfo,
     register_block_format,
     get_block_format,
+    get_format_info,
     is_block_format,
     list_block_formats,
-    get_bit_layout,
+    decode,
     _registry,
 )
 
@@ -24,7 +27,6 @@ def _dummy_quantize(data, **kwargs):
     meta = {
         "format": "dummy",
         "block_size": block_size,
-        "mantissa_bits": 8,
         "num_blocks": len(flat) // block_size,
         "original_shape": data.shape,
         "scale": scale,
@@ -58,12 +60,10 @@ class TestRegistration:
     def test_register_custom_format(self):
         """注册自定义格式"""
         spec = BlockFormatSpec(
-            name="test_dummy8",
+            info=FormatInfo(name="test_dummy8", description="Test dummy format"),
             block_size=4,
-            mantissa_bits=8,
             quantize_fn=_dummy_quantize,
             dequantize_fn=_dummy_dequantize,
-            description="Test dummy format",
         )
         register_block_format(spec)
 
@@ -86,16 +86,16 @@ class TestRegistration:
         """BFPP spec 值正确"""
         spec = get_block_format("bfpp8")
         assert spec.block_size == 32
-        assert spec.mantissa_bits == 4
         assert spec.storage_dtype == np.int8
+        assert spec.bytes_per_block == 33
 
         spec16 = get_block_format("bfpp16")
         assert spec16.block_size == 16
-        assert spec16.mantissa_bits == 8
+        assert spec16.bytes_per_block == 17
 
         spec4 = get_block_format("bfpp4")
         assert spec4.block_size == 64
-        assert spec4.mantissa_bits == 2
+        assert spec4.bytes_per_block == 65
 
 
 class TestQuantizeDequantize:
@@ -104,9 +104,8 @@ class TestQuantizeDequantize:
     def test_quantize_via_registry(self):
         """注册后可通过 quantize() 调用"""
         register_block_format(BlockFormatSpec(
-            name="test_q_fmt",
+            info=FormatInfo(name="test_q_fmt"),
             block_size=4,
-            mantissa_bits=8,
             quantize_fn=_dummy_quantize,
             dequantize_fn=_dummy_dequantize,
         ))
@@ -120,9 +119,8 @@ class TestQuantizeDequantize:
     def test_dequantize_via_registry(self):
         """注册后可通过 dequantize() 调用"""
         register_block_format(BlockFormatSpec(
-            name="test_dq_fmt",
+            info=FormatInfo(name="test_dq_fmt"),
             block_size=4,
-            mantissa_bits=8,
             quantize_fn=_dummy_quantize,
             dequantize_fn=_dummy_dequantize,
         ))
@@ -157,42 +155,66 @@ class TestQuantizeDequantize:
 
 
 class TestBitLayout:
-    """get_bit_layout 测试"""
+    """bit_layout 符号化布局测试 (索引表达)"""
 
-    def test_bfpp8_layout(self):
-        """BFPP8 自动生成 BitLayout"""
-        layout = get_bit_layout("bfpp8")
-        assert layout.sign_bits == 1
-        assert layout.exponent_bits == 0
-        assert layout.mantissa_bits == 7  # int8 = 8 bits - 1 sign = 7
-        assert layout.name == "bfpp8"
-        assert layout.precision_bits == 4
+    def test_bfpp8_bit_layout(self):
+        """BFPP8 (mantissa_bits=4): E*8 S0 M0*3 S1 M1*3 ... S31 M31*3"""
+        spec = get_block_format("bfpp8")
+        assert spec.bit_layout.startswith("E*8 S0 M0*3 S1 M1*3")
+        assert spec.bit_layout.endswith("S31 M31*3")
 
-    def test_bfpp16_layout(self):
-        """BFPP16 自动生成 BitLayout"""
-        layout = get_bit_layout("bfpp16")
-        assert layout.name == "bfpp16"
-        assert layout.precision_bits == 8
+    def test_bfpp16_bit_layout(self):
+        """BFPP16 (mantissa_bits=8): E*8 S0 M0*7 ... S15 M15*7"""
+        spec = get_block_format("bfpp16")
+        assert spec.bit_layout.startswith("E*8 S0 M0*7")
+        assert spec.bit_layout.endswith("S15 M15*7")
 
-    def test_custom_format_layout(self):
-        """自定义格式生成 BitLayout"""
+    def test_bfpp4_bit_layout(self):
+        """BFPP4 (mantissa_bits=2): E*8 S0 M0*1 ... S63 M63*1"""
+        spec = get_block_format("bfpp4")
+        assert spec.bit_layout.startswith("E*8 S0 M0*1")
+        assert spec.bit_layout.endswith("S63 M63*1")
+
+    def test_gfloat16_bit_layout(self):
+        """GFloat16: S0 E0*8 M0*7"""
+        spec = get_block_format("gfloat16")
+        assert spec.bit_layout == "S0 E0*8 M0*7"
+
+    def test_gfloat8_bit_layout(self):
+        """GFloat8: S0 E0*4 M0*3"""
+        spec = get_block_format("gfloat8")
+        assert spec.bit_layout == "S0 E0*4 M0*3"
+
+    def test_gfloat4_bit_layout(self):
+        """GFloat4: S0 E0*2 M0*1"""
+        spec = get_block_format("gfloat4")
+        assert spec.bit_layout == "S0 E0*2 M0*1"
+
+    def test_float32_bit_layout(self):
+        """float32: S0 E0*8 M0*23"""
+        spec = get_block_format("float32")
+        assert spec.bit_layout == "S0 E0*8 M0*23"
+
+    def test_float16_bit_layout(self):
+        """float16: S0 E0*5 M0*10"""
+        spec = get_block_format("float16")
+        assert spec.bit_layout == "S0 E0*5 M0*10"
+
+    def test_bfloat16_bit_layout(self):
+        """bfloat16: S0 E0*8 M0*7"""
+        spec = get_block_format("bfloat16")
+        assert spec.bit_layout == "S0 E0*8 M0*7"
+
+    def test_custom_format_default_empty(self):
+        """自定义格式默认 bit_layout 为空"""
         register_block_format(BlockFormatSpec(
-            name="test_layout_fmt",
+            info=FormatInfo(name="test_layout_fmt"),
             block_size=8,
-            mantissa_bits=6,
             quantize_fn=_dummy_quantize,
             dequantize_fn=_dummy_dequantize,
-            storage_dtype=np.int8,
         ))
-        layout = get_bit_layout("test_layout_fmt")
-        assert layout.total_bits == 8
-        assert layout.precision_bits == 6
-        assert layout.name == "test_layout_fmt"
-
-    def test_unknown_format_raises(self):
-        """未注册格式 get_bit_layout 应报错"""
-        with pytest.raises(KeyError):
-            get_bit_layout("nonexistent")
+        spec = get_block_format("test_layout_fmt")
+        assert spec.bit_layout == ""
 
 
 class TestLoadIntegration:
@@ -214,9 +236,8 @@ class TestLoadIntegration:
     def test_load_custom_format(self, tmp_workspace):
         """自定义格式 load"""
         register_block_format(BlockFormatSpec(
-            name="test_load_fmt",
+            info=FormatInfo(name="test_load_fmt", bytes_per_block=4),
             block_size=4,
-            mantissa_bits=8,
             quantize_fn=_dummy_quantize,
             dequantize_fn=_dummy_dequantize,
         ))
@@ -231,3 +252,215 @@ class TestLoadIntegration:
         loaded = load(path, qtype="test_load_fmt", shape=(4,))
         assert loaded.dtype == np.float32
         assert loaded.shape == (4,)
+
+
+class TestDecodeResult:
+    """DecodeResult 接口测试"""
+
+    def test_bfpp8_decode_returns_decode_result(self):
+        """BFPP8 decode() 返回 DecodeResult"""
+        from aidevtools.formats.quantize import quantize
+        data = np.random.randn(64).astype(np.float32) * 0.5
+        packed, meta = quantize(data, "bfpp8")
+        result = decode(packed, "bfpp8", meta)
+        assert isinstance(result, DecodeResult)
+        assert result.values.dtype == np.float32
+        assert result.sign.dtype == np.uint8
+        assert len(result.values) == 64
+        assert len(result.sign) == 64
+        assert len(result.mantissa) == 64
+        # exponent 应被扩充到 per-element
+        assert len(result.exponent) == 64
+
+    def test_bfpp8_decode_shared_exp_expansion(self):
+        """decode() 自动扩充共享指数"""
+        from aidevtools.formats.quantize import quantize
+        data = np.random.randn(64).astype(np.float32) * 0.5
+        packed, meta = quantize(data, "bfpp8")
+        # 直接调用 dequantize_fn 得到未扩充的结果
+        spec = get_block_format("bfpp8")
+        raw_result = spec.dequantize_fn(packed, meta)
+        assert len(raw_result.exponent) == meta["num_blocks"]  # 未扩充
+        # decode() 自动扩充
+        result = decode(packed, "bfpp8", meta)
+        assert len(result.exponent) == 64
+
+    def test_decode_sign_values(self):
+        """sign 字段正确：正数=0，负数=1"""
+        from aidevtools.formats.quantize import quantize
+        data = np.array([1.0, -2.0, 3.0, -4.0] * 8, dtype=np.float32)
+        packed, meta = quantize(data, "bfpp16")
+        result = decode(packed, "bfpp16", meta)
+        # 正数的 sign 应为 0，负数的 sign 应为 1
+        for i in range(len(data)):
+            if data[i] >= 0:
+                assert result.sign[i] == 0
+            else:
+                assert result.sign[i] == 1
+
+
+class TestIEEERegistration:
+    """IEEE 标准浮点格式统一注册测试"""
+
+    def test_float32_registered(self):
+        """float32 已注册"""
+        assert is_block_format("float32")
+        spec = get_block_format("float32")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.float32
+        assert spec.bytes_per_block == 4
+
+    def test_float16_registered(self):
+        """float16 已注册"""
+        assert is_block_format("float16")
+        spec = get_block_format("float16")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.float16
+        assert spec.bytes_per_block == 2
+
+    def test_bfloat16_registered(self):
+        """bfloat16 已注册"""
+        assert is_block_format("bfloat16")
+        spec = get_block_format("bfloat16")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.uint16
+        assert spec.bytes_per_block == 2
+
+    def test_float32_roundtrip(self):
+        """float32 quantize -> dequantize roundtrip (identity)"""
+        from aidevtools.formats.quantize import quantize, dequantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "float32")
+        restored = dequantize(packed, "float32", meta)
+        assert restored.dtype == np.float32
+        np.testing.assert_array_equal(data, restored)
+
+    def test_float16_roundtrip(self):
+        """float16 quantize -> dequantize roundtrip"""
+        from aidevtools.formats.quantize import quantize, dequantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "float16")
+        restored = dequantize(packed, "float16", meta)
+        assert restored.dtype == np.float32
+        assert np.allclose(data, restored, rtol=1e-3)
+
+    def test_bfloat16_roundtrip(self):
+        """bfloat16 quantize -> dequantize roundtrip"""
+        from aidevtools.formats.quantize import quantize, dequantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "bfloat16")
+        restored = dequantize(packed, "bfloat16", meta)
+        assert restored.dtype == np.float32
+        assert np.allclose(data, restored, rtol=1e-2)
+
+    def test_float32_decode(self):
+        """float32 decode() 返回 DecodeResult"""
+        from aidevtools.formats.quantize import quantize
+        data = np.array([1.0, -2.0, 0.0], dtype=np.float32)
+        packed, meta = quantize(data, "float32")
+        result = decode(packed, "float32", meta)
+        assert isinstance(result, DecodeResult)
+        assert len(result.values) == 3
+        assert result.sign[0] == 0   # 1.0 正数
+        assert result.sign[1] == 1   # -2.0 负数
+
+    def test_float32_load(self, tmp_workspace):
+        """float32 通过 load() 加载"""
+        from aidevtools.formats.base import load, save
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        path = str(tmp_workspace / "test.float32.bin")
+        save(path, data, fmt="raw")
+        loaded = load(path, shape=(4,))
+        assert loaded.dtype == np.float32
+        np.testing.assert_array_equal(data, loaded)
+
+    def test_float16_load(self, tmp_workspace):
+        """float16 通过 load() 加载"""
+        from aidevtools.formats.base import load, save
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        fp16_data = data.astype(np.float16)
+        path = str(tmp_workspace / "test.float16.bin")
+        save(path, fp16_data, fmt="raw")
+        loaded = load(path, shape=(4,))
+        assert loaded.dtype == np.float32
+        assert np.allclose(data, loaded, rtol=1e-3)
+
+
+class TestGFloatRegistration:
+    """GFloat 统一注册测试"""
+
+    def test_gfloat16_registered(self):
+        """gfloat16 已通过 register_block_format 注册"""
+        assert is_block_format("gfloat16")
+        spec = get_block_format("gfloat16")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.uint16
+        assert spec.bytes_per_block == 2  # 1 element * uint16
+
+    def test_gfloat8_registered(self):
+        """gfloat8 已注册"""
+        assert is_block_format("gfloat8")
+        spec = get_block_format("gfloat8")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.uint8
+        assert spec.bytes_per_block == 1  # 1 element * uint8
+
+    def test_gfloat4_registered(self):
+        """gfloat4 已注册"""
+        assert is_block_format("gfloat4")
+        spec = get_block_format("gfloat4")
+        assert spec.block_size == 1
+        assert spec.storage_dtype == np.uint8
+
+    def test_gfp_aliases_registered(self):
+        """gfp16/gfp8/gfp4 别名已注册"""
+        assert is_block_format("gfp16")
+        assert is_block_format("gfp8")
+        assert is_block_format("gfp4")
+
+    def test_gfloat16_roundtrip(self):
+        """GFloat16 quantize -> dequantize roundtrip"""
+        from aidevtools.formats.quantize import quantize, dequantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "gfloat16")
+        restored = dequantize(packed, "gfloat16", meta)
+        assert restored.dtype == np.float32
+        assert np.allclose(data, restored, rtol=1e-3)
+
+    def test_gfloat8_roundtrip(self):
+        """GFloat8 quantize -> dequantize roundtrip"""
+        from aidevtools.formats.quantize import quantize, dequantize
+        data = np.array([1.0, -2.0, 0.5, 64.0], dtype=np.float32)
+        packed, meta = quantize(data, "gfloat8")
+        restored = dequantize(packed, "gfloat8", meta)
+        assert restored.dtype == np.float32
+        assert restored.shape == (4,)
+
+    def test_gfloat16_decode(self):
+        """GFloat16 decode() 返回 DecodeResult"""
+        from aidevtools.formats.quantize import quantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "gfloat16")
+        result = decode(packed, "gfloat16", meta)
+        assert isinstance(result, DecodeResult)
+        assert len(result.values) == 4
+        assert len(result.sign) == 4
+        assert len(result.exponent) == 4
+        assert len(result.mantissa) == 4
+        # -2.0 的 sign 应为 1
+        assert result.sign[1] == 1
+        # 1.0 的 sign 应为 0
+        assert result.sign[0] == 0
+
+    def test_gfloat16_load(self, tmp_workspace):
+        """GFloat16 通过 load() 加载"""
+        from aidevtools.formats.base import load, save
+        from aidevtools.formats.quantize import quantize
+        data = np.array([1.0, -2.0, 0.5, 100.0], dtype=np.float32)
+        packed, meta = quantize(data, "gfloat16")
+        path = str(tmp_workspace / "test.gfloat16.bin")
+        save(path, packed, fmt="raw")
+        loaded = load(path, shape=(4,))
+        assert loaded.dtype == np.float32
+        assert loaded.shape == (4,)
+        assert np.allclose(data, loaded, rtol=1e-3)
