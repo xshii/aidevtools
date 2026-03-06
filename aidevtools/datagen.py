@@ -882,6 +882,48 @@ class Model:
         from aidevtools.formats.quantize import simulate_quantize
         return simulate_quantize(data.astype(np.float32), qtype)
 
+    def _cqa_calibrate_weight(
+        self,
+        W_fp32: np.ndarray,
+        x_cqa: np.ndarray,
+        y_golden: np.ndarray,
+        qtype: str,
+    ) -> np.ndarray:
+        """CQA 权重校准: 根据实际量化输入和理想输出推导最优权重
+
+        算法:
+            1. x_cqa 是上层量化后的实际输入 (已有精度损失)
+            2. y_golden 是 fp32 链的理想输出
+            3. 求解 W_cal = lstsq(x_cqa, y_golden) 使输出尽可能接近 golden
+            4. 量化 W_cal 得到最终权重
+
+        对于 y = x @ W.T + b 的线性层:
+            W_cal.T = pinv(x_cqa) @ y_golden
+            x_cqa 已包含量化损失, W_cal 会自动补偿这个损失
+
+        Args:
+            W_fp32: 原始 fp32 权重 [out, in] (PyTorch 格式)
+            x_cqa: 量化后的输入 [batch, ..., in_features]
+            y_golden: fp32 链的理想输出 [batch, ..., out_features]
+            qtype: 权重量化类型
+
+        Returns:
+            校准并量化后的权重 [out, in]
+        """
+        in_dim = x_cqa.shape[-1]
+        out_dim = y_golden.shape[-1]
+
+        # 展平 batch 维度: (B*S, in) 和 (B*S, out)
+        x_flat = x_cqa.reshape(-1, in_dim)
+        y_flat = y_golden.reshape(-1, out_dim)
+
+        # 最小二乘: x_flat @ W_cal_T ≈ y_flat
+        W_cal_T, _, _, _ = np.linalg.lstsq(x_flat, y_flat, rcond=None)
+        W_cal = W_cal_T.T.astype(np.float32)  # [out, in]
+
+        # 量化校准后的权重
+        return self._cqa_quantize(W_cal, qtype)
+
     # ============================================================
     # 输入
     # ============================================================
@@ -1003,7 +1045,15 @@ class Model:
     # ============================================================
 
     def _call_op(self, op_name: str, x: ModelTensor, **kwargs) -> ModelTensor:
-        """调用算子，自动生成权重"""
+        """调用算子，自动生成权重
+
+        CQA 模式 (cqa=True) 流程:
+            1. 生成 fp32 权重 (同非 CQA)
+            2. 用 fp32 权重 + fp32 输入计算理想 golden (参考目标)
+            3. 对有权重的线性算子: lstsq 校准权重 → 量化
+            4. 用校准量化权重 + 量化输入重新计算
+            5. 输出量化后传给下层
+        """
         from aidevtools.ops.registry import get_op_meta, get_op_instance
 
         meta = get_op_meta(op_name)
@@ -1015,7 +1065,7 @@ class Model:
 
         # 根据 auto_gen 生成权重
         context = {"input_shape": input_shape, **kwargs}
-        args = [x.golden]  # 第一个参数是输入
+        args = [x.golden]  # 第一个参数是输入 (CQA 模式下已是量化后的)
 
         # 处理非 auto_gen 的 inputs (如 normalized_shape)
         for inp in meta.inputs[1:]:
@@ -1026,22 +1076,23 @@ class Model:
                     args.append(kwargs[inp])
 
         kwargs_call = {}
-
         pc = self._gen.precision
+
+        # 收集权重信息 (CQA 校准需要)
+        weight_params = {}  # {param: (array_fp32, param_qtype, arg_index_or_kwarg)}
+
         for param, strategy in meta.auto_gen.items():
             if param == meta.inputs[0]:
-                # 第一个输入已经有了
                 continue
 
             is_weight = param in meta.weight_params
             role = "weight" if is_weight else "input"
 
-            # 确定该参数的量化类型 (逐参数精度覆盖)
             param_qtype = pc.get_dtype(param, is_weight)
             if param_qtype == "fp32":
                 param_qtype = self._gen.qtype
 
-            # 从 data_dir 加载或生成
+            # 生成或加载 fp32 权重
             tensor_name = f"{prefix}.{param}"
             load_key = tensor_name.replace(".", "_")
             if self._loaded and load_key in self._loaded:
@@ -1051,28 +1102,83 @@ class Model:
                 array, shape = self._gen._gen_from_strategy(strategy, context)
             self._gen._add_tensor(tensor_name, array, qtype=param_qtype, role=role)
 
-            # CQA: 权重量化后再参与计算
-            if self._cqa:
+            array_fp32 = array.copy()
+
+            # 非 CQA: 直接用 fp32 权重
+            # CQA 无权重校准: 直接量化
+            if self._cqa and not is_weight:
                 array = self._cqa_quantize(array, param_qtype)
 
-            # 更新 context
             context[f"{param}_shape"] = shape
             context[param] = array
 
-            # 添加到参数
             if param in meta.inputs[1:]:
+                idx = len(args)
                 args.append(array)
+                if is_weight:
+                    weight_params[param] = (array_fp32, param_qtype, ("arg", idx))
             elif param in meta.optional:
                 kwargs_call[param] = array
+                if is_weight:
+                    weight_params[param] = (array_fp32, param_qtype, ("kwarg", param))
 
-        # 计算 golden (fp32 累加，模拟硬件 MAC)
         op = get_op_instance(op_name)
-        golden = op.cpu_golden(*args, **kwargs_call)
+
+        # 找主权重 (2D 矩阵, 排除 bias 等 1D 参数)
+        main_weight = None
+        if self._cqa and weight_params and op_name in ("linear",):
+            for param, (w_fp32, pqtype, loc) in weight_params.items():
+                if w_fp32.ndim == 2:
+                    main_weight = (param, w_fp32, pqtype, loc)
+                    break
+
+        if self._cqa and main_weight is not None:
+            # CQA 权重校准:
+            # 1. 先用 fp32 权重计算理想 golden (参考目标)
+            args_fp32 = list(args)
+            kwargs_fp32 = dict(kwargs_call)
+            for param, (w_fp32, _, loc) in weight_params.items():
+                if loc[0] == "arg":
+                    args_fp32[loc[1]] = w_fp32
+                else:
+                    kwargs_fp32[loc[1]] = w_fp32
+            y_golden = op.cpu_golden(*args_fp32, **kwargs_fp32)
+
+            # 2. lstsq 校准主权重矩阵
+            x_cqa = x.golden
+            param, w_fp32, pqtype, loc = main_weight
+            w_cal = self._cqa_calibrate_weight(w_fp32, x_cqa, y_golden, pqtype)
+            if loc[0] == "arg":
+                args[loc[1]] = w_cal
+            else:
+                kwargs_call[loc[1]] = w_cal
+
+            # 3. 其他权重参数 (bias 等) 直接量化
+            for p, (wf, pt, lc) in weight_params.items():
+                if p == param:
+                    continue
+                wq = self._cqa_quantize(wf, pt)
+                if lc[0] == "arg":
+                    args[lc[1]] = wq
+                else:
+                    kwargs_call[lc[1]] = wq
+
+            # 4. 用校准权重重新计算
+            golden = op.cpu_golden(*args, **kwargs_call)
+        else:
+            # 非 CQA 或无权重/非线性算子: CQA 只做简单量化
+            if self._cqa:
+                for param, (w_fp32, pqtype, loc) in weight_params.items():
+                    w_q = self._cqa_quantize(w_fp32, pqtype)
+                    if loc[0] == "arg":
+                        args[loc[1]] = w_q
+                    else:
+                        kwargs_call[loc[1]] = w_q
+            golden = op.cpu_golden(*args, **kwargs_call)
 
         # CQA: 输出量化后再传给下层
         if self._cqa:
-            output_qtype = pc.output_dtype
-            golden = self._cqa_quantize(golden, output_qtype)
+            golden = self._cqa_quantize(golden, pc.output_dtype)
 
         # 返回输出
         out = ModelTensor(shape=golden.shape, name=f"{prefix}.output", golden=golden)
