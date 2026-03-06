@@ -13,7 +13,7 @@ class TestVisualizer:
     def test_create_page(self):
         """创建 Page"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
@@ -23,7 +23,7 @@ class TestVisualizer:
     def test_create_pie(self):
         """创建饼图"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
@@ -36,7 +36,7 @@ class TestVisualizer:
     def test_create_bar(self):
         """创建柱状图"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
@@ -54,7 +54,7 @@ class TestBitAnalysisVisualize:
     def test_visualize(self):
         """生成可视化报告"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
@@ -78,7 +78,7 @@ class TestBlockedVisualize:
     def test_visualize(self):
         """生成可视化报告"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
@@ -102,11 +102,11 @@ class TestModelVisualizer:
     def test_visualize(self):
         """生成模型级报告"""
         try:
-            from aidevtools.compare.visualizer import Visualizer
+            from aidevtools.compare.report.visualizer import Visualizer
         except ImportError:
             pytest.skip("pyecharts not installed")
 
-        from aidevtools.compare.model_visualizer import (
+        from aidevtools.compare.report.model_visualizer import (
             ModelVisualizer,
             ModelCompareResult,
             OpCompareResult,

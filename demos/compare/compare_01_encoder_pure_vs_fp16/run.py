@@ -187,7 +187,7 @@ def main():
 
     # 比对
     print("\n[3/3] 使用 StandardStrategy 比对")
-    engine = CompareEngine.standard(config=COMPARE_CFG)
+    engine = CompareEngine.progressive(config=COMPARE_CFG)
 
     results = {}
     for op_name in ENCODER_OPS:
@@ -255,13 +255,12 @@ def main():
         assert avg_cosine > 0.999, f"平均 Cosine 应该 >0.999，实际 {avg_cosine:.6f}"
         print(f"  ✓ 平均 Cosine {avg_cosine:.6f}（高度相似）")
 
-    # 5. 不应该有 GOLDEN_SUSPECT 或 BOTH_SUSPECT（golden 是纯 fp32，应该是正确的）
-    from aidevtools.compare import CompareStatus
-    bad_status = [
+    # 5. 不应该有 sanity 失败（golden 是纯 fp32，应该是正确的）
+    bad_sanity = [
         name for name, r in zip(names_list, results_list)
-        if r.get("status") in [CompareStatus.GOLDEN_SUSPECT, CompareStatus.BOTH_SUSPECT]
+        if r.get("sanity") and not getattr(r["sanity"], "valid", True)
     ]
-    assert len(bad_status) == 0, f"不应该怀疑 golden 数据: {bad_status}"
+    assert len(bad_sanity) == 0, f"不应该怀疑 golden 数据: {bad_sanity}"
     print("  ✓ Golden 数据无异常")
 
     print("\n✓ 所有验证通过！")

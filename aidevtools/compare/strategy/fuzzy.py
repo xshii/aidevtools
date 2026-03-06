@@ -3,9 +3,25 @@
 
 提供基于QSNR、余弦相似度的模糊比对功能。
 """
+from dataclasses import dataclass
+
 from .base import CompareStrategy, CompareContext
 from ..metrics import calc_all_metrics_early_exit, _calc_all_metrics_early_exit_prepared
-from ..types import FuzzyResult, CompareConfig, _PreparedPair
+from ..types import CompareConfig, _PreparedPair
+
+
+@dataclass
+class FuzzyResult:
+    """模糊比对结果"""
+
+    passed: bool
+    max_abs: float
+    mean_abs: float
+    max_rel: float
+    qsnr: float
+    cosine: float
+    total_elements: int
+    exceed_count: int
 
 
 # ============================================================================
@@ -167,7 +183,7 @@ class FuzzyStrategy(CompareStrategy):
         - 阈值对比
         - 通过率展示
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from aidevtools.compare.report.visualizer import Visualizer
 
         if config is None:
             config = CompareConfig()

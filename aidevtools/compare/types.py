@@ -1,57 +1,10 @@
 """
-比对结果类型定义
+比对基础类型
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 import numpy as np
-
-
-@dataclass
-class ExactResult:
-    """精确比对结果（含 bit 级统计）"""
-
-    passed: bool
-    mismatch_count: int
-    first_diff_offset: int  # -1 表示无差异
-    max_abs: float
-    total_elements: int = 0
-    diff_bits: int = 0      # 差异 bit 数 (popcount)
-    total_bits: int = 0     # 总 bit 数
-
-    @property
-    def diff_bit_ratio(self) -> float:
-        """差异 bit 比例"""
-        return self.diff_bits / self.total_bits if self.total_bits > 0 else 0.0
-
-
-@dataclass
-class FuzzyResult:
-    """模糊比对结果"""
-
-    passed: bool
-    max_abs: float
-    mean_abs: float
-    max_rel: float
-    qsnr: float
-    cosine: float
-    total_elements: int
-    exceed_count: int
-
-
-@dataclass
-class SanityResult:
-    """Golden 自检结果"""
-
-    valid: bool
-    checks: Dict[str, bool] = field(default_factory=dict)
-    messages: List[str] = field(default_factory=list)
-
-    non_zero: bool = True
-    no_nan_inf: bool = True
-    range_valid: bool = True
-    qsnr_valid: bool = True
 
 
 @dataclass

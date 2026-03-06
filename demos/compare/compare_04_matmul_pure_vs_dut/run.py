@@ -34,7 +34,7 @@ import numpy as np
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from aidevtools.compare import CompareEngine, CompareConfig, print_strategy_table, CompareStatus
+from aidevtools.compare import CompareEngine, CompareConfig, print_strategy_table
 from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
 
@@ -169,12 +169,12 @@ def main():
     print("\n[3/3] 四态判定（Four-State Comparison）")
     print("-" * 75)
 
-    engine = CompareEngine.standard(config=COMPARE_CFG)
+    engine = CompareEngine.progressive(config=COMPARE_CFG)
 
     # 比对 1: PyTorch vs CPU Golden（验证后端正确性）
     print("\n  [3.1] PyTorch Golden vs CPU Golden")
     result_pytorch_cpu = engine.run(dut=cpu_golden, golden=pytorch_golden)
-    print(f"    状态: {result_pytorch_cpu.get('status')}")
+    print(f"    状态: {('PASS' if getattr(result_pytorch_cpu.get('fuzzy_pure'), 'passed', False) else 'FAIL')}")
     if result_pytorch_cpu.get('exact'):
         print(f"    Exact: {'PASS' if result_pytorch_cpu['exact'].passed else 'FAIL'}")
     if result_pytorch_cpu.get('fuzzy_pure'):
@@ -184,7 +184,7 @@ def main():
     # 比对 2: PyTorch vs DUT（主比对）
     print("\n  [3.2] PyTorch Golden vs DUT")
     result_pytorch_dut = engine.run(dut=dut_output, golden=pytorch_golden)
-    print(f"    状态: {result_pytorch_dut.get('status')}")
+    print(f"    状态: {('PASS' if getattr(result_pytorch_dut.get('fuzzy_pure'), 'passed', False) else 'FAIL')}")
     if result_pytorch_dut.get('exact'):
         print(f"    Exact: {'PASS' if result_pytorch_dut['exact'].passed else 'FAIL'}")
     if result_pytorch_dut.get('fuzzy_pure'):
@@ -194,7 +194,7 @@ def main():
     # 比对 3: CPU Golden vs DUT
     print("\n  [3.3] CPU Golden vs DUT")
     result_cpu_dut = engine.run(dut=dut_output, golden=cpu_golden)
-    print(f"    状态: {result_cpu_dut.get('status')}")
+    print(f"    状态: {('PASS' if getattr(result_cpu_dut.get('fuzzy_pure'), 'passed', False) else 'FAIL')}")
     if result_cpu_dut.get('exact'):
         print(f"    Exact: {'PASS' if result_cpu_dut['exact'].passed else 'FAIL'}")
     if result_cpu_dut.get('fuzzy_pure'):
@@ -208,19 +208,19 @@ def main():
     if tracks.golden_hw is not None:
         r_hw = engine.run(dut=tracks.golden_hw, golden=tracks.golden_pure)
         qsnr_hw = r_hw.get('fuzzy_pure').qsnr if r_hw.get('fuzzy_pure') else float('inf')
-        print(f"    Pure vs HW: {r_hw.get('status')}, QSNR={qsnr_hw:.1f} dB")
+        print(f"    Pure vs HW: {('PASS' if getattr(r_hw.get('fuzzy_pure'), 'passed', False) else 'FAIL')}, QSNR={qsnr_hw:.1f} dB")
 
     # Track 1 (Pure) vs Track 2 (Local)
     if tracks.golden_local is not None:
         r_local = engine.run(dut=tracks.golden_local, golden=tracks.golden_pure)
         qsnr_local = r_local.get('fuzzy_pure').qsnr if r_local.get('fuzzy_pure') else float('inf')
-        print(f"    Pure vs Local: {r_local.get('status')}, QSNR={qsnr_local:.1f} dB")
+        print(f"    Pure vs Local: {('PASS' if getattr(r_local.get('fuzzy_pure'), 'passed', False) else 'FAIL')}, QSNR={qsnr_local:.1f} dB")
 
     # Track 1 (Pure) vs Track 4 (QA)
     if tracks.golden_qa is not None:
         r_qa = engine.run(dut=tracks.golden_qa, golden=tracks.golden_pure)
         qsnr_qa = r_qa.get('fuzzy_pure').qsnr if r_qa.get('fuzzy_pure') else float('inf')
-        print(f"    Pure vs QA: {r_qa.get('status')}, QSNR={qsnr_qa:.1f} dB")
+        print(f"    Pure vs QA: {('PASS' if getattr(r_qa.get('fuzzy_pure'), 'passed', False) else 'FAIL')}, QSNR={qsnr_qa:.1f} dB")
 
     # ========== 总结 ==========
     print("\n" + "=" * 75)
@@ -254,14 +254,14 @@ def main():
         assert pytorch_dut_fuzzy.qsnr > 5, f"QSNR 应该 >5 dB，实际 {pytorch_dut_fuzzy.qsnr:.1f} dB"
         print(f"  ✓ PyTorch vs DUT: QSNR={pytorch_dut_fuzzy.qsnr:.1f} dB (bfp8 + 噪声)")
 
-    # 3. 不应该有 GOLDEN_SUSPECT（golden 是纯 fp32）
-    bad_status = []
+    # 3. 不应该有 sanity 失败（golden 是纯 fp32）
+    bad_sanity = []
     for name, r in [("PyTorch vs CPU", result_pytorch_cpu),
                     ("PyTorch vs DUT", result_pytorch_dut),
                     ("CPU vs DUT", result_cpu_dut)]:
-        if r.get('status') in [CompareStatus.GOLDEN_SUSPECT, CompareStatus.BOTH_SUSPECT]:
-            bad_status.append(name)
-    assert len(bad_status) == 0, f"不应该怀疑 golden 数据: {bad_status}"
+        if r.get("sanity") and not getattr(r["sanity"], "valid", True):
+            bad_sanity.append(name)
+    assert len(bad_sanity) == 0, f"不应该怀疑 golden 数据: {bad_sanity}"
     print("  ✓ Golden 数据无异常")
 
     print("\n✓ 所有验证通过！")

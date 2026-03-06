@@ -502,7 +502,7 @@ class BitAnalysisStrategy(CompareStrategy):
         - 突出格式理解
         - 严重度分级
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from aidevtools.compare.report.visualizer import Visualizer
 
         page = Visualizer.create_page(title="Bit Analysis Report")
 

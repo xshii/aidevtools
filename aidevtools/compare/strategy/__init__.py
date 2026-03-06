@@ -5,10 +5,10 @@
 # 基础设施
 from .base import CompareContext, CompareStrategy
 
-# 具体策略
-from .exact import ExactStrategy
-from .fuzzy import FuzzyStrategy
-from .sanity import SanityStrategy
+# 具体策略 + 结果类型
+from .exact import ExactStrategy, ExactResult
+from .fuzzy import FuzzyStrategy, FuzzyResult
+from .sanity import SanityStrategy, SanityResult
 from .blocked import BlockedStrategy, BlockResult
 from .bit_analysis import (
     BitAnalysisStrategy,
@@ -50,6 +50,9 @@ __all__ = [
     "never_continue",
     "stop_if_exact_passed",
     "stop_if_fuzzy_passed",
+    "ExactResult",
+    "FuzzyResult",
+    "SanityResult",
     "BlockResult",
     "BitAnalysisResult",
     "FloatFormat",

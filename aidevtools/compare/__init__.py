@@ -27,32 +27,30 @@
     ProgressiveStrategy ← 渐进式三级分析 (L1→L2→L3)
 """
 
-# 核心类型
-from .types import (
-    CompareConfig,
-    ExactResult,
-    FuzzyResult,
-    SanityResult,
-)
+# 配置
+from .types import CompareConfig
 
 # 引擎
 from .engine import CompareEngine
 
-# 策略
+# 策略 + 结果类型
 from .strategy import (
     CompareContext,
     CompareStrategy,
     ExactStrategy,
+    ExactResult,
     FuzzyStrategy,
+    FuzzyResult,
     SanityStrategy,
+    SanityResult,
     BlockedStrategy,
+    BlockResult,
     BitAnalysisStrategy,
+    BitAnalysisResult,
     CompositeStrategy,
     TieredStrategy,
     ProgressiveStrategy,
     StrategyLevel,
-    BlockResult,
-    BitAnalysisResult,
     FloatFormat,
     BitLayout,
     FP32,
@@ -72,12 +70,19 @@ from .metrics import (
 from .model import ModelTieredAnalyzer
 
 # 报告生成
-from .report import (
+from .report.text_report import (
     print_strategy_table,
     format_strategy_results,
     generate_strategy_json,
     print_joint_report,
     visualize_joint_report,
+)
+from .report.visualizer import Visualizer
+from .report.model_visualizer import (
+    ModelVisualizer,
+    ModelCompareResult,
+    OpCompareResult,
+    OpStatus,
 )
 
 __all__ = [
@@ -122,4 +127,10 @@ __all__ = [
     "generate_strategy_json",
     "print_joint_report",
     "visualize_joint_report",
+    # 可视化
+    "Visualizer",
+    "ModelVisualizer",
+    "ModelCompareResult",
+    "OpCompareResult",
+    "OpStatus",
 ]

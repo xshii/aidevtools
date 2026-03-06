@@ -6,7 +6,9 @@
 
 from typing import Dict, List, Any, Optional
 
-from .types import ExactResult, FuzzyResult, SanityResult
+from ..strategy.exact import ExactResult
+from ..strategy.fuzzy import FuzzyResult
+from ..strategy.sanity import SanityResult
 
 
 def format_strategy_results(
@@ -135,8 +137,8 @@ def print_joint_report(results: Dict[str, Any], name: str = ""):
 
     自动遍历 results 中所有策略结果，调用对应的 print_result / print_heatmap。
     """
-    from .strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
-    from .strategy.blocked import BlockedStrategy, BlockResult
+    from ..strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
+    from ..strategy.blocked import BlockedStrategy, BlockResult
 
     # 1. 汇总表格
     print_strategy_table([results], names=[name])
@@ -172,11 +174,11 @@ def visualize_joint_report(results: Dict[str, Any], name: str = "") -> "Page":
         pyecharts Page，可 render 为 HTML
     """
     from .visualizer import Visualizer
-    from .strategy.exact import ExactStrategy
-    from .strategy.fuzzy import FuzzyStrategy
-    from .strategy.sanity import SanityStrategy
-    from .strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
-    from .strategy.blocked import BlockedStrategy, BlockResult
+    from ..strategy.exact import ExactStrategy
+    from ..strategy.fuzzy import FuzzyStrategy
+    from ..strategy.sanity import SanityStrategy
+    from ..strategy.bit_analysis import BitAnalysisStrategy, BitAnalysisResult
+    from ..strategy.blocked import BlockedStrategy, BlockResult
 
     page = Visualizer.create_page(title=f"Joint Report: {name}" if name else "Joint Report")
 

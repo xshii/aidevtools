@@ -1,452 +1,376 @@
-# 比对套件使用指南
+# 比对套件 API 使用手册
 
-> 版本: 2.0
-> 最后更新: 2026-02-09
-> 适用于: aidevtools >= 1.0.0
-
-## 概述
-
-比对套件用于验证自研芯片算子实现的正确性，支持从单算子到完整图的渐进式比对。
-
-核心特性：
-- **策略模式设计**：灵活组合不同比对策略
-- **四状态判定**：PASS / GOLDEN_SUSPECT / DUT_ISSUE / BOTH_SUSPECT
-- **Golden 自检**：自动检测 Golden 数据有效性
-- **多种比对模式**：精确比对、模糊比对、Bit级分析、分块定位
-
-## 四状态判定模型
-
-| DUT vs Golden | Golden 自检 | 判定状态 | 含义 |
-|---------------|-------------|----------|------|
-| PASS | PASS | **PASS** | DUT 正确，Golden 有效 |
-| PASS | FAIL | **GOLDEN_SUSPECT** | DUT 匹配，但 Golden 可疑 |
-| FAIL | PASS | **DUT_ISSUE** | Golden 有效，DUT 有问题 |
-| FAIL | FAIL | **BOTH_SUSPECT** | 都可疑，需人工排查 |
+> 版本: 3.0
+> 日期: 2026-03
+> 适用于: aidevtools >= 2.0.0
 
 ## 快速开始
 
-### 基本用法
-
 ```python
 from aidevtools.compare import CompareEngine, CompareConfig
 
-# 1. 创建配置
-config = CompareConfig(
-    fuzzy_min_qsnr=30.0,      # 最小 QSNR 阈值
-    fuzzy_min_cosine=0.999,   # 最小余弦相似度
-    sanity_min_qsnr=20.0,     # Golden 自检 QSNR 阈值
-)
+# 创建引擎 (渐进式，默认早停)
+engine = CompareEngine.progressive(config=CompareConfig(
+    fuzzy_min_qsnr=30.0,
+    fuzzy_min_cosine=0.999,
+))
 
-# 2. 创建引擎（使用标准策略）
-engine = CompareEngine.standard(config=config)
+# 执行比对
+results = engine.run(dut=dut_output, golden=golden_fp32)
 
-# 3. 执行比对
-result = engine.run(
-    dut=dut_output,           # DUT 输出
-    golden=golden_fp32,       # 纯 fp32 Golden
-    golden_qnt=golden_qnt,    # 量化感知 Golden (可选)
-)
+# 查看结果
+exact = results.get("exact")
+if exact:
+    print(f"Exact: {'PASS' if exact.passed else 'FAIL'}")
+    print(f"Diff bits: {exact.diff_bits}/{exact.total_bits} ({exact.diff_bit_ratio:.4%})")
 
-# 4. 查看结果
-print(f"Status: {result.get('status')}")
-print(f"Exact: {result.get('exact').passed if result.get('exact') else 'N/A'}")
-print(f"Fuzzy QSNR: {result.get('fuzzy_pure').qsnr if result.get('fuzzy_pure') else 'N/A':.2f} dB")
+fuzzy = results.get("fuzzy_pure")
+if fuzzy:
+    print(f"QSNR: {fuzzy.qsnr:.2f} dB, Cosine: {fuzzy.cosine:.6f}")
 ```
 
-### 便捷函数
+---
+
+## 引擎 API
+
+### CompareEngine.progressive()
 
 ```python
-from aidevtools.compare import compare_full
+engine = CompareEngine.progressive(
+    config=None,        # CompareConfig, 可选
+    block_size=64,      # L3 分块大小
+    deep=False,         # True=三级全执行, False=早停
+)
+results = engine.run(
+    dut=dut_array,           # DUT 输出 (np.ndarray)
+    golden=golden_array,     # Golden 参考 (np.ndarray)
+    golden_qnt=None,         # 量化感知 Golden (可选)
+    metadata=None,           # 额外元数据 (可选)
+)
+```
 
-# 一行代码完成比对
-result = compare_full(
-    dut=dut_output,
-    golden=golden_fp32,
-    golden_qnt=golden_qnt,
+**分级流程**:
+
+| 级别 | 策略 | 早停条件 (deep=False) |
+|------|------|----------------------|
+| L1 | Exact | exact.passed → 停止 |
+| L2 | Fuzzy(pure) + Fuzzy(qnt) + Sanity | fuzzy.passed → 停止 |
+| L3 | BitAnalysis + Blocked | 最后一级 |
+
+`deep=True` 时忽略早停条件，三级全部执行。
+
+### CompareEngine.model_progressive()
+
+```python
+analyzer = CompareEngine.model_progressive(config=config)
+results = analyzer.progressive_analyze(
+    pairs={"op_name": (golden, dut), ...},
+    l1_threshold=0.9,   # L1 通过率阈值
+    l2_threshold=0.8,   # L2 通过率阈值
+)
+analyzer.print_summary(results)
+```
+
+适用于大模型场景 (几十到几百个算子)，根据整体通过率决定是否深入下一级。
+
+### 自定义策略
+
+```python
+from aidevtools.compare.strategy import CompositeStrategy, ExactStrategy, FuzzyStrategy
+
+engine = CompareEngine(
+    strategy=CompositeStrategy([
+        ExactStrategy(),
+        FuzzyStrategy(use_golden_qnt=False),
+    ]),
     config=config,
 )
 ```
 
-## 策略选择
+---
 
-### 预定义策略
+## 结果格式
 
-aidevtools 提供多种预定义策略，适用于不同场景：
-
-```python
-# 1. 标准策略（推荐）- 完整的四层比对
-engine = CompareEngine.standard(config=config)
-# 包含: Exact + Fuzzy(Pure) + Fuzzy(Qnt) + Sanity
-
-# 2. 快速检查 - 用于CI/CD
-engine = CompareEngine.quick(config=config)
-# 包含: Exact + Fuzzy(Pure)
-
-# 3. 深度分析 - 包含分块定位
-engine = CompareEngine.deep(config=config, block_size=1024)
-# 包含: Exact + Fuzzy(Pure/Qnt) + Sanity + Blocked
-
-# 4. 最小策略 - 性能优先
-engine = CompareEngine.minimal(config=config)
-# 仅包含: Fuzzy(Pure)
-
-# 5. 渐进式分析 - 三级递进
-engine = CompareEngine.progressive(config=config)
-# L1: Exact → L2: Fuzzy+Sanity → L3: Blocked
-```
-
-### 结果格式
-
-所有策略返回统一的字典格式：
+`engine.run()` 返回 `Dict[str, Any]`:
 
 ```python
-result = {
-    'exact': ExactResult,           # 精确比对结果
-    'fuzzy_pure': FuzzyResult,      # 纯FP32模糊比对
-    'fuzzy_qnt': FuzzyResult,       # 量化感知模糊比对 (可选)
-    'sanity': SanityResult,         # Golden自检结果
-    'status': CompareStatus,        # 总体状态
+{
+    "exact": ExactResult,                    # L1
+    "fuzzy_pure": FuzzyResult,              # L2
+    "fuzzy_qnt": FuzzyResult,               # L2 (如有 golden_qnt)
+    "sanity": SanityResult,                  # L2
+    "bit_analysis_fp32": BitAnalysisResult, # L3
+    "blocked_64": [BlockResult, ...],        # L3
+    "_executed_levels": ["L1_quick", ...],
+    "_stopped_at": "L1_quick",
 }
 ```
 
-## 配置参数
+---
 
-### CompareConfig
+## Result 类型参考
 
-```python
-from dataclasses import dataclass
-
-@dataclass
-class CompareConfig:
-    # 精确比对阈值
-    exact_max_abs: float = 0.0     # 允许的最大绝对误差
-    exact_max_count: int = 0       # 允许的最大不匹配数
-
-    # 模糊比对阈值
-    fuzzy_atol: float = 1e-5       # 绝对容差
-    fuzzy_rtol: float = 1e-3       # 相对容差
-    fuzzy_min_qsnr: float = 30.0   # 最小 QSNR (dB)
-    fuzzy_min_cosine: float = 0.999 # 最小余弦相似度
-    fuzzy_max_exceed_ratio: float = 0.0  # 最大超限比例
-
-    # Golden 自检阈值
-    sanity_min_qsnr: float = 20.0  # golden_qnt vs golden_pure
-    sanity_max_nan_ratio: float = 0.0
-    sanity_max_inf_ratio: float = 0.0
-    sanity_min_nonzero_ratio: float = 0.01
-```
-
-## 精度指标
-
-| 指标 | 公式 | 参考值 | 说明 |
-|------|------|--------|------|
-| max_abs | max(\|g-r\|) | < 1e-5 | 最大绝对误差 |
-| mean_abs | mean(\|g-r\|) | < 1e-6 | 平均绝对误差 |
-| qsnr | 10*log10(signal/noise) | > 30dB | 量化信噪比 |
-| cosine | dot(g,r)/(norm*norm) | > 0.999 | 余弦相似度 |
-
-## Golden 自检项
-
-| 检查项 | 说明 | 失败原因 |
-|--------|------|----------|
-| non_zero | 数据非全零 | Golden 可能未正确生成 |
-| no_nan_inf | 无 NaN/Inf | 数值溢出或异常 |
-| range_valid | 数值范围合理 | 数据可能是常数 |
-| qsnr_valid | 量化 QSNR 达标 | 量化误差过大 |
-
-## 完整示例
-
-### 单算子比对
+### ExactResult
 
 ```python
-import numpy as np
-from aidevtools import ops
-from aidevtools.ops import _functional as F
-from aidevtools.compare import CompareEngine, CompareConfig
+from aidevtools.compare.strategy.exact import ExactResult
 
-# 1. 生成 Golden
-ops.clear()
-x = np.random.randn(2, 8, 64).astype(np.float32)
-w = np.random.randn(64, 128).astype(np.float32)
-
-y_golden = F.matmul(x, w)
-
-# 2. 模拟 DUT 输出 (带噪声)
-y_dut = y_golden + np.random.randn(*y_golden.shape).astype(np.float32) * 0.001
-
-# 3. 比对
-config = CompareConfig(fuzzy_min_qsnr=30.0, fuzzy_min_cosine=0.99)
-engine = CompareEngine.standard(config=config)
-
-result = engine.run(dut=y_dut, golden=y_golden)
-
-# 4. 查看结果
-status = result.get('status')
-exact = result.get('exact')
-fuzzy = result.get('fuzzy_pure')
-
-print(f"Status: {status}")
-if exact:
-    print(f"Exact: {'PASS' if exact.passed else 'FAIL'}")
-if fuzzy:
-    print(f"QSNR: {fuzzy.qsnr:.2f} dB")
-    print(f"Cosine: {fuzzy.cosine:.6f}")
+exact.passed            # bool
+exact.mismatch_count    # int - 不匹配元素数
+exact.first_diff_offset # int - 第一个差异位置 (-1=无差异)
+exact.max_abs           # float - 最大绝对误差
+exact.total_elements    # int
+exact.diff_bits         # int - XOR popcount
+exact.total_bits        # int
+exact.diff_bit_ratio    # float (property) - diff_bits / total_bits
 ```
 
-### 多算子批量比对
+### FuzzyResult
 
 ```python
-from aidevtools.compare.report import print_strategy_table
+from aidevtools.compare.strategy.fuzzy import FuzzyResult
 
-# 比对多个算子
-results = []
-for record in ops.get_records():
-    result = engine.run(
-        dut=dut_outputs[record.op_name],
-        golden=record.golden,
-    )
-    results.append({
-        'name': record.op_name,
-        'result': result,
-    })
-
-# 打印结果表格
-print_strategy_table(results)
+fuzzy.passed          # bool
+fuzzy.qsnr            # float (dB)
+fuzzy.cosine          # float
+fuzzy.max_abs         # float
+fuzzy.mean_abs        # float
+fuzzy.max_rel         # float
+fuzzy.total_elements  # int
+fuzzy.exceed_count    # int
 ```
 
-输出示例：
-```
-================================================================================
-Strategy Table - StandardStrategy
-================================================================================
-name          exact  fuzzy_pure  fuzzy_qnt  sanity      status
---------------------------------------------------------------------------------
-matmul_0      PASS   PASS        PASS       PASS        PASS
-layernorm_0   FAIL   PASS        PASS       PASS        PASS
-softmax_0     FAIL   FAIL        FAIL       FAIL        BOTH_SUSPECT
-================================================================================
-Summary: 2 PASS, 0 GOLDEN_SUSPECT, 0 DUT_ISSUE, 1 BOTH_SUSPECT
-================================================================================
-```
-
-## 高级用法
-
-### 自定义策略组合
+### SanityResult
 
 ```python
-from aidevtools.compare import CompareEngine
-from aidevtools.compare.strategy import (
-    ExactStrategy,
-    FuzzyStrategy,
-    SanityStrategy,
-)
+from aidevtools.compare.strategy.sanity import SanityResult
 
-# 方式1: 使用策略列表
-engine = CompareEngine(
-    strategy=[
-        ExactStrategy(),
-        FuzzyStrategy(use_golden_qnt=False),
-        SanityStrategy(),
-    ],
-    config=config,
-)
-
-# 方式2: 使用组合策略
-from aidevtools.compare.strategy import CompositeStrategy
-
-custom_strategy = CompositeStrategy(
-    strategies=[
-        ExactStrategy(),
-        FuzzyStrategy(use_golden_qnt=True),
-    ],
-    name="my_custom_strategy",
-)
-engine = CompareEngine(strategy=custom_strategy, config=config)
+sanity.valid        # bool - Golden 是否有效
+sanity.checks       # Dict[str, bool] - 各检查项
+sanity.messages     # List[str] - 告警消息
+sanity.non_zero     # bool
+sanity.no_nan_inf   # bool
+sanity.range_valid  # bool
+sanity.qsnr_valid   # bool
 ```
 
-### Bit级分析
+### BlockResult
+
+```python
+from aidevtools.compare.strategy.blocked import BlockResult
+
+block.offset       # int - 块起始偏移
+block.size         # int
+block.qsnr         # float (dB)
+block.cosine       # float
+block.max_abs      # float
+block.exceed_count # int
+block.passed       # bool
+```
+
+### BitAnalysisResult
+
+```python
+from aidevtools.compare.strategy.bit_analysis import BitAnalysisResult
+
+result.fmt                            # FloatFormat | BitLayout
+result.summary.total_elements         # int
+result.summary.diff_elements          # int
+result.summary.sign_flip_count        # int
+result.summary.exponent_diff_count    # int
+result.summary.mantissa_diff_count    # int
+result.summary.max_exponent_diff      # int
+result.warnings                       # List[BitWarning]
+result.has_critical                    # bool
+```
+
+---
+
+## 策略静态方法
+
+每个策略都可以独立使用，无需通过引擎:
+
+### ExactStrategy
+
+```python
+from aidevtools.compare.strategy import ExactStrategy
+
+result = ExactStrategy.compare(golden, dut, max_abs=0.0, max_count=0)
+is_same = ExactStrategy.compare_bytes(golden_bytes, dut_bytes)
+```
+
+### FuzzyStrategy
+
+```python
+from aidevtools.compare.strategy import FuzzyStrategy
+
+result = FuzzyStrategy.compare(golden, dut, config=CompareConfig())
+result = FuzzyStrategy.compare_isclose(golden, dut, atol=1e-5, rtol=1e-3)
+```
+
+### SanityStrategy
+
+```python
+from aidevtools.compare.strategy import SanityStrategy
+
+result = SanityStrategy.compare(golden_pure, golden_qnt, config)
+result = SanityStrategy.check_data(data, name="input")
+```
+
+### BitAnalysisStrategy
 
 ```python
 from aidevtools.compare.strategy import BitAnalysisStrategy, FP32
 
-# 静态方法调用
-result = BitAnalysisStrategy.compare(
-    golden=golden_data,
-    result=dut_data,
-    fmt=FP32,
+result = BitAnalysisStrategy.compare(golden, dut, fmt=FP32)
+BitAnalysisStrategy.print_result(result, name="linear_0")
+```
+
+### BlockedStrategy
+
+```python
+from aidevtools.compare.strategy import BlockedStrategy
+
+blocks = BlockedStrategy.compare(golden, dut, block_size=1024)
+BlockedStrategy.print_heatmap(blocks)
+```
+
+---
+
+## 报告 API
+
+### 文字报告
+
+```python
+from aidevtools.compare.report.text_report import (
+    print_joint_report,
+    print_strategy_table,
+    generate_strategy_json,
 )
 
-# 查看分析结果
-print(f"Total elements: {result.summary.total_elements}")
-print(f"Sign flip count: {result.summary.sign_flip_count}")
-print(f"Exponent diff count: {result.summary.exponent_diff_count}")
-print(f"Max exponent diff: {result.summary.max_exponent_diff}")
+# 单算子联合报告 (表格 + bit 统计 + 分析详情 + 热力图)
+print_joint_report(results, name="softmax")
 
-# 查看告警
-for warning in result.warnings:
-    print(f"[{warning.level.value}] {warning.message}")
+# 多算子汇总表格
+print_strategy_table([results1, results2], names=["softmax", "linear"])
+
+# JSON 输出
+json_data = generate_strategy_json(results, name="softmax")
 ```
 
-## 报告生成
-
-### 文本报告
+### 可视化报告
 
 ```python
-from aidevtools.compare.report import generate_text_report
+from aidevtools.compare.report.text_report import visualize_joint_report
 
-results = [result1, result2, result3]
-report = generate_text_report(results, output_path="report.txt")
+page = visualize_joint_report(results, name="softmax")
+page.render("report.html")
 ```
 
-### JSON 报告
+---
+
+## CompareConfig 推荐阈值
 
 ```python
-from aidevtools.compare.report import generate_json_report
-
-report = generate_json_report(results, output_path="report.json")
-```
-
-## 失败处理
-
-### GOLDEN_SUSPECT
-
-Golden 自检失败，但 DUT 匹配 Golden。
-
-**处理方法**：
-1. 检查 Golden 生成逻辑
-2. 检查量化参数配置
-3. 查看 sanity 结果的 messages 获取详细信息
-   ```python
-   sanity = result.get('sanity')
-   if sanity and not sanity.valid:
-       for msg in sanity.messages:
-           print(msg)
-   ```
-
-### DUT_ISSUE
-
-Golden 有效，但 DUT 不匹配。
-
-**处理方法**：
-1. 查看 max_abs 定位误差范围
-   ```python
-   fuzzy = result.get('fuzzy_pure')
-   print(f"Max abs error: {fuzzy.max_abs:.6e}")
-   ```
-2. 查看 qsnr 评估整体质量
-   ```python
-   print(f"QSNR: {fuzzy.qsnr:.2f} dB")
-   ```
-3. 检查 DUT 算子实现
-4. 使用深度分析定位问题
-   ```python
-   engine = CompareEngine.deep(config=config, block_size=256)
-   result = engine.run(dut=dut_output, golden=golden)
-
-   # 查看分块结果
-   blocked = result.get('blocked')
-   if blocked:
-       for block in blocked[:5]:  # 显示前5个误差最大的块
-           print(f"Block {block.block_id}: max_abs={block.max_abs:.6e}")
-   ```
-
-### BOTH_SUSPECT
-
-Golden 和 DUT 都可疑。
-
-**处理方法**：
-1. 优先修复 Golden 问题
-2. 重新生成 Golden 后再测试 DUT
-3. 检查数据范围是否合理
-   ```python
-   sanity = result.get('sanity')
-   print(f"Non-zero check: {sanity.non_zero}")
-   print(f"No NaN/Inf: {sanity.no_nan_inf}")
-   print(f"Range valid: {sanity.range_valid}")
-   ```
-
-## 最佳实践
-
-### 1. 选择合适的策略
-
-- **日常开发**: 使用 `CompareEngine.standard()`
-- **CI/CD**: 使用 `CompareEngine.quick()` 加快速度
-- **调试问题**: 使用 `CompareEngine.deep()` 深度分析
-- **性能敏感**: 使用 `CompareEngine.minimal()` 最小开销
-
-### 2. 配置合理的阈值
-
-```python
-# BFP8 量化 - 降低精度要求
+# BFP8 量化
 config_bfp8 = CompareConfig(
-    fuzzy_min_qsnr=15.0,      # BFP8 QSNR 较低
+    fuzzy_min_qsnr=15.0,
     fuzzy_min_cosine=0.98,
     fuzzy_max_exceed_ratio=0.05,
 )
 
-# FP16 量化 - 中等精度
+# FP16 量化
 config_fp16 = CompareConfig(
     fuzzy_min_qsnr=30.0,
     fuzzy_min_cosine=0.999,
 )
 
-# FP32 计算 - 高精度
+# FP32 计算
 config_fp32 = CompareConfig(
     fuzzy_min_qsnr=60.0,
     fuzzy_min_cosine=0.9999,
 )
 ```
 
-### 3. 渐进式调试
+---
 
-```python
-# 第一步：快速检查
-quick_engine = CompareEngine.quick(config=config)
-result = quick_engine.run(dut=dut, golden=golden)
+## 精度指标参考
 
-if result.get('status') != CompareStatus.PASS:
-    # 第二步：深度分析
-    deep_engine = CompareEngine.deep(config=config, block_size=256)
-    result = deep_engine.run(dut=dut, golden=golden)
+| 指标 | 公式 | 参考值 | 说明 |
+|------|------|--------|------|
+| max_abs | max(\|g-r\|) | < 1e-5 | 最大绝对误差 |
+| mean_abs | mean(\|g-r\|) | < 1e-6 | 平均绝对误差 |
+| QSNR | 10*log10(signal/noise) | > 30dB | 量化信噪比 |
+| cosine | dot(g,r)/(norm*norm) | > 0.999 | 余弦相似度 |
+| diff_bit_ratio | XOR popcount / total bits | < 1% | bit 级差异率 |
 
-    # 第三步：Bit级分析
-    from aidevtools.compare.strategy import BitAnalysisStrategy, FP32
-    bit_result = BitAnalysisStrategy.compare(golden, dut, fmt=FP32)
+---
+
+## CLI 命令
+
+```bash
+# 渐进式比对 (自动解读文件名)
+compare diff --golden=softmax_bfp8_2x16x64.txt --result=softmax_bfp8_2x16x64_result.txt
+
+# 指定参数
+compare diff --golden=a.txt --result=b.txt --qtype=bfp8 --shape=2,16,64 --format=hex_text
+
+# 深度模式 (三级全执行)
+compare diff --golden=a.txt --result=b.txt --engine=deep
+
+# 类型转换
+compare convert --golden=a.bin --target_dtype=float16
+
+# 列出量化类型
+compare qtypes
 ```
 
-## 参考资料
+---
 
-- [策略模式使用指南](./compare_strategy_guide.md)
-- [架构设计文档](./design/compare_module_design.md)
+## 自定义策略开发
+
+```python
+from aidevtools.compare.strategy import CompareStrategy, CompareContext
+
+class MyStrategy(CompareStrategy):
+    @property
+    def name(self) -> str:
+        return "my_custom"
+
+    def run(self, ctx: CompareContext) -> dict:
+        diff = np.abs(ctx.golden - ctx.dut)
+        return {"max_diff": float(diff.max()), "passed": diff.max() < 0.01}
+```
+
+使用:
+
+```python
+engine = CompareEngine(strategy=CompositeStrategy([
+    ExactStrategy(),
+    MyStrategy(),
+]))
+```
+
+---
+
+## 从 v2.0 迁移
+
+| v2.0 (已删除) | v3.0 |
+|----------------|------|
+| `CompareEngine.standard()` | `CompareEngine.progressive()` |
+| `CompareEngine.quick()` | `CompareEngine.progressive()` (默认早停) |
+| `CompareEngine.deep()` | `CompareEngine.progressive(deep=True)` |
+| `CompareEngine.minimal()` | 自定义 `CompositeStrategy([FuzzyStrategy()])` |
+| `CompareStatus` | 检查 `sanity.valid` + `fuzzy.passed` |
+| `CompareResult` | 返回 `Dict[str, Any]` |
+| `compare_full()` | `CompareEngine.progressive().run()` |
+| `result.get("status")` | 通过 `sanity.valid` / `fuzzy.passed` 判断 |
+| `BitXorStrategy` | 合并到 `ExactResult.diff_bits` |
+
+---
+
+## 参考
+
+- [设计说明书](./design/compare_module_design.md)
 - [Demo 示例](../demos/compare/)
-
-## API 迁移指南
-
-从旧版 API 升级到 v2.0：
-
-```python
-# 旧版 API (已废弃)
-result = engine.compare(
-    dut_output=dut,
-    golden_pure=golden,
-    name="matmul_0",
-)
-print(f"Status: {result.status.value}")
-print(f"QSNR: {result.fuzzy_pure.qsnr}")
-
-# 新版 API (v2.0+)
-result = engine.run(
-    dut=dut,
-    golden=golden,
-)
-print(f"Status: {result.get('status')}")
-fuzzy = result.get('fuzzy_pure')
-print(f"QSNR: {fuzzy.qsnr if fuzzy else 'N/A'}")
-```
-
-主要变化：
-1. `engine.compare()` → `engine.run()`
-2. `dut_output` → `dut`
-3. `golden_pure` → `golden`
-4. 返回值从对象改为字典，需使用 `.get()` 访问
-5. 移除 `name` 参数（由调用方管理）
+- [源代码](../aidevtools/compare/)

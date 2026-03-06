@@ -65,7 +65,7 @@ class ModelVisualizer:
         3. 误差累积曲线
         4. 数据完整性
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from .visualizer import Visualizer
 
         page = Visualizer.create_page(title=f"Model Analysis: {result.model_name}")
 
@@ -99,7 +99,7 @@ class ModelVisualizer:
         Input → Conv1 → BN1 → Conv2 → Output
                (15%)   (12%)   (25%)
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from .visualizer import Visualizer
 
         # 构建节点和链接
         nodes = []
@@ -141,7 +141,7 @@ class ModelVisualizer:
 
         找出误差最大的算子（瓶颈定位）
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from .visualizer import Visualizer
 
         # 提取有 QSNR 的算子
         ops_with_qsnr = [
@@ -177,7 +177,7 @@ class ModelVisualizer:
 
         展示误差随算子层数的累积趋势
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from .visualizer import Visualizer
 
         # 提取有数据的算子
         valid_ops = [
@@ -212,7 +212,7 @@ class ModelVisualizer:
 
         展示有多少算子缺失 DUT 输出
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from .visualizer import Visualizer
 
         data = {
             "✅ Has Data": result.ops_with_data,

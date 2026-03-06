@@ -3,10 +3,30 @@
 
 提供bit级精确比对功能。
 """
+from dataclasses import dataclass
+
 import numpy as np
 
 from .base import CompareStrategy, CompareContext
-from ..types import ExactResult, _PreparedPair
+from ..types import _PreparedPair
+
+
+@dataclass
+class ExactResult:
+    """精确比对结果（含 bit 级统计）"""
+
+    passed: bool
+    mismatch_count: int
+    first_diff_offset: int  # -1 表示无差异
+    max_abs: float
+    total_elements: int = 0
+    diff_bits: int = 0      # 差异 bit 数 (popcount)
+    total_bits: int = 0     # 总 bit 数
+
+    @property
+    def diff_bit_ratio(self) -> float:
+        """差异 bit 比例"""
+        return self.diff_bits / self.total_bits if self.total_bits > 0 else 0.0
 
 
 # ============================================================================
@@ -183,7 +203,7 @@ class ExactStrategy(CompareStrategy):
         - 通过率仪表盘
         - 误差分布（如有不匹配）
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from aidevtools.compare.report.visualizer import Visualizer
 
         try:
             from pyecharts.charts import Gauge

@@ -3,12 +3,11 @@
 Demo 09: 完整比对流水线 - Encoder 模型全量策略检查
 
 展示从基础到深度的渐进式比对策略：
-1. Exact - 精确匹配（快速筛选）
+1. Exact - 精确匹配 + bit 统计（快速筛选）
 2. Fuzzy - 统计指标（量化感知）
 3. Blocked - 块级分析（定位异常区域）
 4. BitAnalysis - bit 级深度分析
-5. BitXor - 纯 XOR 快速检查
-6. Sanity - Golden 自检
+5. Sanity - Golden 自检
 
 完整可视化：
 - 各策略级可视化
@@ -77,19 +76,17 @@ def run_progressive_strategies(ops_data):
     渐进式策略检查
 
     从快到慢，从粗到细：
-    1. Exact - 快速精确匹配
+    1. Exact - 快速精确匹配 + bit 统计
     2. Fuzzy - 统计指标
     3. Blocked - 块级分析
     4. BitAnalysis - bit 级深度分析
-    5. BitXor - 纯 XOR
-    6. Sanity - Golden 自检
+    5. Sanity - Golden 自检
     """
     from aidevtools.compare.strategy import (
         ExactStrategy,
         FuzzyStrategy,
         BlockedStrategy,
         BitAnalysisStrategy,
-        BitXorStrategy,
         SanityStrategy,
         FP32,
     )
@@ -182,22 +179,9 @@ def run_progressive_strategies(ops_data):
     print(f"Mantissa Diff: {bitwise_result.summary.mantissa_diff_count}")
     print(f"Has Critical: {bitwise_result.has_critical}")
 
-    # 5. BitXor - 纯 XOR
+    # 5. Sanity - Golden 自检
     print("\n" + "-" * 80)
-    print("5️⃣  BitXor Strategy - 纯 XOR（快速检查）")
-    print("-" * 80)
-
-    bitxor_result = BitXorStrategy.compare(golden_sample, dut_sample)
-    results["bitxor"] = bitxor_result
-
-    print(f"Total elements: {bitxor_result.total_elements}")
-    print(f"Diff elements: {bitxor_result.diff_elements} ({bitxor_result.diff_element_ratio:.2%})")
-    print(f"Total bits: {bitxor_result.total_bits}")
-    print(f"Diff bits: {bitxor_result.diff_bits} ({bitxor_result.diff_bit_ratio:.4%})")
-
-    # 6. Sanity - Golden 自检
-    print("\n" + "-" * 80)
-    print("6️⃣  Sanity Strategy - Golden 自检")
+    print("5️⃣  Sanity Strategy - Golden 自检")
     print("-" * 80)
 
     sanity_result = SanityStrategy.check_data(golden_sample, name="golden")
@@ -233,7 +217,6 @@ def generate_all_visualizations(results, ops_data):
         FuzzyStrategy,
         BlockedStrategy,
         BitAnalysisStrategy,
-        BitXorStrategy,
         SanityStrategy,
     )
     from aidevtools.compare.types import CompareConfig
@@ -270,15 +253,7 @@ def generate_all_visualizations(results, ops_data):
         page.render(path)
         print(f"   ✅ {path}")
 
-    # 5. BitXor 可视化
-    if "bitxor" in results:
-        print("\n📊 Generating BitXor visualization...")
-        page = BitXorStrategy.visualize(results["bitxor"])
-        path = f"{output_dir}/05_bitxor_report.html"
-        page.render(path)
-        print(f"   ✅ {path}")
-
-    # 6. Sanity 可视化
+    # 5. Sanity 可视化
     if "sanity" in results:
         print("\n📊 Generating Sanity visualization...")
         page = SanityStrategy.visualize(results["sanity"])
@@ -293,7 +268,7 @@ def generate_all_visualizations(results, ops_data):
 
 def generate_model_visualization(ops_data, output_dir):
     """生成模型级误差传播可视化"""
-    from aidevtools.compare.model_visualizer import (
+    from aidevtools.compare.report.model_visualizer import (
         ModelVisualizer,
         ModelCompareResult,
         OpCompareResult,
@@ -362,13 +337,12 @@ def main():
     print("✅ 全部完成！")
     print("=" * 80)
     print("\n报告位置: /tmp/compare_demo09/")
-    print("  01_exact_report.html      - 精确匹配")
+    print("  01_exact_report.html      - 精确匹配 + bit 统计")
     print("  02_fuzzy_report.html      - 统计指标")
     print("  03_blocked_report.html    - 块级分析")
     print("  04_bitwise_report.html    - bit 级分析")
-    print("  05_bitxor_report.html     - XOR 检查")
-    print("  06_sanity_report.html     - Golden 自检")
-    print("  07_model_report.html      - 模型级误差传播")
+    print("  05_sanity_report.html     - Golden 自检")
+    print("  06_model_report.html      - 模型级误差传播")
     print()
 
 

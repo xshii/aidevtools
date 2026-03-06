@@ -314,7 +314,7 @@ class BlockedStrategy(CompareStrategy):
         - QSNR 统计分布
         - 异常块定位
         """
-        from aidevtools.compare.visualizer import Visualizer
+        from aidevtools.compare.report.visualizer import Visualizer
 
         page = Visualizer.create_page(title="Blocked Analysis Report")
 

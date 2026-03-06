@@ -36,7 +36,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import numpy as np
-from aidevtools.compare import CompareEngine, CompareConfig, CompareStatus
+from aidevtools.compare import CompareEngine, CompareConfig
 from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
 from aidevtools.formats.quantize import simulate_quantize
@@ -266,7 +266,7 @@ def main():
     print("\n[3/4] 四态判定（PyTorch Golden vs DUT）")
     print("-" * 75)
 
-    engine = CompareEngine.standard(config=COMPARE_CFG)
+    engine = CompareEngine.progressive(config=COMPARE_CFG)
 
     # 比对 PyTorch Golden vs DUT
     results = {}

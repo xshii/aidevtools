@@ -29,7 +29,7 @@ import numpy as np
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from aidevtools.compare import CompareEngine, CompareConfig, print_strategy_table, CompareStatus
+from aidevtools.compare import CompareEngine, CompareConfig, print_strategy_table
 from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
 from aidevtools.formats.quantize import simulate_quantize
@@ -219,7 +219,7 @@ def main():
 
     # 比对
     print("\n[3/3] 使用 StandardStrategy 比对")
-    engine = CompareEngine.standard(config=COMPARE_CFG)
+    engine = CompareEngine.progressive(config=COMPARE_CFG)
 
     results = {}
     for op_name in ENCODER_OPS:
@@ -287,12 +287,12 @@ def main():
         avg_cosine = np.mean(cosines)
         print(f"  ✓ 平均 Cosine {avg_cosine:.6f}（QA 数据量化后的相似度）")
 
-    # 5. 不应该有 GOLDEN_SUSPECT（golden 是纯 QA 数据）
-    bad_status = [
+    # 5. 不应该有 sanity 失败（golden 是纯 QA 数据）
+    bad_sanity = [
         name for name, r in zip(names_list, results_list)
-        if r.get("status") in [CompareStatus.GOLDEN_SUSPECT, CompareStatus.BOTH_SUSPECT]
+        if r.get("sanity") and not getattr(r["sanity"], "valid", True)
     ]
-    assert len(bad_status) == 0, f"不应该怀疑 golden 数据: {bad_status}"
+    assert len(bad_sanity) == 0, f"不应该怀疑 golden 数据: {bad_sanity}"
     print("  ✓ Golden 数据无异常")
 
     print("\n✓ 所有验证通过！")

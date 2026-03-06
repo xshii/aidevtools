@@ -186,7 +186,7 @@ def _action_diff(golden, result, format, qtype, shape, engine, **kwargs):
     )
 
     # ── 输出报告 ──
-    from aidevtools.compare.report import print_joint_report
+    from aidevtools.compare.report.text_report import print_joint_report
     name = parsed["op"] if parsed else (golden.rsplit("/", 1)[-1] if "/" in golden else golden)
     print_joint_report(results, name)
 

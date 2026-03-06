@@ -34,7 +34,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import numpy as np
-from aidevtools.compare import CompareEngine, CompareConfig, CompareStatus
+from aidevtools.compare import CompareEngine, CompareConfig
 from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
 
