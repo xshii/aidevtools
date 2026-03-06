@@ -2,7 +2,7 @@
 """方式 1: DataGenerator 手动 API 构建 Encoder
 
 手动创建每个张量 (randn / xavier / zeros)，手动调用算子 cpu_golden，
-输入 bfp8，权重 bfp4 量化。适合需要精细控制每个参数的场景。
+输入 bfpp8，权重 bfpp4 量化。适合需要精细控制每个参数的场景。
 
 Encoder 结构:
     Q/K/V proj → Softmax → O proj → LayerNorm
@@ -16,17 +16,17 @@ from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
 from aidevtools.ops.registry import get_op_instance
 from aidevtools.formats.quantize import simulate_quantize
-from aidevtools.compare.fuzzy import compare_fuzzy
-from aidevtools.compare.types import CompareConfig
+from aidevtools.compare import FuzzyStrategy
+from aidevtools.compare import CompareConfig
 
 BATCH, SEQ, HIDDEN, FFN = 2, 16, 64, 256
-QTYPE_INPUT = "bfp8"
-QTYPE_WEIGHT = "bfp4"
+QTYPE_INPUT = "bfpp8"
+QTYPE_WEIGHT = "bfpp4"
 
 
 def main():
     print("=" * 70)
-    print("  方式 1: DataGenerator 手动 API (input:bfp8, weight:bfp4)")
+    print("  方式 1: DataGenerator 手动 API (input:bfpp8, weight:bfpp4)")
     print("=" * 70)
 
     gen = DataGenerator(seed=42, qtype=QTYPE_INPUT)
@@ -46,12 +46,12 @@ def main():
         b = gen.uniform((HIDDEN,), low=-0.1, high=0.1, name=f"b_{name}", qtype=QTYPE_INPUT)
         golden_pure = linear_op.cpu_golden(hidden, w.array, b.array)
 
-        # 量化版: input bfp8, weight bfp4
+        # 量化版: input bfpp8, weight bfpp4
         h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
         w_q = simulate_quantize(w.array.astype(np.float32), QTYPE_WEIGHT)
         golden_hw = linear_op.cpu_golden(h_q, w_q, b.array)
 
-        r = compare_fuzzy(golden_pure, golden_hw, config)
+        r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
         results.append((f"{name}_proj", golden_pure.shape, r))
         if name == "Q":
             hidden = golden_pure  # 简化: 用 Q 输出继续
@@ -61,7 +61,7 @@ def main():
     golden_pure = softmax_op.cpu_golden(hidden)
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     golden_hw = softmax_op.cpu_golden(h_q)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("softmax", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -71,7 +71,7 @@ def main():
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     w_q = simulate_quantize(w_o.array.astype(np.float32), QTYPE_WEIGHT)
     golden_hw = linear_op.cpu_golden(h_q, w_q)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("O_proj", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -82,7 +82,7 @@ def main():
     golden_pure = ln_op.cpu_golden(hidden, (HIDDEN,), weight=gamma.array, bias=beta.array)
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     golden_hw = ln_op.cpu_golden(h_q, (HIDDEN,), weight=gamma.array, bias=beta.array)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("layernorm_1", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -92,7 +92,7 @@ def main():
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     w_q = simulate_quantize(w_up.array.astype(np.float32), QTYPE_WEIGHT)
     golden_hw = linear_op.cpu_golden(h_q, w_q)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("ffn_up", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -101,7 +101,7 @@ def main():
     golden_pure = gelu_op.cpu_golden(hidden)
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     golden_hw = gelu_op.cpu_golden(h_q)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("gelu", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -111,7 +111,7 @@ def main():
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     w_q = simulate_quantize(w_down.array.astype(np.float32), QTYPE_WEIGHT)
     golden_hw = linear_op.cpu_golden(h_q, w_q)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("ffn_down", golden_pure.shape, r))
     hidden = golden_pure
 
@@ -121,7 +121,7 @@ def main():
     golden_pure = ln_op.cpu_golden(hidden, (HIDDEN,), weight=gamma2.array, bias=beta2.array)
     h_q = simulate_quantize(hidden.astype(np.float32), QTYPE_INPUT)
     golden_hw = ln_op.cpu_golden(h_q, (HIDDEN,), weight=gamma2.array, bias=beta2.array)
-    r = compare_fuzzy(golden_pure, golden_hw, config)
+    r = FuzzyStrategy.compare(golden_pure, golden_hw, config=config)
     results.append(("layernorm_2", golden_pure.shape, r))
 
     # 报告
@@ -134,6 +134,15 @@ def main():
         print(f"  {name:<15} {str(shape):<20} {r.qsnr:>10.2f} {r.cosine:>10.6f} {status:>8}")
 
     print(f"\n  L2 总量: {gen.total_size / 1024:.1f} KB, 张量数: {len(gen._tensors)}")
+
+    # 结果断言
+    assert len(results) == 10, f"应有 10 个算子结果, 实际 {len(results)}"
+    for name, shape, r in results:
+        assert r.qsnr > 0, f"{name}: QSNR 应 > 0"
+        assert r.cosine > 0.8, f"{name}: Cosine 应 > 0.8, 实际 {r.cosine:.4f}"
+    assert gen.total_size > 0, "L2 应有分配"
+    assert len(gen._tensors) == 14, f"应有 14 个张量, 实际 {len(gen._tensors)}"
+    print("  所有断言通过!")
     print("=" * 70)
 
 

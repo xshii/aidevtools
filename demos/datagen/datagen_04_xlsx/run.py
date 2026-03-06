@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """方式 5: Excel/XLSX 配置构建 Encoder
 
-从 Excel 配置生成 Encoder 算子序列，输入 bfp8，权重 bfp4 精度。
+从 Excel 配置生成 Encoder 算子序列，输入 bfpp8，权重 bfpp4 精度。
 非编程人员可直接在 Excel 中定义算子参数。
 
 Encoder 结构:
@@ -14,13 +14,13 @@ import numpy as np
 from pathlib import Path
 
 BATCH, SEQ, HIDDEN, FFN = 2, 16, 64, 256
-QTYPE_INPUT = "bfp8"
-QTYPE_WEIGHT = "bfp4"
+QTYPE_INPUT = "bfpp8"
+QTYPE_WEIGHT = "bfpp4"
 
 
 def main():
     print("=" * 70)
-    print("  方式 5: Excel/XLSX 配置 (input:bfp8, weight:bfp4)")
+    print("  方式 5: Excel/XLSX 配置 (input:bfpp8, weight:bfpp4)")
     print("=" * 70)
 
     try:
@@ -35,7 +35,7 @@ def main():
 
     output_dir = Path(__file__).parent / "workspace"
     output_dir.mkdir(parents=True, exist_ok=True)
-    xlsx_path = output_dir / "encoder_bfp4.xlsx"
+    xlsx_path = output_dir / "encoder_bfpp4.xlsx"
 
     # 1. 创建模板
     print("\n  [1] 创建 XLSX 模板")
@@ -51,7 +51,7 @@ def main():
     # 清空已有数据行
     ws_ops.delete_rows(3, ws_ops.max_row)
 
-    # Encoder 算子定义: 权重用 bfp4, 输入用 bfp8
+    # Encoder 算子定义: 权重用 bfpp4, 输入用 bfpp8
     encoder_ops = [
         # id, op_name,   shape,                 dtype,     depends, qtype,       skip,  sim_cmd, note
         (0,  "linear",   f"{BATCH},{SEQ},{HIDDEN}", "float32", "",     QTYPE_WEIGHT, "FALSE", "",  "Q_proj"),

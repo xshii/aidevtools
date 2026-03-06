@@ -2,7 +2,7 @@
 """方式 4: PyTorch 劫持 (Golden Mode) 构建 Encoder
 
 通过 import aidevtools.golden 劫持 torch.nn.functional，
-用户写标准 PyTorch 代码，框架自动计算 golden。输入 bfp8，权重 bfp4 精度。
+用户写标准 PyTorch 代码，框架自动计算 golden。输入 bfpp8，权重 bfpp4 精度。
 
 Encoder 结构:
     Q/K/V proj → Softmax → O proj → LayerNorm
@@ -20,13 +20,13 @@ except ImportError:
     HAS_TORCH = False
 
 BATCH, SEQ, HIDDEN, FFN = 2, 16, 64, 256
-QTYPE_INPUT = "bfp8"
-QTYPE_WEIGHT = "bfp4"
+QTYPE_INPUT = "bfpp8"
+QTYPE_WEIGHT = "bfpp4"
 
 
 def main():
     print("=" * 70)
-    print("  方式 4: PyTorch 劫持 (Golden Mode) (input:bfp8, weight:bfp4)")
+    print("  方式 4: PyTorch 劫持 (Golden Mode) (input:bfpp8, weight:bfpp4)")
     print("=" * 70)
 
     if not HAS_TORCH:
@@ -95,17 +95,17 @@ def main():
             out_shape = str(tuple(r.get("golden", np.array([])).shape))
             print(f"  {r['name']:<20} {in_shape:<20} {out_shape:<20}")
 
-    # 量化比对: input bfp8, weight bfp4
+    # 量化比对: input bfpp8, weight bfpp4
     from aidevtools.formats.quantize import simulate_quantize
-    from aidevtools.compare.fuzzy import compare_fuzzy
-    from aidevtools.compare.types import CompareConfig
+    from aidevtools.compare import FuzzyStrategy
+    from aidevtools.compare import CompareConfig
 
     config = CompareConfig(fuzzy_min_qsnr=1.0, fuzzy_min_cosine=0.85,
                            fuzzy_max_exceed_ratio=0.15,
                            fuzzy_atol=0.5, fuzzy_rtol=0.5)
     out_np = output.detach().numpy().astype(np.float32)
     dut = simulate_quantize(out_np, QTYPE_INPUT)
-    r = compare_fuzzy(out_np, dut, config)
+    r = FuzzyStrategy.compare(out_np, dut, config=config)
     print(f"\n  最终输出 {QTYPE_INPUT} 比对: QSNR={r.qsnr:.2f}, Cosine={r.cosine:.6f}")
 
     print("\n" + "=" * 70)

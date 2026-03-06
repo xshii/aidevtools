@@ -2,7 +2,7 @@
 """方式 2: 算子自动生成 API 构建 Encoder
 
 使用 gen.generate_four_track() 根据 @register_op 元信息自动生成数据，
-无需手动创建权重。输入 fp16，权重 bfp4 精度。
+无需手动创建权重。输入 fp16，权重 bfpp4 精度。
 
 Encoder 结构:
     Q/K/V proj → Softmax → O proj → LayerNorm
@@ -14,16 +14,16 @@ import numpy as np
 
 from aidevtools.datagen import DataGenerator
 from aidevtools.frontend.types import PrecisionConfig
-from aidevtools.compare.fuzzy import compare_fuzzy
-from aidevtools.compare.types import CompareConfig
+from aidevtools.compare import FuzzyStrategy
+from aidevtools.compare import CompareConfig
 
 BATCH, SEQ, HIDDEN, FFN = 2, 16, 64, 256
 
 PRECISION = PrecisionConfig(
     input_dtype="fp16",
-    weight_dtype="bfp4",
+    weight_dtype="bfpp4",
     compute_dtype="fp32",
-    output_dtype="bfp8",
+    output_dtype="bfpp8",
 )
 
 ENCODER_OPS = [
@@ -42,7 +42,7 @@ ENCODER_OPS = [
 
 def main():
     print("=" * 70)
-    print("  方式 2: 算子自动生成 API (input:fp16, weight:bfp4)")
+    print("  方式 2: 算子自动生成 API (input:fp16, weight:bfpp4)")
     print("=" * 70)
 
     gen = DataGenerator(seed=42, precision=PRECISION)
@@ -58,27 +58,35 @@ def main():
     print(f"  {'算子':<15} {'Shape':<20} {'QSNR(hw)':>10} {'Cos(hw)':>10} {'QSNR(local)':>12}")
     print(f"  {'-'*69}")
 
+    all_tracks = []
     for name, op_name, shape, kwargs in ENCODER_OPS:
         tracks = gen.generate_four_track(
             op_name, input_shape=shape, precision=PRECISION, **kwargs,
         )
+        all_tracks.append((name, tracks))
 
-        # HW bfp4 比数
+        # HW bfpp4 比数
         hw_qsnr, hw_cos = "N/A", "N/A"
         if tracks.golden_hw is not None:
-            r_hw = compare_fuzzy(tracks.golden_pure, tracks.golden_hw, config)
+            r_hw = FuzzyStrategy.compare(tracks.golden_pure, tracks.golden_hw, config=config)
             hw_qsnr = f"{r_hw.qsnr:.2f}"
             hw_cos = f"{r_hw.cosine:.6f}"
 
         # Local fp16 比数
         local_qsnr = "N/A"
         if tracks.golden_local is not None:
-            r_local = compare_fuzzy(tracks.golden_pure, tracks.golden_local, config)
+            r_local = FuzzyStrategy.compare(tracks.golden_pure, tracks.golden_local, config=config)
             local_qsnr = f"{r_local.qsnr:.2f}"
 
         print(f"  {name:<15} {str(tracks.golden_pure.shape):<20} "
               f"{hw_qsnr:>10} {hw_cos:>10} {local_qsnr:>12}")
 
+    # 结果断言
+    assert len(all_tracks) == 10, f"应有 10 个算子, 实际 {len(all_tracks)}"
+    for name, tracks in all_tracks:
+        assert tracks.golden_pure is not None, f"{name}: golden_pure 不应为 None"
+        assert tracks.golden_pure.size > 0, f"{name}: golden_pure 不应为空"
+    print("  所有断言通过!")
     print("\n" + "=" * 70)
 
 
