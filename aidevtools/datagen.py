@@ -801,6 +801,7 @@ class Model:
     - 算子级精度配置 (PrecisionConfig)
     - 量化感知随机数 (qa_aware 开关)
     - 四种比数 golden 生成
+    - CQA 链式量化感知 (cqa 开关)
 
     用法:
         with Model(seed=42) as m:
@@ -816,15 +817,17 @@ class Model:
         # 导出
         m.export("./golden/")
 
-    量化感知用法:
-        from aidevtools.frontend.types import PrecisionConfig
+    CQA 链式量化感知:
+        pc = PrecisionConfig(input_dtype="bfpp8", weight_dtype="bfpp4",
+                             compute_dtype="fp32", output_dtype="bfpp8")
 
-        pc = PrecisionConfig(input_dtype="fp16", compute_dtype="fp32",
-                             qa_aware=True, qa_center=1.0, qa_amplitude=0.5)
+        with Model(seed=42, precision=pc, cqa=True) as m:
+            x = m.input((512, 768))       # 输入经过 bfpp8 量化
+            y = m.linear(x, out_features=3072)  # 权重 bfpp4 量化, 输出 bfpp8 量化
+            y = m.gelu(y)                 # 输出 bfpp8 量化
+            y = m.linear(y, out_features=768)
 
-        with Model(seed=42, precision=pc) as m:
-            x = m.input((512, 768))
-            y = m.linear(x, out_features=3072)
+        # 每层输入 = 上层量化后的输出, 模拟硬件真实数据流
     """
 
     def __init__(
@@ -836,6 +839,7 @@ class Model:
         precision: Optional[Any] = None,
         data_dir: Optional[Union[str, Path]] = None,
         bm: str = "",
+        cqa: bool = False,
     ):
         self._gen = DataGenerator(
             seed=seed, l2_base=l2_base, alignment=alignment,
@@ -845,6 +849,7 @@ class Model:
         self._op_counter: Dict[str, int] = {}
         self._data_dir = Path(data_dir) if data_dir else None
         self._bm = bm
+        self._cqa = cqa
         self._loaded: Optional[Dict[str, np.ndarray]] = None
         if self._data_dir:
             from aidevtools.formats.base import load_dir
@@ -862,6 +867,22 @@ class Model:
         return self._gen.precision
 
     # ============================================================
+    # CQA 链式量化
+    # ============================================================
+
+    def _cqa_quantize(self, data: np.ndarray, qtype: str) -> np.ndarray:
+        """CQA: 模拟量化精度损失 (quantize → dequantize)
+
+        仅在 cqa=True 时调用。跳过 fp32 (无损)。
+        """
+        if qtype in ("fp32", "float32"):
+            return data
+        if qtype in ("fp16", "float16"):
+            return data.astype(np.float16).astype(np.float32)
+        from aidevtools.formats.quantize import simulate_quantize
+        return simulate_quantize(data.astype(np.float32), qtype)
+
+    # ============================================================
     # 输入
     # ============================================================
 
@@ -876,9 +897,16 @@ class Model:
         key = name.replace(".", "_")
         if self._loaded and key in self._loaded:
             array = self._loaded[key]
-            return ModelTensor(shape=array.shape, name=name, golden=array)
-        t = self._gen.randn(shape, name=name, qtype=qtype, role="input")
-        return ModelTensor(shape=t.shape, name=name, golden=t.array)
+        else:
+            t = self._gen.randn(shape, name=name, qtype=qtype, role="input")
+            array = t.array
+
+        # CQA: 对初始输入做量化
+        if self._cqa:
+            input_qtype = qtype or self._gen.precision.input_dtype
+            array = self._cqa_quantize(array, input_qtype)
+
+        return ModelTensor(shape=array.shape, name=name, golden=array)
 
     # ============================================================
     # 算子 (自动生成权重)
@@ -914,7 +942,6 @@ class Model:
 
     def matmul(self, x: ModelTensor, y: ModelTensor, **kwargs) -> ModelTensor:
         """MatMul (两个输入)"""
-        # matmul 特殊处理：两个输入都来自前面的 tensor
         from aidevtools.ops.registry import get_op_instance
 
         op_name = "matmul"
@@ -925,6 +952,8 @@ class Model:
             raise ValueError(f"算子 '{op_name}' 未注册")
 
         golden = op.cpu_golden(x.golden, y.golden)
+        if self._cqa:
+            golden = self._cqa_quantize(golden, self._gen.precision.output_dtype)
         out = ModelTensor(shape=golden.shape, name=f"{prefix}.output", golden=golden)
         self._outputs.append(out)
         return out
@@ -934,6 +963,8 @@ class Model:
         from aidevtools.ops.registry import get_op_instance
         op = get_op_instance("add")
         golden = op.cpu_golden(x.golden, y.golden)
+        if self._cqa:
+            golden = self._cqa_quantize(golden, self._gen.precision.output_dtype)
         name = self._next_name("add")
         out = ModelTensor(shape=golden.shape, name=f"{name}.output", golden=golden)
         self._outputs.append(out)
@@ -944,6 +975,8 @@ class Model:
         from aidevtools.ops.registry import get_op_instance
         op = get_op_instance("mul")
         golden = op.cpu_golden(x.golden, y.golden)
+        if self._cqa:
+            golden = self._cqa_quantize(golden, self._gen.precision.output_dtype)
         name = self._next_name("mul")
         out = ModelTensor(shape=golden.shape, name=f"{name}.output", golden=golden)
         self._outputs.append(out)
@@ -1018,6 +1051,10 @@ class Model:
                 array, shape = self._gen._gen_from_strategy(strategy, context)
             self._gen._add_tensor(tensor_name, array, qtype=param_qtype, role=role)
 
+            # CQA: 权重量化后再参与计算
+            if self._cqa:
+                array = self._cqa_quantize(array, param_qtype)
+
             # 更新 context
             context[f"{param}_shape"] = shape
             context[param] = array
@@ -1028,9 +1065,14 @@ class Model:
             elif param in meta.optional:
                 kwargs_call[param] = array
 
-        # 计算 golden
+        # 计算 golden (fp32 累加，模拟硬件 MAC)
         op = get_op_instance(op_name)
         golden = op.cpu_golden(*args, **kwargs_call)
+
+        # CQA: 输出量化后再传给下层
+        if self._cqa:
+            output_qtype = pc.output_dtype
+            golden = self._cqa_quantize(golden, output_qtype)
 
         # 返回输出
         out = ModelTensor(shape=golden.shape, name=f"{prefix}.output", golden=golden)
