@@ -882,6 +882,14 @@ class Model:
         from aidevtools.formats.quantize import simulate_quantize
         return simulate_quantize(data.astype(np.float32), qtype)
 
+    @staticmethod
+    def _get_bfp_params(qtype: str):
+        """获取 BFP 格式参数 (block_size, mantissa_bits)"""
+        _BFP_PARAMS = {
+            "bfpp4": (64, 2), "bfpp8": (32, 4), "bfpp16": (16, 8),
+        }
+        return _BFP_PARAMS.get(qtype)
+
     def _cqa_calibrate_weight(
         self,
         W_fp32: np.ndarray,
@@ -889,20 +897,23 @@ class Model:
         y_golden: np.ndarray,
         qtype: str,
     ) -> np.ndarray:
-        """CQA 权重校准: 根据实际量化输入和理想输出推导最优权重
+        """CQA 权重校准: lstsq + 量化域坐标下降优化
 
         算法:
-            1. x_cqa 是上层量化后的实际输入 (已有精度损失)
-            2. y_golden 是 fp32 链的理想输出
-            3. 求解 W_cal = lstsq(x_cqa, y_golden) 使输出尽可能接近 golden
-            4. 量化 W_cal 得到最终权重
+            Phase 1 — lstsq 初始化:
+                求解 W_opt = lstsq(x_cqa, y_golden) 得到无约束最优权重
 
-        对于 y = x @ W.T + b 的线性层:
-            W_cal.T = pinv(x_cqa) @ y_golden
-            x_cqa 已包含量化损失, W_cal 会自动补偿这个损失
+            Phase 2 — 量化域逐行优化 (BFP 格式):
+                对每行 (每个输出通道):
+                a. 遍历候选共享指数 (搜索最优 block exponent)
+                b. 在最优指数下, 坐标下降微调每个尾数值
+                使 ||x @ w_j - t_j||² 最小
+
+            Phase 3 — 迭代残差补偿:
+                量化后计算残差, lstsq 求补偿, 重复
 
         Args:
-            W_fp32: 原始 fp32 权重 [out, in] (PyTorch 格式)
+            W_fp32: 原始 fp32 权重 [out, in]
             x_cqa: 量化后的输入 [batch, ..., in_features]
             y_golden: fp32 链的理想输出 [batch, ..., out_features]
             qtype: 权重量化类型
@@ -913,16 +924,157 @@ class Model:
         in_dim = x_cqa.shape[-1]
         out_dim = y_golden.shape[-1]
 
-        # 展平 batch 维度: (B*S, in) 和 (B*S, out)
         x_flat = x_cqa.reshape(-1, in_dim)
         y_flat = y_golden.reshape(-1, out_dim)
 
-        # 最小二乘: x_flat @ W_cal_T ≈ y_flat
+        # Phase 1: lstsq 初始化
         W_cal_T, _, _, _ = np.linalg.lstsq(x_flat, y_flat, rcond=None)
-        W_cal = W_cal_T.T.astype(np.float32)  # [out, in]
+        W = W_cal_T.T.astype(np.float32)
 
-        # 量化校准后的权重
-        return self._cqa_quantize(W_cal, qtype)
+        bfp = self._get_bfp_params(qtype)
+        if bfp is None:
+            # 非 BFP 格式, 直接量化返回
+            return self._cqa_quantize(W, qtype)
+
+        block_size, mantissa_bits = bfp
+        max_mant = 2 ** (mantissa_bits - 1) - 1  # bfpp4: 1, bfpp8: 7
+
+        # Phase 2: 逐行量化域优化
+        W_q = np.zeros_like(W)
+        for j in range(out_dim):
+            row = W[j, :]
+            target = y_flat[:, j]  # (N,)
+
+            # 将行分块 (一行可能跨多个 block)
+            n_elems = len(row)
+            n_blocks = (n_elems + block_size - 1) // block_size
+            pad_len = n_blocks * block_size - n_elems
+            if pad_len > 0:
+                row_padded = np.concatenate([row, np.zeros(pad_len, dtype=np.float32)])
+                x_padded = np.concatenate(
+                    [x_flat, np.zeros((x_flat.shape[0], pad_len), dtype=np.float32)],
+                    axis=1,
+                )
+            else:
+                row_padded = row
+                x_padded = x_flat
+
+            blocks = row_padded.reshape(n_blocks, block_size)
+            best_row_q = np.zeros_like(row_padded)
+
+            # 逐 block 优化
+            for b in range(n_blocks):
+                blk = blocks[b]
+                col_start = b * block_size
+                col_end = col_start + block_size
+                x_blk = x_padded[:, col_start:col_end]  # (N, block_size)
+
+                # 其他 block 的贡献 (已确定)
+                other_contrib = np.zeros(len(target), dtype=np.float32)
+                for ob in range(n_blocks):
+                    if ob == b:
+                        continue
+                    if ob < b:
+                        # 已优化的 block
+                        obs = ob * block_size
+                        obe = obs + block_size
+                        other_contrib += x_padded[:, obs:obe] @ best_row_q[obs:obe]
+                    else:
+                        # 未优化的 block — 用 lstsq 初始值的量化版本估算
+                        obs = ob * block_size
+                        obe = obs + block_size
+                        ob_blk = blocks[ob]
+                        ob_abs = np.max(np.abs(ob_blk))
+                        if ob_abs < 1e-10:
+                            continue
+                        ob_exp = int(np.floor(np.log2(ob_abs))) + 1
+                        ob_scale = 2.0 ** (mantissa_bits - 1 - ob_exp)
+                        ob_mant = np.clip(np.round(ob_blk * ob_scale), -max_mant, max_mant)
+                        ob_q = ob_mant / ob_scale
+                        other_contrib += x_padded[:, obs:obe] @ ob_q
+
+                # 本 block 的目标
+                blk_target = target - other_contrib  # (N,)
+
+                # 搜索最优共享指数
+                abs_max = np.max(np.abs(blk))
+                if abs_max < 1e-10:
+                    best_row_q[col_start:col_end] = 0.0
+                    continue
+
+                base_exp = int(np.floor(np.log2(abs_max))) + 1
+                best_blk_err = float('inf')
+                best_blk_q = None
+                best_mants = None
+                best_exp = base_exp
+
+                for exp_off in range(-2, 3):
+                    exp = base_exp + exp_off
+                    scale = 2.0 ** (mantissa_bits - 1 - exp)
+                    mants = np.clip(np.round(blk * scale), -max_mant, max_mant)
+                    blk_q = mants / scale
+                    err = np.sum((x_blk @ blk_q - blk_target) ** 2)
+                    if err < best_blk_err:
+                        best_blk_err = err
+                        best_blk_q = blk_q.copy()
+                        best_mants = mants.copy()
+                        best_exp = exp
+
+                # 坐标下降: 逐元素微调尾数 (仅低精度格式, 高精度跳过)
+                if max_mant <= 7:  # bfpp4 (1) 和 bfpp8 (7) 做坐标下降
+                    mants = best_mants.copy()
+                    scale_inv = 2.0 ** (mantissa_bits - 1 - best_exp)
+                    for _sweep in range(2):
+                        for k in range(block_size):
+                            orig = mants[k]
+                            blk_q = mants / scale_inv
+                            base_err = np.sum((x_blk @ blk_q - blk_target) ** 2)
+                            for trial in range(-max_mant, max_mant + 1):
+                                if trial == orig:
+                                    continue
+                                mants[k] = trial
+                                blk_q = mants / scale_inv
+                                err = np.sum((x_blk @ blk_q - blk_target) ** 2)
+                                if err < base_err:
+                                    base_err = err
+                                    orig = trial
+                                else:
+                                    mants[k] = orig
+                    best_row_q[col_start:col_end] = mants / scale_inv
+                else:
+                    # 高精度格式: 仅用 AdaRound (floor vs ceil)
+                    mants = best_mants.copy()
+                    scale = 2.0 ** (mantissa_bits - 1 - best_exp)
+                    blk_raw = blk * scale  # fp32 未取整值
+                    for k in range(block_size):
+                        floor_v = np.floor(blk_raw[k])
+                        ceil_v = np.ceil(blk_raw[k])
+                        floor_v = np.clip(floor_v, -max_mant, max_mant)
+                        ceil_v = np.clip(ceil_v, -max_mant, max_mant)
+                        # 尝试 floor
+                        mants[k] = floor_v
+                        blk_q = mants / scale
+                        err_f = np.sum((x_blk @ blk_q - blk_target) ** 2)
+                        # 尝试 ceil
+                        mants[k] = ceil_v
+                        blk_q = mants / scale
+                        err_c = np.sum((x_blk @ blk_q - blk_target) ** 2)
+                        mants[k] = floor_v if err_f <= err_c else ceil_v
+                    best_row_q[col_start:col_end] = mants / scale
+
+            W_q[j, :] = best_row_q[:n_elems]
+
+        # Phase 3: 迭代残差补偿 (2 轮)
+        for _ in range(2):
+            residual = y_flat - x_flat @ W_q.T
+            dW_T, _, _, _ = np.linalg.lstsq(x_flat, residual, rcond=None)
+            W_new = W_q + dW_T.T.astype(np.float32)
+            W_q_new = self._cqa_quantize(W_new, qtype)
+            if np.mean((x_flat @ W_q_new.T - y_flat) ** 2) < \
+               np.mean((x_flat @ W_q.T - y_flat) ** 2):
+                W_q = W_q_new
+
+        return W_q
 
     # ============================================================
     # 输入
