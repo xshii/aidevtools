@@ -210,6 +210,47 @@ def main():
                   f"QSNR={fuzzy.qsnr:.1f} dB, cosine={fuzzy.cosine:.6f}")
 
     # =====================================================================
+    # 结果断言
+    # =====================================================================
+    print("\n" + "=" * 70)
+    print("  结果验证:")
+    print("=" * 70)
+
+    # 1) 所有算子都有结果
+    assert len(results) == 20, f"应有 20 个算子结果, 实际 {len(results)}"
+
+    # 2) L0_layernorm_1 是 bit-exact (dut = golden.copy())
+    ln1 = results["L0_layernorm_1"]
+    assert ln1.get("exact") is not None, "L0_layernorm_1 应有 exact 结果"
+    assert ln1["exact"].passed, "L0_layernorm_1 应该 bit-exact 通过"
+
+    # 3) 坏算子 (大噪声) exact 不通过
+    for bad_name in ["L0_attn_softmax", "L1_ffn_gelu"]:
+        bad_r = results[bad_name]
+        assert bad_r.get("exact") is not None, f"{bad_name} 应有 exact 结果"
+        assert not bad_r["exact"].passed, f"{bad_name} 不应该 exact 通过"
+        bad_fuzzy = bad_r.get("fuzzy_pure") or bad_r.get("fuzzy_qnt")
+        if bad_fuzzy:
+            assert not bad_fuzzy.passed, f"{bad_name} 不应该 fuzzy 通过 (QSNR={bad_fuzzy.qsnr:.1f})"
+
+    # 4) 单算子引擎: 好算子 vs 坏算子
+    good_r = engine.run(dut=pairs["L0_Q_proj"][1], golden=pairs["L0_Q_proj"][0])
+    bad_r = engine.run(dut=pairs["L1_ffn_gelu"][1], golden=pairs["L1_ffn_gelu"][0])
+    assert not good_r["exact"].passed, "好算子有微小噪声, exact 不通过"
+    good_fuzzy = good_r.get("fuzzy_pure")
+    assert good_fuzzy is not None, "好算子应有 fuzzy 结果"
+    assert good_fuzzy.qsnr > bad_r.get("fuzzy_pure", good_fuzzy).qsnr, \
+        "好算子 QSNR 应高于坏算子"
+
+    # 5) sanity 检查: 所有有 sanity 结果的算子都应 valid
+    for name, r in results.items():
+        sanity = r.get("sanity")
+        if sanity:
+            assert sanity.valid, f"{name} sanity 应该 valid"
+
+    print("  所有断言通过!")
+
+    # =====================================================================
     # 总结
     # =====================================================================
     print("\n" + "=" * 70)

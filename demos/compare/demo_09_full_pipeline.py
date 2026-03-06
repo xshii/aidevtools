@@ -192,6 +192,34 @@ def run_progressive_strategies(ops_data):
         for check_name, passed in sanity_result.checks.items():
             print(f"  {check_name}: {'✅' if passed else '❌'}")
 
+    # =====================================================================
+    # 结果断言
+    # =====================================================================
+    print("\n" + "-" * 80)
+    print("结果验证")
+    print("-" * 80)
+
+    # Exact: ffn_fc2 误差大, 不应 exact 通过
+    assert not results["exact"].passed, "ffn_fc2 不应该 exact 通过 (误差 scale=0.08)"
+    assert results["exact"].mismatch_count > 0, "应有不匹配元素"
+    assert results["exact"].diff_bits > 0, "应有 bit 差异"
+
+    # Fuzzy: QSNR 和 cosine 应该是有限数值
+    assert results["fuzzy"].qsnr > 0, f"QSNR 应 > 0, 实际 {results['fuzzy'].qsnr}"
+    assert results["fuzzy"].cosine > 0.9, f"Cosine 应 > 0.9, 实际 {results['fuzzy'].cosine}"
+
+    # Blocked: 应有分块结果
+    assert len(results["blocked"]) > 0, "应有分块结果"
+
+    # BitAnalysis: 应检测到差异
+    assert results["bitwise"].summary.diff_elements > 0, "应检测到 bit 级差异"
+    assert results["bitwise"].summary.total_elements == 1000, "采样 1000 元素"
+
+    # Sanity: golden 数据应有效
+    assert results["sanity"].valid, "Golden 数据应该有效"
+
+    print("  所有断言通过!")
+
     return results
 
 
